@@ -4,25 +4,37 @@
 
 # Watchtower
 
-An automated configuration of my HTPC.
+A self-hosted Kaleidescape.
+
+"The ultimate movie (+series/music/audiobooks/comics) platform"
 
 </div>
 
-## 📖 Overview
+## 🐳 Docker Compose
 
-Control center for my personal media (incl. ~2500 MP3s from the 90s and 00s).
+At the heart of the project is Docker, Docker Compose v2 to be specific. Makes for easy deployment to, and management of, a singular host.
 
-Extends [Mothership](https://github.com/jovalle/mothership)
+See `docker-compose.yaml` for the services deployed.
 
 ## 🧰 Core Components
 
-- [Docker Socket Proxy](https://github.com/Tecnativa/docker-socket-proxy): Secured proxy for Homepage to watch Docker
-- [Jellyfin](https://jellyfin.org): Plex competitor. Currently running comparisons. One advantage for Jellyfin is the lack of a SaaS and support for more media types (comics, audiobooks)
-- [Node Exporter](https://github.com/prometheus/node_exporter): Presents host resource metrics to be consumed by Prometheus and displayed by Grafana
-- [Plex](https://plex.tv): Organizes and streams media
-- [Portainer](https://portainer.io): Web app for managing container stacks remotely
-- [Traefik](https://traefik.io): Reverse proxy for serving other components with HTTPS enabled URLs. Using Let's Encrypt for quick and easy HTTPS certificates.
-- [Watchtower](https://containrrr.dev/watchtower/): No relation. 😅 Keeps an eye on colocated containers and updates them while I'm (hopefully) sleeping.
+- [Jellyfin](https://jellyfin.org): Self-hosted Hulu. Plex competitor. Currently running comparisons. One advantage for Jellyfin is the lack of a SaaS and support for more media types (comics, audiobooks)
+- [Navidrome](https://www.navidrome.org/): Self-hosted Spotify.
+- [Plex](https://plex.tv): Self-hosted Netflix with music streaming.
+
+### 💿 Media Curators
+
+- 🔊 [Lidarr](https://lidarr.audio/)
+- 🎬 [Radarr](https://radarr.video/)
+- 📺 [Sonarr](https://sonarr.tv/)
+
+### 📊 Dashboards
+
+- [Homepage](https://gethomepage.dev): Easily configurable dashboard with plugins for key services.
+
+![image](https://github.com/jovalle/watchtower/assets/47045210/6c11573d-08c5-414c-8814-f11e244b796d)
+
+- [Tautulli](https://tautulli.com/): Plex server monitoring. Especially useful for troubleshooting stream performance and issues.
 
 ## 📋 Prerequisites
 
@@ -48,10 +60,7 @@ CF_API_EMAIL=REDACTED
 CF_API_KEY=REDACTED
 
 # media
-MISC_PATH=/mnt/hulkpool/misc
-MOVIES_PATH=/mnt/hulkpool/movies
-MUSIC_PATH=/mnt/hulkpool/music
-TVSHOWS_PATH=/mnt/whirlpool/tvshows
+MEDIA_PATH=/media
 
 # optional (if deploying containers remotely and without systemd)
 DOCKER_HOST_IP=${HOST_IP}
@@ -59,6 +68,38 @@ DOCKER_HOST="ssh://root@${DOCKER_HOST_IP}"
 ```
 
 ⚠️ Virtually all docker compose services are leveraging `.env`. Changes to the file will trigger recreations of virtually all containers. May look into creating specific environment files for each container to address this. Wish I could just uses SOPS for inline encryption of `docker-compose.yaml`.
+
+### 💾 Media
+
+Consolidated all of my data onto one giant pool. Example mount:
+
+```sh
+# cat /etc/fstab
+//nexus/Media /media cifs credentials=/etc/watchtower/.smb-credentials,uid=1000,gid=1000,file_mode=0644,dir_mode=0755,iocharset=utf8,vers=3.0 0 0
+```
+
+To avoid containers reading/writing on erroneous paths (if the expected mount is missing, it will be created locally), the `media` service continuously checks for the mount and fails if missing. Using `depend_on`, dependents will not start until mounted properly.
+
+```yaml
+media:
+  command: [
+      "/bin/sh",
+      "-c",
+      "if grep -q '^//nexus/Media /media ' /proc/mounts; then echo 'Media
+      mounted'; sleep infinity; else echo 'Media not mounted' >&2; cat
+      /proc/mounts; exit 1; fi",
+    ]
+  container_name: media
+  healthcheck:
+    interval: 10s
+    retries: 3
+    test: ["CMD", "grep", "-q", "^//nexus/Media /media ", "/proc/mounts"]
+    timeout: 2s
+  image: ubuntu
+  restart: no
+  volumes:
+    - /media:/media:ro
+```
 
 ## 🚀 Deployment
 

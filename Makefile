@@ -29,13 +29,14 @@ ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 DOCKER_COMPOSE := docker compose
 DOCKER_COMPOSE_FILE := $(ROOT_DIR)/docker-compose.yaml
 SYSTEMD_UNIT := $(ROOT_DIR)/watchtower.service
+ENV_FILE := $(ROOT_DIR)/.env
 EXTRA_UP_ARGS := --remove-orphans
 
-install: ##@other Start and enable service
-	@apt update
-	@apt install -y curl
-	@curl -fsSL https://raw.githubusercontent.com/jovalle/mothership/main/scripts/install-packages.sh | sh
-	@curl -fsSL https://raw.githubusercontent.com/jovalle/mothership/main/scripts/install-docker.sh | sh
+prepare: ##@Install prerequisites
+	@scripts/install-packages.sh
+	@scripts/install-docker.sh
+
+install: prepare ##@other Start and enable service
 	@ln -sf $(SYSTEMD_UNIT) /etc/systemd/system/watchtower.service
 	@systemctl daemon-reload
 	@systemctl start watchtower

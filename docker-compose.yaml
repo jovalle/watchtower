@@ -13,8 +13,76 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+  flaresolverr:
+    container_name: flaresolverr
+    env_file: .env
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+    hostname: flaresolverr
+    image: ghcr.io/flaresolverr/flaresolverr
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.flaresolverr.rule=Host(`flaresolverr.${DOMAIN}`)
+    ports:
+      - 8191:8191
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/flaresolverr:/config
+  gluetun:
+    cap_add:
+      - NET_ADMIN
+    container_name: gluetun
+    devices:
+      - /dev/net/tun
+    env_file: .env
+    environment:
+      - OPENVPN_PASSWORD="${OPENVPN_PASSWORD}"
+      - OPENVPN_USER="${OPENVPN_USER}"
+      - SERVER_NAMES="newyork434,newyork435,newyork439,newyork440"
+      - VPN_SERVICE_PROVIDER=private internet access
+    hostname: gluetun
+    image: qmcgaw/gluetun
+    labels:
+      - homepage.group=Core
+      - homepage.name=Gluetun
+      - homepage.icon=gluetun
+      - homepage.href=https://gluetun.${DOMAIN}/v1/publicip/ip
+      - homepage.description=VPN server for containers
+      - homepage.widget.type=gluetun
+      - homepage.widget.url=http://gluetun:8000
+      - homepage.widget.fields=["public_ip", "region", "country"]
+      - traefik.enable=true
+      - traefik.http.routers.gluetun.rule=Host(`gluetun.${DOMAIN}`)
+      - traefik.http.services.gluetun.loadbalancer.server.port=8000
+    ports:
+      - 10095:10095
+      - 6881:6881
+      - 6881:6881/udp
+    restart: always
+    volumes:
+      - /dev/net/tun:/dev/net/tun
+      - ${CONFIG_PATH:-./docker}/gluetun:/config
+  homepage:
+    container_name: homepage
+    env_file: .env
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=homepage.${DOMAIN}
+    image: ghcr.io/gethomepage/homepage
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.homepage.rule=Host(`homepage.${DOMAIN}`)
+    ports:
+      - 3001:3000
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/homepage:/app/config
   jellyfin:
     container_name: jellyfin
+    depends_on:
+      media:
+        condition: service_healthy
     devices:
       - /dev/dri
     env_file: .env
@@ -41,11 +109,91 @@ services:
     network_mode: host
     restart: unless-stopped
     volumes:
-      - ${CONFIG_PATH-/var/lib/watchtower}/jellyfin:/config
-      - ${MISC_PATH:-/var/lib/watchtower/misc}:/misc
-      - ${MOVIES_PATH:-/var/lib/watchtower/movies}:/movies
-      - ${TRANSCODE_PATH:-/dev/shm}:/transcode
-      - ${SERIES_PATH:-/var/lib/watchtower/series}:/series
+      - ${CONFIG_PATH:-./docker}/jellyfin:/config
+      - ${MEDIA_PATH:-/media}:/media:ro
+  lidarr:
+    container_name: lidarr
+    depends_on:
+      media:
+        condition: service_healthy
+      prowlarr:
+        condition: service_started
+      qbittorrent:
+        condition: service_started
+    env_file: .env
+    hostname: lidarr
+    image: lscr.io/linuxserver/lidarr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Lidarr
+      - homepage.icon=lidarr
+      - homepage.href=https://lidarr.${DOMAIN}
+      - homepage.description=Personal Music Curator
+      - homepage.widget.type=lidarr
+      - homepage.widget.url=http://lidarr:8686
+      - homepage.widget.key=${LIDARR_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.lidarr.rule=Host(`lidarr.${DOMAIN}`)
+    ports:
+      - 8686:8686
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/lidarr:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+      - ${MUSIC_PATH:-/media}/music:/music
+  media:
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "if grep -q '^//nexus/Media /media ' /proc/mounts; then echo 'Media
+          mounted'; sleep infinity; else echo 'Media not mounted' >&2; cat
+          /proc/mounts; exit 1; fi"
+      ]
+    container_name: media
+    healthcheck:
+      interval: 10s
+      retries: 3
+      test:
+        [
+          "CMD",
+          "grep",
+          "-q",
+          "^//nexus/Media /media ",
+          "/proc/mounts"
+        ]
+      timeout: 2s
+    image: ubuntu
+    restart: no
+    volumes:
+      - /media:/media:ro
+  navidrome:
+    container_name: navidrome
+    depends_on:
+      media:
+        condition: service_healthy
+    env_file: .env
+    hostname: navidrome
+    image: deluan/navidrome
+    labels:
+      - homepage.group=Media
+      - homepage.name=Navidrome
+      - homepage.icon=navidrome
+      - homepage.href=https://navidrome.${DOMAIN}
+      - homepage.description=Personal Music Streamer
+      - homepage.widget.type=navidrome
+      - homepage.widget.url=http://navidrome:4533
+      - homepage.widget.user=${NAVIDROME_USER:-}
+      - homepage.widget.token=${NAVIDROME_TOKEN:-}
+      - homepage.widget.salt=${NAVIDROME_SALT:-}
+      - traefik.enable=true
+      - traefik.http.routers.navidrome.rule=Host(`navidrome.${DOMAIN}`)
+    ports:
+      - 4533:4533
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/navidrome:/data
+      - ${MUSIC_PATH:-/media}/music:/music:ro
   node-exporter:
     command: --path.rootfs=/host
     container_name: node-exporter
@@ -57,6 +205,9 @@ services:
       - /:/host:ro,rslave
   plex:
     container_name: plex
+    depends_on:
+      media:
+        condition: service_healthy
     devices:
       - /dev/dri
     env_file: .env
@@ -84,12 +235,9 @@ services:
     network_mode: host
     restart: unless-stopped
     volumes:
-      - ${CONFIG_PATH:-/var/lib/watchtower}/plex:/config
-      - ${MISC_PATH:-/var/lib/watchtower/misc}:/misc
-      - ${MOVIES_PATH:-/var/lib/watchtower/movies}:/movies
-      - ${MUSIC_PATH:-/var/lib/watchtower/music}:/music
-      - ${SERIES_PATH:-/var/lib/watchtower/series}:/series
-      - ${TRANSCODE_PATH:-/var/lib/watchtower/transcode}:/transcode
+      - ${CONFIG_PATH:-./docker}/plex:/config
+      - ${MEDIA_PATH:-/media}:/media:ro
+      - ${TRANSCODE_PATH:-/dev/shm}/transcode}:/transcode
   portainer:
     command: -H unix:///var/run/docker.sock
     container_name: portainer
@@ -113,8 +261,173 @@ services:
       - 9000:9000
     restart: unless-stopped
     volumes:
-      - ${CONFIG_PATH:-/var/lib/watchtower}/portainer:/data
+      - ${CONFIG_PATH:-./docker}/portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
+  prowlarr:
+    container_name: prowlarr
+    depends_on:
+      media:
+        condition: service_healthy
+    env_file: .env
+    hostname: prowlarr
+    image: lscr.io/linuxserver/prowlarr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Prowlarr
+      - homepage.icon=prowlarr
+      - homepage.href=https://prowlarr.${DOMAIN}
+      - homepage.description=*arr-based Indexer Manager
+      - homepage.widget.type=prowlarr
+      - homepage.widget.url=http://prowlarr:9696
+      - homepage.widget.key=${PROWLARR_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.prowlarr.rule=Host(`prowlarr.${DOMAIN}`)
+    ports:
+      - 9696:9696
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/prowlarr:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+  qbittorrent:
+    container_name: qbittorrent
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      media:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - WEBUI_PORT=10095
+    image: lscr.io/linuxserver/qbittorrent
+    labels:
+      - homepage.group=Media
+      - homepage.name=qBittorrent
+      - homepage.icon=qbittorrent
+      - homepage.href=https://qbittorrent.${DOMAIN}
+      - homepage.description=BitTorrent client for ISOs
+      - homepage.widget.type=qbittorrent
+      - homepage.widget.url=http://gluetun:10095
+      - homepage.widget.username=${QBITTORRENT_USER}
+      - homepage.widget.password=${QBITTORRENT_PASSWORD}
+      - homepage.widget.fields=["download", "upload", "seed", "leech"]
+      - traefik.enable=true
+      - traefik.http.routers.qbittorrent.rule=Host(`qbittorrent.${DOMAIN}`)
+      - traefik.http.services.qbittorrent.loadbalancer.server.port=10095
+    network_mode: "service:gluetun"
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/qbittorrent:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+  radarr:
+    container_name: radarr
+    depends_on:
+      media:
+        condition: service_healthy
+      prowlarr:
+        condition: service_started
+      qbittorrent:
+        condition: service_started
+      sabnzbd:
+        condition: service_started
+    env_file: .env
+    hostname: radarr
+    image: lscr.io/linuxserver/radarr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Radarr
+      - homepage.icon=radarr
+      - homepage.href=https://radarr.${DOMAIN}
+      - homepage.description=Personal Movie Curator
+      - homepage.widget.type=radarr
+      - homepage.widget.url=http://radarr:7878
+      - homepage.widget.key=${RADARR_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.radarr.rule=Host(`radarr.${DOMAIN}`)
+    ports:
+      - 7878:7878
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/radarr:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+      - ${MOVIES_PATH:-/media}/movies:/movies
+  sabnzbd:
+    container_name: sabnzbd
+    depends_on:
+      media:
+        condition: service_healthy
+    env_file: .env
+    hostname: sabnzbd
+    image: lscr.io/linuxserver/sabnzbd
+    labels:
+      - homepage.group=Media
+      - homepage.name=sabnzbd
+      - homepage.icon=sabnzbd
+      - homepage.href=https://sabnzbd.${DOMAIN}
+      - homepage.description=Binary Newsreader
+      - homepage.widget.type=sabnzbd
+      - homepage.widget.url=http://sabnzbd:8080
+      - homepage.widget.key=${SABNZBD_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.sabnzbd.rule=Host(`sabnzbd.${DOMAIN}`)
+    ports:
+      - 8081:8080
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/sabnzbd:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+  sonarr:
+    container_name: sonarr
+    depends_on:
+      media:
+        condition: service_healthy
+      prowlarr:
+        condition: service_started
+      qbittorrent:
+        condition: service_started
+      sabnzbd:
+        condition: service_started
+    env_file: .env
+    hostname: sonarr
+    image: lscr.io/linuxserver/sonarr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Sonarr
+      - homepage.icon=sonarr
+      - homepage.href=https://sonarr.${DOMAIN}
+      - homepage.description=Personal Series Curator
+      - homepage.widget.type=sonarr
+      - homepage.widget.url=http://sonarr:8989
+      - homepage.widget.key=${SONARR_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.sonarr.rule=Host(`sonarr.${DOMAIN}`)
+    ports:
+      - 8989:8989
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/sonarr:/config
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
+      - ${SERIES_PATH:-/media}/series:/series
+  tautulli:
+    container_name: tautulli
+    env_file: .env
+    hostname: tautulli
+    image: lscr.io/linuxserver/tautulli
+    labels:
+      - homepage.group=Media
+      - homepage.name=Tautulli
+      - homepage.icon=tautulli
+      - homepage.href=https://tautulli.${DOMAIN}
+      - homepage.description=Media Server Companion
+      - homepage.widget.type=tautulli
+      - homepage.widget.url=http://tautulli:8181
+      - homepage.widget.key=${TAUTULLI_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.tautulli.rule=Host(`tautulli.${DOMAIN}`)
+    ports:
+      - 8181:8181
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/tautulli:/config
   traefik:
     command:
       - --api.dashboard=true
@@ -161,8 +474,37 @@ services:
       - 443:443
     restart: unless-stopped
     volumes:
-      - ${CONFIG_PATH-/var/lib/watchtower}/letsencrypt:/letsencrypt
+      - ${CONFIG_PATH:-./docker}/letsencrypt:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock
+  unpackerr:
+    container_name: unpackerr
+    depends_on:
+      media:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # General config
+      - UN_DEBUG=false
+      - UN_INTERVAL=2m
+      - UN_START_DELAY=1m
+      - UN_RETRY_DELAY=5m
+      - UN_MAX_RETRIES=3
+      - UN_PARALLEL=1
+      - UN_FILE_MODE=0644
+      - UN_DIR_MODE=0755
+      # Folder Config
+      - UN_FOLDER_0_PATH=/downloads
+      - UN_FOLDER_0_EXTRACT_PATH=/downloads
+      - UN_FOLDER_0_DELETE_AFTER=10m
+      - UN_FOLDER_0_DELETE_ORIGINAL=false
+      - UN_FOLDER_0_DELETE_FILES=false
+      - UN_FOLDER_0_MOVE_BACK=false
+    image: golift/unpackerr
+    ports:
+      - 5656:5656
+    restart: unless-stopped
+    volumes:
+      - ${DOWNLOADS_PATH:-/media}/downloads:/downloads
   watchtowerr:
     container_name: watchtowerr
     env_file: .env
