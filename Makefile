@@ -32,49 +32,49 @@ SYSTEMD_UNIT := $(ROOT_DIR)/watchtower.service
 ENV_FILE := $(ROOT_DIR)/.env
 EXTRA_UP_ARGS := --remove-orphans
 
-prepare: ##@Install prerequisites
+prepare: ##@management Install prerequisites
 	@scripts/install-packages.sh
 	@scripts/install-docker.sh
 
-install: prepare ##@other Start and enable service
+install: prepare ##@management Start and enable service
 	@ln -sf $(SYSTEMD_UNIT) /etc/systemd/system/watchtower.service
 	@systemctl daemon-reload
 	@systemctl start watchtower
 	@systemctl enable watchtower
 
-uninstall: confirm ##@other Stop and disable service
+uninstall: confirm ##@management Stop and disable service
 	@systemctl stop watchtower
 	@systemctl disable watchtower
 
-help: ##@other Show this help
+help:
 	@perl -e '$(HELP_FMT)' $(MAKEFILE_LIST)
 
 confirm:
 	@( read -p "$(RED)Are you sure? [y/N]$(RESET): " sure && case "$$sure" in [yY]) true;; *) false;; esac )
 
-up: ## Start all containers in foreground
+up: ##@operations Start all containers in foreground
 	@$(DOCKER_COMPOSE) up
 
-start: ## Start all containers in background
+start: ##@operations Start all containers in background
 	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS)
 
-new: ## Start all containers anew
+new: ##@operations Start all containers anew
 	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS) --force-recreate
 
-stop: ## Stop all containers
+stop: ##@operations Stop all containers
 	@$(DOCKER_COMPOSE) stop
 
-restart: ## Stop and start all containers in background
+restart: ##@operations Stop and start all containers in background
 	@$(DOCKER_COMPOSE) stop
 	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS)
 
-logs: ## Tail logs of all containers
+logs: ##@operations Tail logs of all containers
 	@$(DOCKER_COMPOSE) logs -f
 
-status: ## List all containers
+status: ##@operations List all containers
 	@$(DOCKER_COMPOSE) ps
 
 ps: status
 
-clean: confirm ## Delete all containers
+clean: confirm ##@operations Delete all containers
 	@$(DOCKER_COMPOSE) down -v
