@@ -263,6 +263,24 @@ services:
     volumes:
       - ${CONFIG_PATH:-./docker}/portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
+  profilarr:
+    container_name: profilarr
+    env_file: .env
+    image: santiagosayshey/profilarr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Profilarr
+      - homepage.icon=profilarr
+      - homepage.href=https://profilarr.${DOMAIN}
+      - homepage.description=Profile Management for *arrs
+      - traefik.enable=true
+      - traefik.http.routers.profilarr.rule=Host(`profilarr.${DOMAIN}`)
+      - traefik.http.services.profilarr.loadbalancer.server.port=6868
+    ports:
+      - 6868:6868
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/profilarr:/config
   prowlarr:
     container_name: prowlarr
     depends_on:
