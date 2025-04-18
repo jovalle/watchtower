@@ -19,6 +19,7 @@ See `docker-compose.yaml` for the services deployed.
 ## 🧰 Core Components
 
 - [Jellyfin](https://jellyfin.org): Self-hosted Hulu. Plex competitor. Currently running comparisons. One advantage for Jellyfin is the lack of a SaaS and support for more media types (comics, audiobooks)
+- [Jellyseerr](https://docs.jellyseerr.dev/): Manages media requests and issue tracking. Supports Jellyfin and Plex.
 - [Navidrome](https://www.navidrome.org/): Self-hosted Spotify.
 - [Plex](https://plex.tv): Self-hosted Netflix with music streaming.
 
