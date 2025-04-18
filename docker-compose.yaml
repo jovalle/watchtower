@@ -111,6 +111,27 @@ services:
     volumes:
       - ${CONFIG_PATH:-./docker}/jellyfin:/config
       - ${MEDIA_PATH:-/media}:/media:ro
+  jellyseerr:
+    container_name: jellyseerr
+    env_file: .env
+    hostname: jellyseerr
+    image: ghcr.io/fallenbagel/jellyseerr
+    labels:
+      - homepage.group=Media
+      - homepage.name=Jellyseerr
+      - homepage.icon=jellyseerr
+      - homepage.href=https://jellyseerr.${DOMAIN}
+      - homepage.description=Media Server Request Management
+      - homepage.widget.type=jellyseerr
+      - homepage.widget.url=http://jellyseerr:5055
+      - homepage.widget.key=${JELLYSEERR_API_KEY:-}
+      - traefik.enable=true
+      - traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.${DOMAIN}`) || Host(`requests.${DOMAIN}`)
+    ports:
+      - 5055:5055
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_PATH:-./docker}/jellyseerr:/app/config
   lidarr:
     container_name: lidarr
     depends_on:
@@ -146,7 +167,7 @@ services:
       [
         "/bin/sh",
         "-c",
-        "if grep -q '^//nexus/Media /media ' /proc/mounts; then echo 'Media
+        "if grep -q '^//nexus/media /media ' /proc/mounts; then echo 'Media
           mounted'; sleep infinity; else echo 'Media not mounted' >&2; cat
           /proc/mounts; exit 1; fi"
       ]
@@ -159,12 +180,12 @@ services:
           "CMD",
           "grep",
           "-q",
-          "^//nexus/Media /media ",
+          "^//nexus/media /media ",
           "/proc/mounts"
         ]
       timeout: 2s
     image: ubuntu
-    restart: no
+    restart: unless-stopped
     volumes:
       - /media:/media:ro
   navidrome:
@@ -236,7 +257,7 @@ services:
     restart: unless-stopped
     volumes:
       - ${CONFIG_PATH:-./docker}/plex:/config
-      - ${MEDIA_PATH:-/media}:/media:ro
+      - ${MEDIA_PATH:-/media}:/media
       - ${TRANSCODE_PATH:-/dev/shm}/transcode}:/transcode
   portainer:
     command: -H unix:///var/run/docker.sock
