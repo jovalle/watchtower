@@ -1,6 +1,6 @@
-.PHONY: help confirm up start stop restart logs status ps clean
+.PHONY: help confirm up start new stop restart logs status ps clean
 
-# Copypasta from https://github.com/krom/docker-compose-makefile
+# Copypasta from https://github.com/jovalle/stargate/blob/main/Makefile
 
 #COLORS
 GREEN  := $(shell tput -Txterm setaf 2)
@@ -24,57 +24,49 @@ HELP_FMT = \
 	}; \
 	print "\n"; }
 
-#DEFAULT variables
-ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-DOCKER_COMPOSE := docker compose
-DOCKER_COMPOSE_FILE := $(ROOT_DIR)/docker-compose.yaml
-SYSTEMD_UNIT := $(ROOT_DIR)/watchtower.service
-ENV_FILE := $(ROOT_DIR)/.env
-EXTRA_UP_ARGS := --remove-orphans
-
-prepare: ##@management Install prerequisites
-	@scripts/install-packages.sh
-	@scripts/install-docker.sh
-
-install: prepare ##@management Start and enable service
-	@ln -sf $(SYSTEMD_UNIT) /etc/systemd/system/watchtower.service
+install: ##@other Start and enable service
+	@apt update
+	@apt install -y curl
+	@bash scripts/install-packages.sh
+	@bash scripts/install-docker.sh
+	@ln -sf watchtower.service /etc/systemd/system/watchtower.service
 	@systemctl daemon-reload
 	@systemctl start watchtower
 	@systemctl enable watchtower
 
-uninstall: confirm ##@management Stop and disable service
+uninstall: confirm ##@other Stop and disable service
 	@systemctl stop watchtower
 	@systemctl disable watchtower
 
-help:
+help: ##@other Show this help
 	@perl -e '$(HELP_FMT)' $(MAKEFILE_LIST)
 
 confirm:
 	@( read -p "$(RED)Are you sure? [y/N]$(RESET): " sure && case "$$sure" in [yY]) true;; *) false;; esac )
 
-up: ##@operations Start all containers in foreground
-	@$(DOCKER_COMPOSE) up
+up: check ## Start all containers in foreground
+	@sops --decrypt docker-compose.yaml | docker compose -f - up
 
-start: ##@operations Start all containers in background
-	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS)
+start: ## Start all containers in background
+	@sops --decrypt docker-compose.yaml | docker compose -f - up -d --remove-orphans
 
-new: ##@operations Start all containers anew
-	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS) --force-recreate
+new: ## Start all containers anew
+	@sops --decrypt docker-compose.yaml | docker compose -f - up -d --remove-orphans --force-recreate
 
-stop: ##@operations Stop all containers
-	@$(DOCKER_COMPOSE) stop
+stop: ## Stop all containers
+	@sops --decrypt docker-compose.yaml | docker compose -f - stop
 
-restart: ##@operations Stop and start all containers in background
-	@$(DOCKER_COMPOSE) stop
-	@$(DOCKER_COMPOSE) up -d $(EXTRA_UP_ARGS)
+restart: ## Stop and start all containers in background
+	@sops --decrypt docker-compose.yaml | docker compose -f - stop
+	@sops --decrypt docker-compose.yaml | docker compose -f - up -d --remove-orphans
 
-logs: ##@operations Tail logs of all containers
-	@$(DOCKER_COMPOSE) logs -f
+logs: ## Tail logs of all containers
+	@sops --decrypt docker-compose.yaml | docker compose -f - logs -f
 
-status: ##@operations List all containers
-	@$(DOCKER_COMPOSE) ps
+status: ## List all containers
+	@sops --decrypt docker-compose.yaml | docker compose -f - ps
 
 ps: status
 
-clean: confirm ##@operations Delete all containers
-	@$(DOCKER_COMPOSE) down -v
+clean: confirm ## Delete all containers
+	@sops --decrypt docker-compose.yaml | docker compose -f - down -v

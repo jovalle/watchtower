@@ -6,11 +6,13 @@
 .terraform
 .venv
 .vscode
+*.agekey
 *.lock.hcl
 *.lock.info
 *.log
 *.tfstate
 *.tfstate.backup
+*copy.yaml
 backups*.db
 data/
 docker/
