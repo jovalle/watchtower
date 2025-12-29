@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+/build
+/.cache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Misc
+tmp/
+*.local
+
+# Local data cache (logos, metadata)
+.planning/
+data/
+
+# TypeScript
+*.tsbuildinfo
