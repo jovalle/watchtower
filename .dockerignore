@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+
+# Build output
+build
+.cache
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Misc
+*.md
+*.log
+coverage
+tmp
+.DS_Store
+
+# Planning (development only)
+.planning

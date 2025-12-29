@@ -1,0 +1,1672 @@
+/**
+ * Media detail page - displays full metadata for movies, TV shows, seasons, and episodes.
+ * GET /app/media/:type/:ratingKey
+ *
+ * Supports hierarchical navigation:
+ * - Movies: standalone detail page
+ * - Shows: displays seasons and episodes
+ * - Seasons: shows episode list with breadcrumb to show
+ * - Episodes: shows episode details with breadcrumb to show > season
+ */
+
+import { useState, useCallback } from "react";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData, Link, useNavigate } from "@remix-run/react";
+import { Play, Plus, Check, Star, Clock, Calendar, ExternalLink, ChevronRight, HardDrive, Volume2, Subtitles, RotateCcw } from "lucide-react";
+import { Container } from "~/components/layout";
+import { CastRow, MediaCard, MediaRow } from "~/components/media";
+import { Typography, Button } from "~/components/ui";
+import { requirePlexToken } from "~/lib/auth/session.server";
+import { PlexClient } from "~/lib/plex/client.server";
+import { env } from "~/lib/env.server";
+import { createTMDBClient } from "~/lib/tmdb/client.server";
+import type { PlexMediaItem, PlexMetadata, PlexRole } from "~/lib/plex/types";
+import type { TMDBRecommendation } from "~/lib/tmdb/types";
+
+interface SeasonView {
+  ratingKey: string;
+  title: string;
+  index: number;
+  leafCount: number;
+  viewedLeafCount: number;
+  thumb: string;
+}
+
+interface EpisodeView {
+  ratingKey: string;
+  title: string;
+  index: number;
+  seasonIndex: number;
+  duration: string | null;
+  thumb: string;
+  summary?: string;
+  viewCount: number;
+  viewOffset?: number;
+}
+
+// Breadcrumb navigation item
+interface BreadcrumbItem {
+  label: string;
+  href: string;
+}
+
+// On Deck info (resume episode)
+interface OnDeckInfo {
+  seasonIndex: number;
+  episodeIndex: number;
+  episodeTitle: string;
+  episodeRatingKey: string;
+  viewOffset?: number; // Resume position in milliseconds
+}
+
+interface LoaderData {
+  metadata: PlexMetadata;
+  backdropUrl: string;
+  posterUrl: string;
+  year: string | null;
+  duration: string | null;
+  rating: string | null;
+  audienceRating: string | null;
+  userRating: string | null;
+  genres: string[];
+  directors: string[];
+  writers: string[];
+  studio: string | null;
+  cast: PlexRole[];
+  similar: Array<{
+    ratingKey: string;
+    title: string;
+    posterUrl: string;
+    type: string;
+  }>;
+  recommendations: TMDBRecommendation[];
+  serverUrl: string;
+  token: string;
+  type: "movie" | "show" | "season" | "episode";
+  viewOffset?: number; // Resume position in milliseconds
+  viewCount: number; // Number of times watched
+  leafCount?: number; // Total episodes (TV shows/seasons only)
+  viewedLeafCount?: number; // Watched episodes (TV shows/seasons only)
+  isInWatchlist: boolean; // Whether item is in user's watchlist
+  // TV show specific data
+  seasons?: SeasonView[];
+  episodes?: EpisodeView[]; // Episodes for the selected season
+  initialSeasonIndex?: number; // The initially selected season index
+  onDeck?: OnDeckInfo; // Next episode to watch/resume
+  // Hierarchy navigation (for seasons and episodes)
+  breadcrumbs: BreadcrumbItem[];
+  // Parent info for context
+  showTitle?: string; // For seasons and episodes
+  showRatingKey?: string; // For seasons and episodes
+  showPosterUrl?: string; // For seasons and episodes
+  seasonTitle?: string; // For episodes
+  seasonRatingKey?: string; // For episodes
+  seasonIndex?: number; // For episodes (and seasons)
+  episodeIndex?: number; // For episodes
+  // Episode-specific data
+  originallyAired?: string; // Air date for episodes
+  // External IDs for linking
+  tmdbId?: number;
+  imdbId?: string;
+  // Media file info (ISS-012: Feature parity with Plex)
+  mediaInfo?: {
+    resolution?: string; // e.g., "1080p", "4K"
+    videoCodec?: string; // e.g., "H.264", "HEVC"
+    audioCodec?: string; // e.g., "AAC", "AC3"
+    audioChannels?: string; // e.g., "5.1", "Stereo"
+    container?: string; // e.g., "MKV", "MP4"
+    fileSize?: string; // e.g., "4.2 GB"
+    bitrate?: string; // e.g., "8.5 Mbps"
+  };
+  // Available streams for selection
+  videoStreams?: Array<{
+    id: number;
+    displayTitle: string;
+    resolution?: string;
+    codec?: string;
+    selected?: boolean;
+  }>;
+  audioStreams?: Array<{
+    id: number;
+    displayTitle: string;
+    language?: string;
+    channels?: string;
+    codec?: string;
+    selected?: boolean;
+  }>;
+  subtitleStreams?: Array<{
+    id: number;
+    displayTitle: string;
+    language?: string;
+    codec?: string;
+    selected?: boolean;
+  }>;
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  const title = data?.metadata?.title ?? "Media Details";
+  return [
+    { title: `${title} | Watchtower` },
+    { name: "description", content: data?.metadata?.summary ?? "" },
+  ];
+};
+
+function buildPlexImageUrl(
+  serverUrl: string,
+  token: string,
+  path: string | undefined,
+  width: number,
+  height: number
+): string {
+  if (!path) {
+    return "";
+  }
+  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
+}
+
+function formatRuntime(durationMs?: number): string | null {
+  if (!durationMs) return null;
+  const minutes = Math.floor(durationMs / 60000);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours > 0) {
+    return `${hours}h ${remainingMinutes}m`;
+  }
+  return `${remainingMinutes}m`;
+}
+
+function formatRating(rating?: number): string | null {
+  if (rating === undefined || rating === null) return null;
+  return rating.toFixed(1);
+}
+
+function formatFileSize(bytes?: number): string | null {
+  if (!bytes) return null;
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(0)} MB`;
+}
+
+function formatBitrate(kbps?: number): string | null {
+  if (!kbps) return null;
+  if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbps`;
+  return `${kbps} Kbps`;
+}
+
+function formatAudioChannels(channels?: number): string | null {
+  if (!channels) return null;
+  if (channels === 1) return "Mono";
+  if (channels === 2) return "Stereo";
+  if (channels === 6) return "5.1";
+  if (channels === 8) return "7.1";
+  return `${channels}ch`;
+}
+
+function formatVideoCodec(codec?: string): string {
+  if (!codec) return "Unknown";
+  const codecMap: Record<string, string> = {
+    h264: "H.264",
+    hevc: "HEVC",
+    h265: "HEVC",
+    vp9: "VP9",
+    av1: "AV1",
+    mpeg2video: "MPEG-2",
+    mpeg4: "MPEG-4",
+  };
+  return codecMap[codec.toLowerCase()] || codec.toUpperCase();
+}
+
+function formatAudioCodec(codec?: string): string {
+  if (!codec) return "Unknown";
+  const codecMap: Record<string, string> = {
+    aac: "AAC",
+    ac3: "AC3",
+    eac3: "E-AC3",
+    dts: "DTS",
+    truehd: "TrueHD",
+    flac: "FLAC",
+    mp3: "MP3",
+    opus: "Opus",
+  };
+  return codecMap[codec.toLowerCase()] || codec.toUpperCase();
+}
+
+function formatResolution(width?: number, height?: number, resolution?: string): string {
+  if (resolution) {
+    // Map common resolution strings
+    if (resolution === "4k" || resolution === "2160") return "4K";
+    if (resolution === "1080") return "1080p";
+    if (resolution === "720") return "720p";
+    if (resolution === "480") return "480p";
+    return resolution;
+  }
+  if (width && height) {
+    if (width >= 3840) return "4K";
+    if (width >= 1920) return "1080p";
+    if (width >= 1280) return "720p";
+    if (width >= 854) return "480p";
+    return `${width}x${height}`;
+  }
+  return "Unknown";
+}
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const token = await requirePlexToken(request);
+  const { type, ratingKey } = params;
+
+  // Validate type parameter - now supports all content types
+  if (type !== "movie" && type !== "show" && type !== "season" && type !== "episode") {
+    throw new Response("Invalid media type", { status: 400 });
+  }
+
+  // Validate ratingKey
+  if (!ratingKey) {
+    throw new Response("Missing rating key", { status: 400 });
+  }
+
+  const client = new PlexClient({
+    serverUrl: env.PLEX_SERVER_URL,
+    token,
+    clientId: env.PLEX_CLIENT_ID,
+  });
+
+  const result = await client.getMetadata(ratingKey);
+
+  if (!result.success) {
+    throw new Response("Media not found", { status: 404 });
+  }
+
+  const metadata = result.data;
+
+  // Build breadcrumbs based on content type
+  const breadcrumbs: BreadcrumbItem[] = [];
+  let showTitle: string | undefined;
+  let showRatingKey: string | undefined;
+  let showPosterUrl: string | undefined;
+  let seasonTitle: string | undefined;
+  let seasonRatingKey: string | undefined;
+  let seasonIndex: number | undefined;
+  let episodeIndex: number | undefined;
+  let originallyAired: string | undefined;
+
+  // Fetch parent metadata for seasons and episodes
+  if (type === "season" && metadata.parentRatingKey) {
+    // Season: fetch show info
+    const showResult = await client.getMetadata(metadata.parentRatingKey);
+    if (showResult.success) {
+      showTitle = showResult.data.title;
+      showRatingKey = metadata.parentRatingKey;
+      showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, showResult.data.thumb, 400, 600);
+      breadcrumbs.push({
+        label: showTitle,
+        href: `/app/media/show/${showRatingKey}`,
+      });
+    }
+    seasonIndex = metadata.index;
+  } else if (type === "episode") {
+    // Episode: fetch show and season info
+    episodeIndex = metadata.index;
+    seasonIndex = metadata.parentIndex;
+    originallyAired = metadata.originallyAvailableAt;
+
+    // Fetch season info if available
+    if (metadata.parentRatingKey) {
+      const seasonResult = await client.getMetadata(metadata.parentRatingKey);
+      if (seasonResult.success) {
+        seasonTitle = seasonResult.data.title;
+        seasonRatingKey = metadata.parentRatingKey;
+        seasonIndex = seasonResult.data.index ?? metadata.parentIndex;
+
+        // Fetch show info from season's parent
+        if (seasonResult.data.parentRatingKey) {
+          const showResult = await client.getMetadata(seasonResult.data.parentRatingKey);
+          if (showResult.success) {
+            showTitle = showResult.data.title;
+            showRatingKey = seasonResult.data.parentRatingKey;
+            showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, showResult.data.thumb, 400, 600);
+          }
+        }
+      }
+    }
+
+    // Alternative: use grandparent info from episode metadata
+    if (!showTitle && metadata.grandparentTitle) {
+      showTitle = metadata.grandparentTitle;
+      showRatingKey = metadata.grandparentRatingKey;
+      if (metadata.grandparentThumb) {
+        showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, metadata.grandparentThumb, 400, 600);
+      }
+    }
+
+    // Build breadcrumbs for episode
+    if (showTitle && showRatingKey) {
+      breadcrumbs.push({
+        label: showTitle,
+        href: `/app/media/show/${showRatingKey}`,
+      });
+    }
+    if (seasonTitle && seasonRatingKey) {
+      breadcrumbs.push({
+        label: seasonTitle,
+        href: `/app/media/season/${seasonRatingKey}`,
+      });
+    }
+  }
+
+  // Check if item is in watchlist
+  let isInWatchlist = false;
+  if (metadata.guid) {
+    try {
+      const watchlistResult = await client.getWatchlist();
+      if (watchlistResult.success) {
+        isInWatchlist = watchlistResult.data.some(
+          (item) => item.guid === metadata.guid
+        );
+      }
+    } catch (error) {
+      // Silently fail - watchlist check is optional
+      console.error("[Watchlist] Failed to check watchlist status:", error);
+    }
+  }
+
+  // For episodes/seasons, use parent art as backdrop if not available
+  const artPath = metadata.art || (type === "episode" ? metadata.grandparentArt : undefined);
+
+  // Extract external IDs from Plex GUID
+  const guidToCheck = metadata.guid;
+  const imdbMatch = guidToCheck?.match(/imdb:\/\/(tt\d+)/);
+  const tmdbMatch = guidToCheck?.match(/tmdb:\/\/(\d+)/);
+  const tmdbId = tmdbMatch ? parseInt(tmdbMatch[1], 10) : undefined;
+  const imdbId = imdbMatch?.[1];
+
+  // Extract media file info (for movies and episodes that have playable media)
+  let mediaInfo: LoaderData["mediaInfo"];
+  let videoStreams: LoaderData["videoStreams"];
+  let audioStreams: LoaderData["audioStreams"];
+  let subtitleStreams: LoaderData["subtitleStreams"];
+
+  if ((type === "movie" || type === "episode") && metadata.Media?.[0]) {
+    const media = metadata.Media[0];
+    const part = media.Part?.[0];
+    const streams = part?.Stream ?? [];
+
+    // Build media info
+    mediaInfo = {
+      resolution: formatResolution(media.width, media.height, media.videoResolution),
+      videoCodec: formatVideoCodec(media.videoCodec),
+      audioCodec: formatAudioCodec(media.audioCodec),
+      audioChannels: formatAudioChannels(media.audioChannels) ?? undefined,
+      container: media.container?.toUpperCase(),
+      fileSize: formatFileSize(part?.size) ?? undefined,
+      bitrate: formatBitrate(media.bitrate) ?? undefined,
+    };
+
+    // Extract video streams (streamType 1)
+    videoStreams = streams
+      .filter((s) => s.streamType === 1)
+      .map((s) => ({
+        id: s.id,
+        displayTitle: s.displayTitle || `${formatResolution(s.width, s.height)} ${formatVideoCodec(s.codec)}`,
+        resolution: formatResolution(s.width, s.height),
+        codec: formatVideoCodec(s.codec),
+        selected: s.selected,
+      }));
+
+    // Extract audio streams (streamType 2)
+    audioStreams = streams
+      .filter((s) => s.streamType === 2)
+      .map((s) => ({
+        id: s.id,
+        displayTitle: s.displayTitle || `${s.language || "Unknown"} (${formatAudioCodec(s.codec)})`,
+        language: s.language,
+        channels: formatAudioChannels(s.channels) ?? undefined,
+        codec: formatAudioCodec(s.codec),
+        selected: s.selected,
+      }));
+
+    // Extract subtitle streams (streamType 3)
+    subtitleStreams = streams
+      .filter((s) => s.streamType === 3)
+      .map((s) => ({
+        id: s.id,
+        displayTitle: s.displayTitle || s.language || "Unknown",
+        language: s.language,
+        codec: s.codec,
+        selected: s.selected,
+      }));
+  }
+
+  // Build processed data for the view
+  const loaderData: LoaderData = {
+    metadata,
+    backdropUrl: buildPlexImageUrl(
+      env.PLEX_SERVER_URL,
+      token,
+      artPath,
+      1920,
+      1080
+    ),
+    posterUrl: buildPlexImageUrl(
+      env.PLEX_SERVER_URL,
+      token,
+      metadata.thumb,
+      400,
+      600
+    ),
+    year: metadata.year?.toString() ?? null,
+    duration: formatRuntime(metadata.duration),
+    rating: metadata.contentRating ?? null,
+    audienceRating: formatRating(metadata.audienceRating),
+    userRating: formatRating(metadata.userRating),
+    genres: metadata.Genre?.map((g) => g.tag) ?? [],
+    directors: metadata.Director?.map((d) => d.tag) ?? [],
+    writers: metadata.Writer?.map((w) => w.tag) ?? [],
+    studio: metadata.studio ?? null,
+    cast: metadata.Role?.slice(0, 15) ?? [],
+    similar: (metadata.Similar ?? [])
+      .filter((s) => s.ratingKey)
+      .slice(0, 10)
+      .map((s) => ({
+        ratingKey: s.ratingKey!,
+        title: s.tag,
+        posterUrl: "", // Similar items don't have poster URLs in the response
+        type,
+      })),
+    recommendations: [],
+    serverUrl: env.PLEX_SERVER_URL,
+    token,
+    type,
+    viewOffset: metadata.viewOffset,
+    viewCount: metadata.viewCount ?? 0,
+    leafCount: metadata.leafCount,
+    viewedLeafCount: metadata.viewedLeafCount,
+    isInWatchlist,
+    // Hierarchy navigation
+    breadcrumbs,
+    showTitle,
+    showRatingKey,
+    showPosterUrl,
+    seasonTitle,
+    seasonRatingKey,
+    seasonIndex,
+    episodeIndex,
+    originallyAired,
+    // External IDs
+    tmdbId,
+    imdbId,
+    // Media file info
+    mediaInfo,
+    videoStreams,
+    audioStreams,
+    subtitleStreams,
+  };
+
+  // Fetch seasons and episodes for TV shows
+  if (type === "show") {
+    const seasonsResult = await client.getChildren(ratingKey);
+    if (seasonsResult.success && seasonsResult.data.length > 0) {
+      // Filter to only actual seasons (not specials which have index 0)
+      const seasonItems = seasonsResult.data
+        .filter((s) => s.type === "season")
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+      loaderData.seasons = seasonItems.map((season) => ({
+        ratingKey: season.ratingKey,
+        title: season.title,
+        index: season.index ?? 0,
+        leafCount: season.leafCount ?? 0,
+        viewedLeafCount: season.viewedLeafCount ?? 0,
+        thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, season.thumb, 300, 450),
+      }));
+
+      // Get episodes for the first unwatched season, or latest if all watched
+      const regularSeasons = seasonItems
+        .filter((s) => (s.index ?? 0) >= 1)
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+      let targetSeason = seasonItems[0]; // Fallback
+      if (regularSeasons.length > 0) {
+        // Find first season that's not fully watched
+        const firstUnwatched = regularSeasons.find(
+          (s) => (s.leafCount ?? 0) > 0 && (s.viewedLeafCount ?? 0) < (s.leafCount ?? 0)
+        );
+        targetSeason = firstUnwatched || regularSeasons[regularSeasons.length - 1];
+      }
+
+      if (targetSeason) {
+        const episodesResult = await client.getChildren(targetSeason.ratingKey);
+        if (episodesResult.success) {
+          const sortedEpisodes = episodesResult.data
+            .filter((e) => e.type === "episode")
+            .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+          loaderData.episodes = sortedEpisodes.map((episode) => ({
+              ratingKey: episode.ratingKey,
+              title: episode.title,
+              index: episode.index ?? 0,
+              seasonIndex: episode.parentIndex ?? targetSeason.index ?? 0,
+              duration: formatRuntime(episode.duration),
+              thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, episode.thumb, 400, 225),
+              summary: episode.summary,
+              viewCount: episode.viewCount ?? 0,
+              viewOffset: episode.viewOffset,
+            }));
+          // Store the initially selected season index
+          loaderData.initialSeasonIndex = targetSeason.index ?? 1;
+
+          // Find On Deck episode (first with viewOffset or first unwatched)
+          const inProgressEp = sortedEpisodes.find((e) => e.viewOffset && e.viewOffset > 0);
+          const firstUnwatchedEp = sortedEpisodes.find((e) => (e.viewCount ?? 0) === 0);
+          const onDeckEpisode = inProgressEp || firstUnwatchedEp;
+
+          if (onDeckEpisode) {
+            loaderData.onDeck = {
+              seasonIndex: onDeckEpisode.parentIndex ?? targetSeason.index ?? 1,
+              episodeIndex: onDeckEpisode.index ?? 1,
+              episodeTitle: onDeckEpisode.title,
+              episodeRatingKey: onDeckEpisode.ratingKey,
+              viewOffset: onDeckEpisode.viewOffset,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // Fetch episodes for season pages
+  if (type === "season") {
+    const episodesResult = await client.getChildren(ratingKey);
+    if (episodesResult.success) {
+      const sortedEpisodes = episodesResult.data
+        .filter((e) => e.type === "episode")
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+      loaderData.episodes = sortedEpisodes.map((episode) => ({
+          ratingKey: episode.ratingKey,
+          title: episode.title,
+          index: episode.index ?? 0,
+          seasonIndex: seasonIndex ?? 0,
+          duration: formatRuntime(episode.duration),
+          thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, episode.thumb, 400, 225),
+          summary: episode.summary,
+          viewCount: episode.viewCount ?? 0,
+          viewOffset: episode.viewOffset,
+        }));
+
+      // Find On Deck episode for season page
+      const inProgressEp = sortedEpisodes.find((e) => e.viewOffset && e.viewOffset > 0);
+      const firstUnwatchedEp = sortedEpisodes.find((e) => (e.viewCount ?? 0) === 0);
+      const onDeckEpisode = inProgressEp || firstUnwatchedEp;
+
+      if (onDeckEpisode) {
+        loaderData.onDeck = {
+          seasonIndex: seasonIndex ?? 1,
+          episodeIndex: onDeckEpisode.index ?? 1,
+          episodeTitle: onDeckEpisode.title,
+          episodeRatingKey: onDeckEpisode.ratingKey,
+          viewOffset: onDeckEpisode.viewOffset,
+        };
+      }
+    }
+  }
+
+  // Fetch TMDB recommendations (optional, non-blocking - only for movies and shows)
+  if (type === "movie" || type === "show") {
+    const tmdbClient = createTMDBClient();
+    if (tmdbClient && metadata.title) {
+      try {
+        const year = metadata.year;
+        const recsResult =
+          type === "movie"
+            ? await tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
+            : await tmdbClient.getTVRecommendationsByTitle(metadata.title, year);
+
+        if (recsResult.success) {
+          loaderData.recommendations = recsResult.data;
+        }
+      } catch (error) {
+        // Silently fail - recommendations are optional
+        console.error("[TMDB] Failed to fetch recommendations:", error);
+      }
+    }
+  }
+
+  return json(loaderData);
+}
+
+// Breadcrumb navigation component
+function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <nav className="flex items-center gap-2 text-sm">
+      {items.map((item, index) => (
+        <span key={item.href} className="flex items-center gap-2">
+          <Link
+            to={item.href}
+            className="text-foreground-secondary transition-colors hover:text-foreground-primary"
+          >
+            {item.label}
+          </Link>
+          {index < items.length - 1 && (
+            <ChevronRight className="h-4 w-4 text-foreground-muted" />
+          )}
+        </span>
+      ))}
+      <ChevronRight className="h-4 w-4 text-foreground-muted" />
+    </nav>
+  );
+}
+
+export default function MediaDetailPage() {
+  const data = useLoaderData<typeof loader>();
+  const {
+    metadata,
+    backdropUrl,
+    posterUrl,
+    year,
+    duration,
+    rating,
+    audienceRating,
+    userRating,
+    genres,
+    directors,
+    writers,
+    studio,
+    cast,
+    similar,
+    recommendations,
+    serverUrl,
+    token,
+    type,
+    viewOffset,
+    viewCount,
+    leafCount,
+    viewedLeafCount,
+    isInWatchlist: initialIsInWatchlist,
+    seasons,
+    episodes: initialEpisodes,
+    initialSeasonIndex,
+    onDeck: initialOnDeck,
+    // Hierarchy navigation
+    breadcrumbs,
+    showTitle,
+    seasonIndex,
+    episodeIndex,
+    originallyAired,
+    // External IDs
+    tmdbId,
+    imdbId,
+    // Media file info
+    mediaInfo,
+    audioStreams,
+    subtitleStreams,
+  } = data;
+
+  // For TV shows/seasons, watched = all episodes watched. For movies/episodes, watched = viewCount > 0
+  const isWatched =
+    type === "show" || type === "season"
+      ? leafCount !== undefined &&
+        viewedLeafCount !== undefined &&
+        leafCount > 0 &&
+        viewedLeafCount >= leafCount
+      : viewCount > 0;
+  const navigate = useNavigate();
+
+  // Season selection state - use the server-provided initial season index
+  const [, setSelectedSeasonIndex] = useState<number>(initialSeasonIndex ?? 1);
+  const [episodes, setEpisodes] = useState(initialEpisodes);
+  const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
+  const [onDeck, setOnDeck] = useState(initialOnDeck);
+
+  const buildPhotoUrl = (thumbPath: string) => {
+    return buildPlexImageUrl(serverUrl, token, thumbPath, 200, 200);
+  };
+
+  // Handle season change - fetch episodes for the selected season
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleSeasonChange = useCallback(async (newSeasonIndex: number) => {
+    setSelectedSeasonIndex(newSeasonIndex);
+
+    const selectedSeason = seasons?.find((s) => s.index === newSeasonIndex);
+    if (!selectedSeason) return;
+
+    setIsLoadingEpisodes(true);
+    try {
+      // Fetch episodes via API route
+      const response = await fetch(
+        `/api/plex/children/${selectedSeason.ratingKey}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.children) {
+          const sortedEpisodes = data.children
+              .filter((e: PlexMediaItem) => e.type === "episode")
+              .sort((a: PlexMediaItem, b: PlexMediaItem) => (a.index ?? 0) - (b.index ?? 0));
+
+          setEpisodes(
+            sortedEpisodes.map((episode: PlexMediaItem) => ({
+                ratingKey: episode.ratingKey,
+                title: episode.title,
+                index: episode.index ?? 0,
+                seasonIndex: episode.parentIndex ?? seasonIndex,
+                duration: episode.duration ? formatRuntime(episode.duration) : null,
+                thumb: buildPlexImageUrl(serverUrl, token, episode.thumb, 400, 225),
+                summary: episode.summary,
+                viewCount: episode.viewCount ?? 0,
+                viewOffset: episode.viewOffset,
+              }))
+          );
+
+          // Update On Deck
+          const inProgressEp = sortedEpisodes.find((e: PlexMediaItem) => e.viewOffset && e.viewOffset > 0);
+          const firstUnwatchedEp = sortedEpisodes.find((e: PlexMediaItem) => (e.viewCount ?? 0) === 0);
+          const onDeckEp = inProgressEp || firstUnwatchedEp;
+          if (onDeckEp) {
+            setOnDeck({
+              seasonIndex: onDeckEp.parentIndex ?? seasonIndex,
+              episodeIndex: onDeckEp.index ?? 1,
+              episodeTitle: onDeckEp.title,
+              episodeRatingKey: onDeckEp.ratingKey,
+              viewOffset: onDeckEp.viewOffset,
+            });
+          } else {
+            setOnDeck(undefined);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load episodes:", error);
+    } finally {
+      setIsLoadingEpisodes(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasons, serverUrl, token]);
+
+  const handlePlay = () => {
+    // For TV shows and seasons, play the On Deck episode
+    if ((type === "show" || type === "season") && onDeck) {
+      const url = onDeck.viewOffset
+        ? `/app/watch/${onDeck.episodeRatingKey}?t=${onDeck.viewOffset}`
+        : `/app/watch/${onDeck.episodeRatingKey}`;
+      navigate(url);
+      return;
+    }
+    // For movies and episodes, play directly
+    const url = viewOffset
+      ? `/app/watch/${metadata.ratingKey}?t=${viewOffset}`
+      : `/app/watch/${metadata.ratingKey}`;
+    navigate(url);
+  };
+
+  const handlePlayFromBeginning = () => {
+    // For TV shows and seasons, play the On Deck episode from beginning
+    if ((type === "show" || type === "season") && onDeck) {
+      navigate(`/app/watch/${onDeck.episodeRatingKey}`);
+      return;
+    }
+    // For movies and episodes, play from beginning
+    navigate(`/app/watch/${metadata.ratingKey}`);
+  };
+
+  const [isInList, setIsInList] = useState(initialIsInWatchlist);
+  const [isAddingToList, setIsAddingToList] = useState(false);
+
+  const handleAddToList = useCallback(async () => {
+    if (isAddingToList) return;
+
+    setIsAddingToList(true);
+    try {
+      const response = await fetch("/api/plex/list", {
+        method: isInList ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratingKey: metadata.ratingKey }),
+      });
+
+      if (response.ok) {
+        setIsInList(!isInList);
+      }
+    } catch (error) {
+      console.error("Failed to update list:", error);
+    } finally {
+      setIsAddingToList(false);
+    }
+  }, [isInList, isAddingToList, metadata.ratingKey]);
+
+  // Determine display title for episodes
+  const displayTitle =
+    type === "episode" && seasonIndex !== undefined && episodeIndex !== undefined
+      ? `${episodeIndex}. ${metadata.title}`
+      : metadata.title;
+
+  // Determine button label based on watch state
+  const playButtonLabel = () => {
+    if ((type === "show" || type === "season") && onDeck?.viewOffset) return "Resume";
+    if (viewOffset) return "Resume";
+    if (isWatched) return "Play Again";
+    return "Play";
+  };
+
+  // For movies and episodes, keep the original hero layout
+  // For shows and seasons, use Plex-style layout
+  const usePlexLayout = type === "show" || type === "season";
+
+  return (
+    <div className="min-h-screen pb-16">
+      {usePlexLayout ? (
+        /* ===== PLEX-STYLE LAYOUT FOR TV SHOWS AND SEASONS ===== */
+        <>
+          {/* Header Section with gradient background */}
+          <div className="relative">
+            {/* Subtle gradient background */}
+            <div className="absolute inset-0 bg-gradient-to-b from-background-elevated via-background-primary to-background-primary" />
+            {backdropUrl && (
+              <div className="absolute inset-0 opacity-20">
+                <img
+                  src={backdropUrl}
+                  alt=""
+                  className="h-full w-full object-cover object-top blur-xl"
+                />
+              </div>
+            )}
+
+            <Container size="wide" className="relative py-8 md:py-12">
+              <div className="flex gap-6 md:gap-8">
+                {/* Poster with badge */}
+                <div className="flex-shrink-0">
+                  <div className="relative w-36 md:w-44 lg:w-52">
+                    {/* Episode count badge */}
+                    {leafCount !== undefined && leafCount > 0 && (
+                      <div className="absolute right-0 top-0 z-10 flex h-8 min-w-8 items-center justify-center rounded-bl-lg bg-black/70 px-2">
+                        {isWatched ? (
+                          <Check className="h-5 w-5 text-white" />
+                        ) : (
+                          <span className="text-sm font-semibold text-white">{leafCount}</span>
+                        )}
+                      </div>
+                    )}
+                    {/* Poster image */}
+                    <img
+                      src={posterUrl}
+                      alt={metadata.title}
+                      className="w-full rounded-lg shadow-2xl"
+                    />
+                    {/* On Deck indicator */}
+                    {onDeck && (
+                      <div className="mt-3 text-center text-sm text-foreground-secondary">
+                        On Deck — S{onDeck.seasonIndex} · E{onDeck.episodeIndex}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Info section */}
+                <div className="flex-1 pt-2">
+                  {/* Title */}
+                  <Typography variant="hero" className="mb-1">
+                    {type === "season" && showTitle ? showTitle : metadata.title}
+                  </Typography>
+
+                  {/* Season subtitle */}
+                  {type === "season" && (
+                    <Typography variant="title" className="mb-3 text-foreground-secondary">
+                      Season {seasonIndex}
+                    </Typography>
+                  )}
+
+                  {/* Metadata row */}
+                  <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-foreground-secondary">
+                    {year && <span>{year}</span>}
+                    {genres.length > 0 && (
+                      <span>{genres.slice(0, 2).join(", ")}</span>
+                    )}
+                    {rating && (
+                      <span className="rounded bg-white/10 px-2 py-0.5">
+                        {rating}
+                      </span>
+                    )}
+                    {audienceRating && (
+                      <span className="flex items-center gap-1">
+                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                        {audienceRating}
+                      </span>
+                    )}
+                    {userRating && (
+                      <span className="flex items-center gap-1">
+                        <Star className="h-4 w-4 fill-mango text-mango" />
+                        {userRating}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="mb-4 flex items-center gap-3">
+                    <Button variant="primary" size="lg" onClick={handlePlay}>
+                      <Play className="mr-2 h-5 w-5 fill-current" />
+                      {playButtonLabel()}
+                    </Button>
+                    {/* Watchlist button - only for shows */}
+                    {type === "show" && (
+                      <Button
+                        variant="secondary"
+                        size="lg"
+                        onClick={handleAddToList}
+                        disabled={isAddingToList}
+                      >
+                        {isInList ? (
+                          <Check className="h-5 w-5" />
+                        ) : (
+                          <Plus className="h-5 w-5" />
+                        )}
+                      </Button>
+                    )}
+                    {/* External Links */}
+                    {tmdbId && (
+                      <a
+                        href={
+                          type === "season" && seasonIndex !== undefined
+                            ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}`
+                            : `https://www.themoviedb.org/tv/${tmdbId}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex h-11 items-center gap-1.5 rounded-lg bg-[#01b4e4]/20 px-4 text-sm font-medium text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
+                      >
+                        TMDB
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                    {imdbId && (
+                      <a
+                        href={`https://www.imdb.com/title/${imdbId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex h-11 items-center gap-1.5 rounded-lg bg-[#f5c518]/20 px-4 text-sm font-medium text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
+                      >
+                        IMDb
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Summary */}
+                  {metadata.summary && (
+                    <Typography variant="body" className="max-w-2xl text-foreground-secondary line-clamp-4">
+                      {metadata.summary}
+                    </Typography>
+                  )}
+                </div>
+              </div>
+            </Container>
+          </div>
+
+          {/* Seasons Row (TV Shows only) */}
+          {type === "show" && seasons && seasons.length > 0 && (
+            <Container size="wide" className="mt-8">
+              <Typography variant="title" className="mb-4">
+                Seasons
+              </Typography>
+              <div className="flex gap-4 overflow-x-auto pb-4 pt-2 pr-2 scrollbar-hide">
+                {seasons.map((season) => (
+                  <Link
+                    key={season.ratingKey}
+                    to={`/app/media/season/${season.ratingKey}`}
+                    className="group flex-shrink-0"
+                  >
+                    <div className="relative w-32 md:w-36">
+                      {/* Episode count or checkmark badge */}
+                      <div className="absolute right-0 top-0 z-10 flex h-6 min-w-6 items-center justify-center rounded-bl-lg bg-black/70 px-1.5">
+                        {season.viewedLeafCount >= season.leafCount && season.leafCount > 0 ? (
+                          <Check className="h-3.5 w-3.5 text-white" />
+                        ) : (
+                          <span className="text-xs font-semibold text-white">{season.leafCount}</span>
+                        )}
+                      </div>
+                      {/* Season poster */}
+                      <div className="overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
+                        <img
+                          src={season.thumb}
+                          alt={season.title}
+                          className="aspect-[2/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          loading="lazy"
+                        />
+                      </div>
+                      {/* Season info */}
+                      <div className="mt-2">
+                        <Typography variant="body" className="font-medium">
+                          {season.title}
+                        </Typography>
+                        <Typography variant="caption" className="text-foreground-muted">
+                          {season.leafCount} episode{season.leafCount !== 1 ? "s" : ""}
+                        </Typography>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </Container>
+          )}
+
+          {/* Episodes Grid (Seasons only) */}
+          {type === "season" && (
+            <Container size="wide" className="mt-8">
+              <Typography variant="title" className="mb-4">
+                {leafCount} Episode{leafCount !== 1 ? "s" : ""}
+              </Typography>
+
+              {isLoadingEpisodes ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
+                </div>
+              ) : episodes && episodes.length > 0 ? (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {episodes.map((episode) => (
+                    <Link
+                      key={episode.ratingKey}
+                      to={`/app/media/episode/${episode.ratingKey}`}
+                      className="group"
+                    >
+                      {/* Episode Thumbnail */}
+                      <div className="relative overflow-hidden rounded-lg bg-background-elevated">
+                        <img
+                          src={episode.thumb}
+                          alt={episode.title}
+                          className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          loading="lazy"
+                        />
+                        {/* Watched badge */}
+                        {episode.viewCount > 0 && !episode.viewOffset && (
+                          <div className="absolute right-0 top-0 flex h-6 w-6 items-center justify-center rounded-bl-lg bg-black/70">
+                            <Check className="h-3.5 w-3.5 text-white" />
+                          </div>
+                        )}
+                        {/* Progress bar */}
+                        {episode.viewOffset && episode.viewOffset > 0 && (
+                          <div className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
+                            <div
+                              className="h-full bg-accent-primary"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, (episode.viewOffset / 1000 / 60) * 2))}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {/* Episode Info - Plex style: title then episode number */}
+                      <div className="mt-2">
+                        <Typography variant="body" className="font-medium line-clamp-1 group-hover:text-accent-primary">
+                          {episode.title}
+                        </Typography>
+                        <Typography variant="caption" className="text-foreground-muted">
+                          Episode {episode.index}
+                        </Typography>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <Typography variant="body" className="py-8 text-center text-foreground-muted">
+                  No episodes available for this season.
+                </Typography>
+              )}
+            </Container>
+          )}
+
+          {/* Cast Section */}
+          {cast.length > 0 && (
+            <Container size="wide" className="mt-8">
+              <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
+            </Container>
+          )}
+
+          {/* TMDB Recommendations */}
+          {recommendations.length > 0 && (
+            <Container size="wide" className="mt-8">
+              <div className="mb-4 flex items-baseline justify-between">
+                <Typography variant="title">Recommendations</Typography>
+                <span className="text-xs text-foreground-muted">
+                  Powered by TMDB
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                {recommendations.map((rec) => (
+                  <a
+                    key={rec.id}
+                    href={rec.tmdbUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group relative"
+                  >
+                    <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated">
+                      {rec.posterUrl ? (
+                        <img
+                          src={rec.posterUrl}
+                          alt={rec.title}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-foreground-muted">
+                          No Image
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-2">
+                      <Typography
+                        variant="body"
+                        className="line-clamp-1 text-sm group-hover:text-accent-primary"
+                      >
+                        {rec.title}
+                      </Typography>
+                      <div className="flex items-center gap-2 text-xs text-foreground-muted">
+                        {rec.releaseDate && (
+                          <span>{rec.releaseDate.substring(0, 4)}</span>
+                        )}
+                        {rec.rating > 0 && (
+                          <span className="flex items-center gap-0.5">
+                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                            {rec.rating.toFixed(1)}
+                          </span>
+                        )}
+                        <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </Container>
+          )}
+        </>
+      ) : (
+        /* ===== ORIGINAL HERO LAYOUT FOR MOVIES AND EPISODES ===== */
+        <>
+          {/* Hero Section - Full bleed */}
+          <div
+            className={`relative w-full overflow-hidden ${
+              type === "episode"
+                ? "h-[50vh] min-h-[350px] md:h-[60vh] md:min-h-[450px]"
+                : "h-[60vh] min-h-[400px] md:h-[70vh] md:min-h-[500px]"
+            }`}
+          >
+            {/* Backdrop image */}
+            {backdropUrl ? (
+              <div className="absolute inset-0 animate-fadeIn">
+                <img
+                  src={backdropUrl}
+                  alt={metadata.title}
+                  className="h-full w-full object-cover object-center"
+                />
+              </div>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-b from-background-elevated to-background-primary" />
+            )}
+
+            {/* Gradient overlays for cinematic effect */}
+            <div className="absolute inset-0 bg-black/30" />
+            <div className="absolute inset-0 bg-gradient-to-r from-background-primary/90 via-background-primary/50 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-background-primary via-background-primary/60 to-transparent" />
+
+            {/* Content container */}
+            <div className="absolute inset-x-0 bottom-8 md:bottom-16">
+              <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8">
+                <div className="flex gap-6 md:gap-8">
+                  {/* Poster/Thumbnail - show poster for movies, thumbnail for episodes */}
+                  {type === "episode" ? (
+                    <div className="hidden w-48 flex-shrink-0 md:block lg:w-64">
+                      {/* Episode thumbnail */}
+                      {posterUrl && (
+                        <img
+                          src={posterUrl}
+                          alt={metadata.title}
+                          className="w-full rounded-lg shadow-2xl aspect-video object-cover"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    posterUrl && (
+                      <div className="hidden w-48 flex-shrink-0 md:block lg:w-56">
+                        <img
+                          src={posterUrl}
+                          alt={metadata.title}
+                          className="w-full rounded-lg shadow-2xl"
+                        />
+                      </div>
+                    )
+                  )}
+
+                  {/* Title and metadata */}
+                  <div className="max-w-2xl animate-slideUp">
+                    {/* Breadcrumbs for episodes */}
+                    {breadcrumbs.length > 0 && (
+                      <div className="mb-3">
+                        <Breadcrumbs items={breadcrumbs} />
+                      </div>
+                    )}
+
+                    {/* Season/Episode indicator */}
+                    {type === "episode" && seasonIndex !== undefined && (
+                      <Typography
+                        variant="caption"
+                        className="mb-2 block text-accent-primary"
+                      >
+                        Season {seasonIndex}
+                      </Typography>
+                    )}
+
+                    {/* Title */}
+                    <Typography variant="hero" className="mb-3 md:mb-4">
+                      {displayTitle}
+                    </Typography>
+
+                    {/* Metadata row */}
+                    <div className="mb-4 flex flex-wrap items-center gap-3 text-sm md:text-base">
+                      {/* Air date for episodes */}
+                      {type === "episode" && originallyAired && (
+                        <span className="flex items-center gap-1 text-foreground-secondary">
+                          <Calendar className="h-4 w-4" />
+                          {new Date(originallyAired).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                      )}
+                      {/* Year for movies */}
+                      {type === "movie" && year && (
+                        <span className="flex items-center gap-1 text-foreground-secondary">
+                          <Calendar className="h-4 w-4" />
+                          {year}
+                        </span>
+                      )}
+                      {duration && (
+                        <span className="flex items-center gap-1 text-foreground-secondary">
+                          <Clock className="h-4 w-4" />
+                          {duration}
+                        </span>
+                      )}
+                      {rating && (
+                        <span className="rounded bg-white/10 px-2 py-0.5 text-foreground-secondary">
+                          {rating}
+                        </span>
+                      )}
+                      {audienceRating && (
+                        <span className="flex items-center gap-1 text-foreground-secondary">
+                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                          {audienceRating}
+                        </span>
+                      )}
+                      {userRating && (
+                        <span className="flex items-center gap-1 text-foreground-secondary">
+                          <Star className="h-4 w-4 fill-mango text-mango" />
+                          {userRating}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Tagline */}
+                    {metadata.tagline && (
+                      <Typography
+                        variant="subtitle"
+                        className="mb-4 italic text-foreground-secondary"
+                      >
+                        &quot;{metadata.tagline}&quot;
+                      </Typography>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button variant="primary" size="lg" onClick={handlePlay}>
+                        <Play className="mr-2 h-5 w-5 fill-current" />
+                        {viewOffset ? "Resume" : isWatched ? "Play Again" : "Play"}
+                      </Button>
+                      {/* Play from beginning - shown when there's a resume position */}
+                      {viewOffset && (
+                        <Button variant="secondary" size="lg" onClick={handlePlayFromBeginning}>
+                          <RotateCcw className="mr-2 h-5 w-5" />
+                          From Start
+                        </Button>
+                      )}
+                      {/* Watchlist button - only for movies */}
+                      {type === "movie" && (
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          onClick={handleAddToList}
+                          disabled={isAddingToList}
+                        >
+                          {isInList ? (
+                            <>
+                              <Check className="mr-2 h-5 w-5" />
+                              In Watchlist
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="mr-2 h-5 w-5" />
+                              Add to Watchlist
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Details Section */}
+          <Container size="wide" className="relative z-10 mt-8 space-y-8">
+            {/* Summary, cast, and metadata */}
+            <div className="grid gap-8 lg:grid-cols-3">
+              {/* Main content - summary and cast */}
+              <div className="lg:col-span-2">
+                {metadata.summary && (
+                  <div className="mb-4">
+                    <Typography variant="title" className="mb-3">
+                      Overview
+                    </Typography>
+                    <Typography variant="body" className="text-foreground-secondary">
+                      {metadata.summary}
+                    </Typography>
+                  </div>
+                )}
+                {/* Cast inline with overview on desktop */}
+                {cast.length > 0 && (
+                  <div className="mt-4">
+                    <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
+                  </div>
+                )}
+              </div>
+
+              {/* Sidebar - metadata */}
+              <div className="space-y-4">
+                {/* Genres */}
+                {genres.length > 0 && (
+                  <div>
+                    <Typography variant="caption" className="mb-2 block text-foreground-muted">
+                      Genres
+                    </Typography>
+                    <div className="flex flex-wrap gap-2">
+                      {genres.map((genre) => (
+                        <span
+                          key={genre}
+                          className="rounded-full bg-white/10 px-3 py-1 text-sm text-foreground-primary"
+                        >
+                          {genre}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Studio */}
+                {studio && (
+                  <div>
+                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                      Studio
+                    </Typography>
+                    <Typography variant="body">{studio}</Typography>
+                  </div>
+                )}
+
+                {/* Directors */}
+                {directors.length > 0 && (
+                  <div>
+                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                      {directors.length === 1 ? "Director" : "Directors"}
+                    </Typography>
+                    <Typography variant="body">{directors.join(", ")}</Typography>
+                  </div>
+                )}
+
+                {/* Writers (especially for episodes) */}
+                {writers.length > 0 && (
+                  <div>
+                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                      {writers.length === 1 ? "Writer" : "Writers"}
+                    </Typography>
+                    <Typography variant="body">{writers.join(", ")}</Typography>
+                  </div>
+                )}
+
+                {/* Original title if different */}
+                {metadata.originalTitle && metadata.originalTitle !== metadata.title && (
+                  <div>
+                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                      Original Title
+                    </Typography>
+                    <Typography variant="body">{metadata.originalTitle}</Typography>
+                  </div>
+                )}
+
+                {/* Media Info Section */}
+                {mediaInfo && (
+                  <div className="border-t border-border-subtle pt-4">
+                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                      <HardDrive className="h-4 w-4" />
+                      Media Info
+                    </Typography>
+                    <div className="space-y-2 text-sm">
+                      {mediaInfo.resolution && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Resolution</span>
+                          <span className="font-medium">{mediaInfo.resolution}</span>
+                        </div>
+                      )}
+                      {mediaInfo.videoCodec && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Video</span>
+                          <span className="font-medium">{mediaInfo.videoCodec}</span>
+                        </div>
+                      )}
+                      {mediaInfo.audioCodec && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Audio</span>
+                          <span className="font-medium">
+                            {mediaInfo.audioCodec}
+                            {mediaInfo.audioChannels && ` ${mediaInfo.audioChannels}`}
+                          </span>
+                        </div>
+                      )}
+                      {mediaInfo.container && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Container</span>
+                          <span className="font-medium">{mediaInfo.container}</span>
+                        </div>
+                      )}
+                      {mediaInfo.fileSize && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Size</span>
+                          <span className="font-medium">{mediaInfo.fileSize}</span>
+                        </div>
+                      )}
+                      {mediaInfo.bitrate && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-foreground-muted">Bitrate</span>
+                          <span className="font-medium">{mediaInfo.bitrate}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Audio Streams */}
+                {audioStreams && audioStreams.length > 1 && (
+                  <div className="border-t border-border-subtle pt-4">
+                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                      <Volume2 className="h-4 w-4" />
+                      Audio Tracks ({audioStreams.length})
+                    </Typography>
+                    <div className="space-y-1.5 text-sm">
+                      {audioStreams.map((stream) => (
+                        <div
+                          key={stream.id}
+                          className={`flex items-center gap-2 rounded px-2 py-1 ${
+                            stream.selected ? "bg-accent-primary/20 text-accent-primary" : "text-foreground-secondary"
+                          }`}
+                        >
+                          {stream.selected && <Check className="h-3 w-3" />}
+                          <span className="flex-1 truncate">{stream.displayTitle}</span>
+                          {stream.channels && (
+                            <span className="text-xs text-foreground-muted">{stream.channels}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Subtitle Streams */}
+                {subtitleStreams && subtitleStreams.length > 0 && (
+                  <div className="border-t border-border-subtle pt-4">
+                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                      <Subtitles className="h-4 w-4" />
+                      Subtitles ({subtitleStreams.length})
+                    </Typography>
+                    <div className="space-y-1.5 text-sm">
+                      {subtitleStreams.slice(0, 5).map((stream) => (
+                        <div
+                          key={stream.id}
+                          className={`flex items-center gap-2 rounded px-2 py-1 ${
+                            stream.selected ? "bg-accent-primary/20 text-accent-primary" : "text-foreground-secondary"
+                          }`}
+                        >
+                          {stream.selected && <Check className="h-3 w-3" />}
+                          <span className="flex-1 truncate">{stream.displayTitle}</span>
+                        </div>
+                      ))}
+                      {subtitleStreams.length > 5 && (
+                        <div className="px-2 text-xs text-foreground-muted">
+                          +{subtitleStreams.length - 5} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* External Links */}
+                {(tmdbId || imdbId) && (
+                  <div className="border-t border-border-subtle pt-4">
+                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                      <ExternalLink className="h-4 w-4" />
+                      External Links
+                    </Typography>
+                    <div className="flex flex-wrap gap-2">
+                      {tmdbId && (
+                        <a
+                          href={
+                            type === "movie"
+                              ? `https://www.themoviedb.org/movie/${tmdbId}`
+                              : type === "episode" && seasonIndex !== undefined && episodeIndex !== undefined
+                                ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}/episode/${episodeIndex}`
+                                : `https://www.themoviedb.org/tv/${tmdbId}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 rounded-full bg-[#01b4e4]/20 px-3 py-1.5 text-sm text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
+                        >
+                          TMDB
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {imdbId && (
+                        <a
+                          href={`https://www.imdb.com/title/${imdbId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 rounded-full bg-[#f5c518]/20 px-3 py-1.5 text-sm text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
+                        >
+                          IMDb
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Similar Section (from Plex) */}
+            {similar.length > 0 && (
+              <MediaRow title="More Like This">
+                {similar.map((item) => (
+                  <Link
+                    key={item.ratingKey}
+                    to={`/app/media/${type}/${item.ratingKey}`}
+                    className="flex-shrink-0 snap-start"
+                  >
+                    <MediaCard
+                      imageUrl={
+                        item.posterUrl ||
+                        "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=225&fit=crop"
+                      }
+                      title={item.title}
+                    />
+                  </Link>
+                ))}
+              </MediaRow>
+            )}
+
+            {/* TMDB Recommendations */}
+            {recommendations.length > 0 && (
+              <div>
+                <div className="mb-4 flex items-baseline justify-between">
+                  <Typography variant="title">Recommendations</Typography>
+                  <span className="text-xs text-foreground-muted">
+                    Powered by TMDB
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                  {recommendations.map((rec) => (
+                    <a
+                      key={rec.id}
+                      href={rec.tmdbUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative"
+                    >
+                      <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated">
+                        {rec.posterUrl ? (
+                          <img
+                            src={rec.posterUrl}
+                            alt={rec.title}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-foreground-muted">
+                            No Image
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-2">
+                        <Typography
+                          variant="body"
+                          className="line-clamp-1 text-sm group-hover:text-accent-primary"
+                        >
+                          {rec.title}
+                        </Typography>
+                        <div className="flex items-center gap-2 text-xs text-foreground-muted">
+                          {rec.releaseDate && (
+                            <span>{rec.releaseDate.substring(0, 4)}</span>
+                          )}
+                          {rec.rating > 0 && (
+                            <span className="flex items-center gap-0.5">
+                              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                              {rec.rating.toFixed(1)}
+                            </span>
+                          )}
+                          <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Container>
+        </>
+      )}
+    </div>
+  );
+}
