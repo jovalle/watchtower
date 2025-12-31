@@ -25,6 +25,12 @@ Dockerfile*
 docker-compose*.yml
 .dockerignore
 
+# Test files
+test
+*.test.ts
+*.test.tsx
+vitest.config.ts
+
 # Misc
 *.md
 *.log
