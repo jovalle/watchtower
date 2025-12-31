@@ -1,18 +1,18 @@
 # syntax=docker/dockerfile:1
 
 # ----------------------------------------
-# Stage 1: Dependencies
+# Stage 1: Dependencies (use Bun for fast installs)
 # ----------------------------------------
 FROM oven/bun:1-alpine AS deps
 
 WORKDIR /app
 
-# Install dependencies based on lockfile
+# Install production dependencies
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 # ----------------------------------------
-# Stage 2: Builder
+# Stage 2: Builder (use Bun for fast builds)
 # ----------------------------------------
 FROM oven/bun:1-alpine AS builder
 
@@ -27,9 +27,9 @@ COPY . .
 RUN bun run build
 
 # ----------------------------------------
-# Stage 3: Production Runner
+# Stage 3: Production Runner (use Node.js for compatibility)
 # ----------------------------------------
-FROM oven/bun:1-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
@@ -58,4 +58,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:9001/ || exit 1
 
 # Start the application
-CMD ["bun", "run", "start"]
+CMD ["npm", "run", "start"]

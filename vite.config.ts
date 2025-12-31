@@ -21,6 +21,7 @@ export default defineConfig({
         v3_singleFetch: true,
         v3_lazyRouteDiscovery: true,
       },
+      ignoredRouteFiles: ["**/*.test.{ts,tsx}", "**/__tests__/**"],
     }),
     tsconfigPaths({
       // Ignore tmp directory which may contain reference projects
