@@ -18,7 +18,7 @@ export const tokens = {
   },
   accent: {
     primary: '#FDBE02', // Mango for primary actions
-    hover: '#FD9E02', // Darker mango for hover states
+    hover: '#FFD151', // Lighter mango for hover states
     foreground: '#1C1C1C', // Dark text on mango backgrounds
   },
   border: {
