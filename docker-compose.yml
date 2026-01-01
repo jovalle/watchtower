@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/jovalle/watchtower:latest
+    image: ghcr.io/jovalle/watchtower:${DOCKER_TAG:-latest}
     container_name: watchtower
     restart: unless-stopped
     ports:
@@ -12,7 +12,7 @@ services:
       - NODE_ENV=production
       - PORT=9001
       - SESSION_SECRET=${SESSION_SECRET:?"Please set SESSION_SECRET environment variable"}
-      - PLEX_SERVER_URL=${PLEX_SERVER_URL:?"Please set PLEX_SERVER_URL environment variable"}
+      - PLEX_SERVER_URL=${PLEX_SERVER_URL:-http://plex:32400}
       - PLEX_TOKEN=${PLEX_TOKEN:?"Please set PLEX_TOKEN environment variable"}
       - PLEX_CLIENT_ID=${PLEX_CLIENT_ID:-watchtower-001}
       # Optional: TMDB API key for recommendations (leave empty to disable)
