@@ -152,18 +152,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ];
 };
 
-function buildPlexImageUrl(
-  serverUrl: string,
-  token: string,
-  path: string | undefined,
-  width: number,
-  height: number
-): string {
-  if (!path) {
-    return "";
-  }
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | null {
   if (!durationMs) return null;
@@ -298,7 +288,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (showResult.success) {
       showTitle = showResult.data.title;
       showRatingKey = metadata.parentRatingKey;
-      showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, showResult.data.thumb, 400, 600);
+      showPosterUrl = buildPlexImageUrl(showResult.data.thumb);
       breadcrumbs.push({
         label: showTitle,
         href: `/app/media/show/${showRatingKey}`,
@@ -325,7 +315,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           if (showResult.success) {
             showTitle = showResult.data.title;
             showRatingKey = seasonResult.data.parentRatingKey;
-            showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, showResult.data.thumb, 400, 600);
+            showPosterUrl = buildPlexImageUrl(showResult.data.thumb);
           }
         }
       }
@@ -336,7 +326,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       showTitle = metadata.grandparentTitle;
       showRatingKey = metadata.grandparentRatingKey;
       if (metadata.grandparentThumb) {
-        showPosterUrl = buildPlexImageUrl(env.PLEX_SERVER_URL, token, metadata.grandparentThumb, 400, 600);
+        showPosterUrl = buildPlexImageUrl(metadata.grandparentThumb);
       }
     }
 
@@ -441,20 +431,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Build processed data for the view
   const loaderData: LoaderData = {
     metadata,
-    backdropUrl: buildPlexImageUrl(
-      env.PLEX_SERVER_URL,
-      token,
-      artPath,
-      1920,
-      1080
-    ),
-    posterUrl: buildPlexImageUrl(
-      env.PLEX_SERVER_URL,
-      token,
-      metadata.thumb,
-      400,
-      600
-    ),
+    backdropUrl: buildPlexImageUrl(artPath),
+    posterUrl: buildPlexImageUrl(metadata.thumb),
     year: metadata.year?.toString() ?? null,
     duration: formatRuntime(metadata.duration),
     rating: metadata.contentRating ?? null,
@@ -518,7 +496,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         index: season.index ?? 0,
         leafCount: season.leafCount ?? 0,
         viewedLeafCount: season.viewedLeafCount ?? 0,
-        thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, season.thumb, 300, 450),
+        thumb: buildPlexImageUrl(season.thumb),
       }));
 
       // Get episodes for the first unwatched season, or latest if all watched
@@ -548,7 +526,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               index: episode.index ?? 0,
               seasonIndex: episode.parentIndex ?? targetSeason.index ?? 0,
               duration: formatRuntime(episode.duration),
-              thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, episode.thumb, 400, 225),
+              thumb: buildPlexImageUrl(episode.thumb),
               summary: episode.summary,
               viewCount: episode.viewCount ?? 0,
               viewOffset: episode.viewOffset,
@@ -589,7 +567,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           index: episode.index ?? 0,
           seasonIndex: seasonIndex ?? 0,
           duration: formatRuntime(episode.duration),
-          thumb: buildPlexImageUrl(env.PLEX_SERVER_URL, token, episode.thumb, 400, 225),
+          thumb: buildPlexImageUrl(episode.thumb),
           summary: episode.summary,
           viewCount: episode.viewCount ?? 0,
           viewOffset: episode.viewOffset,
@@ -722,7 +700,7 @@ export default function MediaDetailPage() {
   const [onDeck, setOnDeck] = useState(initialOnDeck);
 
   const buildPhotoUrl = (thumbPath: string) => {
-    return buildPlexImageUrl(serverUrl, token, thumbPath, 200, 200);
+    return buildPlexImageUrl(thumbPath);
   };
 
   // Handle season change - fetch episodes for the selected season
@@ -753,7 +731,7 @@ export default function MediaDetailPage() {
                 index: episode.index ?? 0,
                 seasonIndex: episode.parentIndex ?? seasonIndex,
                 duration: episode.duration ? formatRuntime(episode.duration) : null,
-                thumb: buildPlexImageUrl(serverUrl, token, episode.thumb, 400, 225),
+                thumb: buildPlexImageUrl(episode.thumb),
                 summary: episode.summary,
                 viewCount: episode.viewCount ?? 0,
                 viewOffset: episode.viewOffset,

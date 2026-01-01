@@ -197,14 +197,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       tmdbClient,
       'all',
       (thumb, t) => {
-        const localThumb = thumb?.startsWith('/library/')
-          ? `${
-              env.PLEX_SERVER_URL
-            }/photo/:/transcode?width=300&height=450&minSize=1&upscale=1&url=${encodeURIComponent(
-              thumb,
-            )}&X-Plex-Token=${t}`
-          : buildPlexImageUrl(thumb, t);
-        return localThumb;
+        // Local library items use the image proxy
+        if (thumb?.startsWith('/library/')) {
+          return `/api/plex/image?path=${encodeURIComponent(thumb)}&width=300&height=450`;
+        }
+        // Remote Plex Discover items use the public API directly
+        return buildPlexImageUrl(thumb, t);
       },
       localItemsByGuid,
       localItemsByTitleYear,

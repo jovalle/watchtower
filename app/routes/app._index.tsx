@@ -65,19 +65,10 @@ interface LoaderData {
   billboardCandidates: BillboardData[];
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
-  serverUrl: string;
 }
 
-function buildPlexImageUrl(
-  serverUrl: string,
-  token: string,
-  path: string | undefined,
-  width: number,
-  height: number
-): string {
-  if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -92,8 +83,6 @@ function formatRuntime(durationMs?: number): string | undefined {
 
 function transformToView(
   item: PlexMediaItem,
-  serverUrl: string,
-  token: string,
   watchlistGuids: Set<string>,
   isContinueWatching = false,
   logoUrl?: string
@@ -110,13 +99,7 @@ function transformToView(
     title: isEpisode ? item.grandparentTitle || item.title : item.title,
     year: item.year?.toString(),
     type: item.type as "movie" | "show" | "episode",
-    backdropUrl: buildPlexImageUrl(
-      serverUrl,
-      token,
-      item.art || item.grandparentThumb || item.thumb,
-      800,
-      400
-    ),
+    backdropUrl: buildPlexImageUrl(item.art || item.grandparentThumb || item.thumb),
     progress,
     viewOffset: item.viewOffset,
     viewCount: item.viewCount ?? 0,
@@ -151,10 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (cached && !cached.isStale) {
     // Fresh cache - return immediately
-    return json<LoaderData>({
-      ...cached.data,
-      serverUrl: env.PLEX_SERVER_URL,
-    });
+    return json<LoaderData>(cached.data);
   }
 
   const client = new PlexClient({
@@ -167,10 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // For now, we'll just return stale data and let the next request get fresh
   if (cached) {
     // Return stale data - background refresh will happen on next navigation
-    return json<LoaderData>({
-      ...cached.data,
-      serverUrl: env.PLEX_SERVER_URL,
-    });
+    return json<LoaderData>(cached.data);
   }
 
   // Fetch data in parallel
@@ -193,13 +170,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : [];
 
   const continueWatching: MediaItemView[] = sortedOnDeck.map((item) =>
-    transformToView(item, env.PLEX_SERVER_URL, token, watchlistGuids, true)
+    transformToView(item, watchlistGuids, true)
   );
 
   const recentlyAdded: MediaItemView[] = recentlyAddedResult.success
     ? recentlyAddedResult.data
         .filter((item) => item.type === "movie" || item.type === "show")
-        .map((item) => transformToView(item, env.PLEX_SERVER_URL, token, watchlistGuids, false))
+        .map((item) => transformToView(item, watchlistGuids, false))
     : [];
 
   // Fetch logos for all items (continue watching + recently added)
@@ -296,7 +273,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     billboardCandidates: limitedCandidates,
     continueWatching,
     recentlyAdded,
-    serverUrl: env.PLEX_SERVER_URL,
   });
 }
 
