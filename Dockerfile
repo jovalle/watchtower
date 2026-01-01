@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Install production dependencies
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # ----------------------------------------
 # Stage 2: Builder (use Bun for fast builds)
