@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Play, Plus, Check, Star, X } from "lucide-react";
+import { ProxiedImage } from "~/components/ui";
 
 interface MediaCardProps {
   /** Thumbnail URL - should be landscape/backdrop image for horizontal cards */
@@ -134,10 +135,10 @@ export function MediaCard({
         className="relative aspect-[2/1] overflow-hidden rounded-xl bg-background-elevated shadow-lg transition-[box-shadow,ring-color] duration-200 ease-out group-hover:shadow-2xl group-hover:ring-2 group-hover:ring-white/50 group-focus:shadow-2xl group-focus:ring-2 group-focus:ring-accent-primary"
       >
         {/* Thumbnail image */}
-        <img
+        <ProxiedImage
           src={imageUrl}
           alt={title}
-          className="h-full w-full object-cover"
+          className="h-full w-full"
           loading="lazy"
         />
 
