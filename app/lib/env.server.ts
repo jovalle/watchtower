@@ -25,9 +25,10 @@ function getEnvVarWithDefault(name: string, defaultValue: string): string {
 export const env = {
   /**
    * Plex server URL (e.g., http://192.168.1.100:32400)
+   * Defaults to http://plex:32400 for Docker deployments
    */
   get PLEX_SERVER_URL(): string {
-    return getEnvVar("PLEX_SERVER_URL");
+    return getEnvVarWithDefault("PLEX_SERVER_URL", "http://plex:32400");
   },
 
   /**
