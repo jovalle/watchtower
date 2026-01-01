@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "export-library": "tsx scripts/export-library.ts"
+    "export-library": "tsx scripts/export-library.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@remix-run/node": "^2.15.2",
@@ -30,7 +31,6 @@
   "devDependencies": {
     "@remix-run/dev": "^2.15.2",
     "@semantic-release/changelog": "^6.0.3",
-    "conventional-changelog-conventionalcommits": "^8.0.0",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/git": "^10.0.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -42,13 +42,16 @@
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.16",
     "autoprefixer": "^10.4.20",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
     "eslint": "^8.57.1",
     "eslint-import-resolver-typescript": "^3.6.3",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^5.0.0",
+    "husky": "^9.1.7",
     "jsdom": "^27.4.0",
+    "lint-staged": "^16.2.7",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "tsx": "^4.19.2",
@@ -62,5 +65,10 @@
   },
   "overrides": {
     "vite": "^6.4.1"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --cache --cache-location ./node_modules/.cache/eslint --fix"
+    ]
   }
 }
