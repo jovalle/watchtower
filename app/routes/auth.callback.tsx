@@ -17,7 +17,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // No pending auth flow - redirect to login
   if (!pinId) {
-    return redirect("/auth/login");
+    return redirect("/auth/redirect");
   }
 
   // Check if user completed authentication
@@ -26,7 +26,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!authToken) {
     // User cancelled or timeout - clear pending state and redirect to login
     session.unset("pendingPinId");
-    return redirect("/auth/login", {
+    return redirect("/auth/redirect", {
       headers: {
         "Set-Cookie": await commitSession(session),
       },

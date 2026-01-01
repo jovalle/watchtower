@@ -11,7 +11,7 @@ import { requirePlexToken, clearSession } from "~/lib/auth/session.server";
 import { getPlexUser, type PlexUser } from "~/lib/auth/plex.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Require authentication - redirects to /auth/login if no token
+  // Require authentication - redirects to Plex login if no token
   const token = await requirePlexToken(request);
 
   // Validate token by fetching user profile from plex.tv
