@@ -85,16 +85,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ];
 };
 
-function buildPlexImageUrl(
-  serverUrl: string,
-  token: string,
-  path: string | undefined,
-  width: number,
-  height: number
-): string {
-  if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = await requirePlexToken(request);
@@ -221,13 +213,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return json<LoaderData>({
     streamUrl: playbackInfo.streamUrl,
     title: displayTitle,
-    posterUrl: buildPlexImageUrl(
-      env.PLEX_SERVER_URL,
-      token,
-      metadata.art || metadata.thumb,
-      1280,
-      720
-    ),
+    posterUrl: buildPlexImageUrl(metadata.art || metadata.thumb),
     durationMs: metadata.duration || null,
     resumePositionSeconds: resumeSeconds,
     type: metadata.type as "movie" | "show" | "episode",

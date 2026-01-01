@@ -660,10 +660,10 @@ export function VideoPlayer({
    */
   const buildThumbUrl = useCallback(
     (thumbPath?: string) => {
-      if (!thumbPath || !serverUrl || !token) return undefined;
-      return `${serverUrl}/photo/:/transcode?width=240&height=135&minSize=1&upscale=1&url=${encodeURIComponent(thumbPath)}&X-Plex-Token=${token}`;
+      if (!thumbPath) return undefined;
+      return `/api/plex/image?path=${encodeURIComponent(thumbPath)}&width=240&height=135`;
     },
-    [serverUrl, token]
+    []
   );
 
   // Progress bar handlers

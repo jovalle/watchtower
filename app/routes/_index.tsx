@@ -22,13 +22,12 @@ interface LoaderData {
   trending: TrendingItem[];
 }
 
-function buildPlexImageUrl(serverUrl: string, token: string, path: string | undefined): string {
-  if (!path) {
-    return 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300&h=450&fit=crop';
-  }
-  return `${serverUrl}/photo/:/transcode?width=300&height=450&minSize=1&upscale=1&url=${encodeURIComponent(
-    path,
-  )}&X-Plex-Token=${token}`;
+// Use shared image URL helper
+import { buildPlexImageUrl, PLACEHOLDER_IMAGE } from "~/lib/plex/images";
+
+function buildPlexImageUrlWithFallback(path: string | undefined): string {
+  if (!path) return PLACEHOLDER_IMAGE;
+  return buildPlexImageUrl(path);
 }
 
 function formatRuntime(durationMs?: number): string {
@@ -210,7 +209,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             rank: index + 1,
             title: item.title,
             year: item.year?.toString() || '',
-            poster: buildPlexImageUrl(env.PLEX_SERVER_URL, env.PLEX_TOKEN, item.thumb),
+            poster: buildPlexImageUrl(item.thumb),
             genres: item.Genre?.map((g: { tag: string }) => g.tag) || [],
             runtime:
               target.type === 'show' && item.childCount
@@ -262,7 +261,7 @@ export default function Index() {
             </p>
 
             {/* CTA Button */}
-            <Form method="post" action="/auth/login" className="pt-4">
+            <Form method="post" action="/auth/redirect" className="pt-4">
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -400,7 +399,7 @@ export default function Index() {
           <p className="mb-6 text-foreground-secondary">
             Sign in with your Plex account to get started.
           </p>
-          <Form method="post" action="/auth/login">
+          <Form method="post" action="/auth/redirect">
             <button
               type="submit"
               disabled={isSubmitting}

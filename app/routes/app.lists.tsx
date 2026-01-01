@@ -38,14 +38,12 @@ interface LoaderData {
 }
 
 function buildImageUrl(
-  serverUrl: string,
-  token: string,
   path: string | undefined | null,
   width: number = 300,
   height: number = 450
 ): string | null {
   if (!path) return null;
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
+  return `/api/plex/image?path=${encodeURIComponent(path)}&width=${width}&height=${height}`;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -64,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ratingKey: p.ratingKey,
         title: p.title,
         itemCount: p.leafCount,
-        thumb: buildImageUrl(env.PLEX_SERVER_URL, token, p.composite, 300, 300),
+        thumb: buildImageUrl(p.composite, 300, 300),
         type: "playlist" as const,
       }))
     : [];
@@ -83,7 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               ratingKey: c.ratingKey,
               title: c.title,
               itemCount: c.childCount,
-              thumb: buildImageUrl(env.PLEX_SERVER_URL, token, c.thumb, 300, 450),
+              thumb: buildImageUrl(c.thumb, 300, 450),
               type: "collection",
               subtype: c.subtype,
             });
