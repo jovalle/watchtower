@@ -7,10 +7,20 @@ import {
   ScrollRestoration,
   useRouteError,
 } from "@remix-run/react";
-import type { LinksFunction } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 
 import "./tailwind.css";
 import { Shell } from "~/components/layout";
+import { getPlexToken } from "~/lib/auth/session.server";
+import { runStartupChecks } from "~/lib/startup.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  // Run startup checks on first request
+  const token = await getPlexToken(request);
+  await runStartupChecks(token ?? undefined);
+  return json({});
+}
 
 export const links: LinksFunction = () => [
   { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
