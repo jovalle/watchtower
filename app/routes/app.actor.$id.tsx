@@ -51,16 +51,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ];
 };
 
-function buildPlexImageUrl(
-  serverUrl: string,
-  token: string,
-  path: string | undefined,
-  width: number,
-  height: number
-): string {
-  if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -88,19 +80,17 @@ function formatReleaseDate(dateStr?: string): string | undefined {
 }
 
 function transformToView(
-  item: PlexMediaItem,
-  serverUrl: string,
-  token: string
+  item: PlexMediaItem
 ): MediaItemView {
   const isShow = item.type === "show";
   return {
     ratingKey: item.ratingKey,
     title: item.title,
     year: item.year?.toString(),
-    posterUrl: buildPlexImageUrl(serverUrl, token, item.thumb, 400, 600),
+    posterUrl: buildPlexImageUrl(item.thumb),
     type: isShow ? "show" : "movie",
     details: {
-      backdropUrl: buildPlexImageUrl(serverUrl, token, item.art, 800, 450),
+      backdropUrl: buildPlexImageUrl(item.art),
       releaseDate: formatReleaseDate(item.originallyAvailableAt),
       runtime: !isShow ? formatRuntime(item.duration) : undefined,
       seasons: isShow ? item.childCount : undefined,
@@ -152,7 +142,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const result = await client.getLibraryItemsByActor(movieLibrary.key, id);
     if (result.success) {
       for (const item of result.data) {
-        movies.push(transformToView(item, env.PLEX_SERVER_URL, token));
+        movies.push(transformToView(item));
       }
     }
   }
@@ -162,7 +152,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const result = await client.getLibraryItemsByActor(tvLibrary.key, id);
     if (result.success) {
       for (const item of result.data) {
-        shows.push(transformToView(item, env.PLEX_SERVER_URL, token));
+        shows.push(transformToView(item));
       }
     }
   }

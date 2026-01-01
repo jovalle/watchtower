@@ -75,17 +75,8 @@ const TABS: { id: TabId; label: string; icon: typeof Flame }[] = [
   { id: "worth", label: "Worth the Wait", icon: Star },
 ];
 
-function buildPlexImageUrl(serverUrl: string, token: string, path: string | undefined): string {
-  if (!path) {
-    return "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=600&fit=crop";
-  }
-  return `${serverUrl}/photo/:/transcode?width=400&height=600&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
-
-function buildBackdropUrl(serverUrl: string, token: string, path: string | undefined): string {
-  if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=800&height=450&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -193,15 +184,15 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
       ratingKey: item.ratingKey,
       title: isEpisode ? item.grandparentTitle || item.title : item.title,
       year: item.year?.toString(),
-      posterUrl: buildPlexImageUrl(env.PLEX_SERVER_URL, token, item.thumb),
-      backdropUrl: buildBackdropUrl(env.PLEX_SERVER_URL, token, item.art || item.grandparentArt || item.thumb),
+      posterUrl: buildPlexImageUrl(item.thumb),
+      backdropUrl: buildPlexImageUrl(item.art || item.grandparentArt || item.thumb),
       type,
       audienceRating: item.audienceRating,
       addedAt: item.addedAt,
       showTitle: isEpisode ? item.grandparentTitle : undefined,
       seasonEpisode: isEpisode ? `S${item.parentIndex}:E${item.index}` : undefined,
       details: {
-        backdropUrl: buildBackdropUrl(env.PLEX_SERVER_URL, token, item.art || item.grandparentArt),
+        backdropUrl: buildPlexImageUrl(item.art || item.grandparentArt),
         runtime: type === "movie" ? formatRuntime(item.duration) : undefined,
         seasons: type === "show" ? item.childCount : undefined,
         episodes: type === "show" ? item.leafCount : undefined,

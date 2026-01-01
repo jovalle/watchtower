@@ -52,14 +52,12 @@ interface LoaderData {
 }
 
 function buildImageUrl(
-  serverUrl: string,
-  token: string,
   path: string | undefined,
   width: number = 300,
   height: number = 450
 ): string {
   if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=${width}&height=${height}&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
+  return `/api/plex/image?path=${encodeURIComponent(path)}&width=${width}&height=${height}`;
 }
 
 function formatRuntime(durationMs?: number): string | undefined {
@@ -187,8 +185,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     title: item.title,
     year: item.year,
     type: item.type,
-    posterUrl: buildImageUrl(env.PLEX_SERVER_URL, token, item.thumb),
-    backdropUrl: buildImageUrl(env.PLEX_SERVER_URL, token, item.art, 800, 450),
+    posterUrl: buildImageUrl(item.thumb),
+    backdropUrl: buildImageUrl(item.art, 800, 450),
     viewCount: item.viewCount ?? 0,
     leafCount: item.leafCount,
     viewedLeafCount: item.viewedLeafCount,

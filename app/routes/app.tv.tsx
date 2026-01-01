@@ -80,17 +80,8 @@ const SORT_OPTIONS = [
 ];
 
 
-function buildPlexImageUrl(serverUrl: string, token: string, path: string | undefined): string {
-  if (!path) {
-    return "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=600&fit=crop";
-  }
-  return `${serverUrl}/photo/:/transcode?width=400&height=600&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
-
-function buildBackdropUrl(serverUrl: string, token: string, path: string | undefined): string {
-  if (!path) return "";
-  return `${serverUrl}/photo/:/transcode?width=800&height=450&minSize=1&upscale=1&url=${encodeURIComponent(path)}&X-Plex-Token=${token}`;
-}
+// Use shared image URL helper
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatReleaseDate(dateStr?: string): string | undefined {
   if (!dateStr) return undefined;
@@ -184,7 +175,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
         guid: item.guid,
         title: item.title,
         year: item.year?.toString(),
-        posterUrl: buildPlexImageUrl(env.PLEX_SERVER_URL, token, item.thumb),
+        posterUrl: buildPlexImageUrl(item.thumb),
         // logoUrl would come from TMDB integration (Phase 6)
         logoUrl: undefined,
         viewCount: item.viewCount ?? 0,
@@ -197,7 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
         releaseDate: item.originallyAvailableAt,
         addedAt: item.addedAt,
         details: {
-          backdropUrl: buildBackdropUrl(env.PLEX_SERVER_URL, token, item.art),
+          backdropUrl: buildPlexImageUrl(item.art),
           releaseDate: formatReleaseDate(item.originallyAvailableAt),
           seasons: item.childCount,
           episodes: item.leafCount,
