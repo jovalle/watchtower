@@ -23,12 +23,7 @@ interface LoaderData {
 }
 
 // Use shared image URL helper
-import { buildPlexImageUrl, PLACEHOLDER_IMAGE } from "~/lib/plex/images";
-
-function buildPlexImageUrlWithFallback(path: string | undefined): string {
-  if (!path) return PLACEHOLDER_IMAGE;
-  return buildPlexImageUrl(path);
-}
+import { buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string {
   if (!durationMs) return '';
