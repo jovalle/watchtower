@@ -64,7 +64,7 @@ export async function getPlexToken(request: Request): Promise<string | null> {
 export async function requirePlexToken(request: Request): Promise<string> {
   const token = await getPlexToken(request);
   if (!token) {
-    throw redirect("/auth/login");
+    throw redirect("/auth/redirect");
   }
   return token;
 }

@@ -1,20 +1,14 @@
 /**
- * Auto-redirect route - immediately initiates Plex OAuth flow.
- * Used when a user's session expires mid-session to skip the login button.
+ * Auth redirect route - initiates Plex OAuth flow.
+ * Supports both GET (auto-redirect) and POST (form submission) requests.
  */
 
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 import { getSession, commitSession, getPlexToken } from "~/lib/auth/session.server";
 import { initiateLogin } from "~/lib/auth/plex.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  // If already logged in, redirect to authenticated home
-  const token = await getPlexToken(request);
-  if (token) {
-    return redirect("/app");
-  }
-
+async function initiatePlexAuth(request: Request) {
   // Build the callback URL based on the request origin
   const url = new URL(request.url);
   const callbackUrl = `${url.origin}/auth/callback`;
@@ -32,4 +26,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       "Set-Cookie": await commitSession(session),
     },
   });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  return initiatePlexAuth(request);
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  // If already logged in, redirect to authenticated home
+  const token = await getPlexToken(request);
+  if (token) {
+    return redirect("/app");
+  }
+
+  return initiatePlexAuth(request);
 }
