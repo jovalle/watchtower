@@ -3,6 +3,7 @@ import { Play, Plus, Check, Star, List, ExternalLink } from "lucide-react";
 import type { WatchlistSource } from "~/lib/watchlist/types";
 import { SourceBadge } from "./SourceBadge";
 import { ListSelectorModal } from "./ListSelectorModal";
+import { ProxiedImage } from "~/components/ui";
 
 /**
  * Format a timestamp as MM/DD/YYYY date
@@ -235,10 +236,10 @@ export function PosterCard({
         onMouseLeave={handleMouseLeave}
       >
         {/* Poster image */}
-        <img
+        <ProxiedImage
           src={posterUrl}
           alt={title}
-          className="h-full w-full object-cover"
+          className="h-full w-full"
           loading="lazy"
         />
 
