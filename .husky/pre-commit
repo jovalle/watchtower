@@ -1,3 +1,4 @@
+bun install --frozen-lockfile || { echo "Lockfile out of sync. Run 'bun install' and commit bun.lock"; exit 1; }
 bunx lint-staged
 bun run typecheck
 bun test

@@ -1,5 +1,5 @@
 .PHONY: help install dev build start lint lint-fix typecheck test test-watch test-coverage \
-        docker-build docker-up docker-down docker-logs docker-clean clean
+        check ci docker-build docker-up docker-down docker-logs docker-clean clean
 
 # Default target
 .DEFAULT_GOAL := help
@@ -57,6 +57,11 @@ test-coverage:
 
 ## check: Run all checks (lint, typecheck, test)
 check: lint typecheck test
+
+## ci: Run CI pipeline locally (frozen lockfile + all checks)
+ci:
+	bun install --frozen-lockfile
+	$(MAKE) check
 
 ## docker-build: Build Docker image
 docker-build:
