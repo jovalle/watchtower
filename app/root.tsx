@@ -12,6 +12,7 @@ import { json } from "@remix-run/node";
 
 import "./tailwind.css";
 import { Shell } from "~/components/layout";
+import { InstallPrompt } from "~/components/pwa";
 import { getPlexToken } from "~/lib/auth/session.server";
 import { runStartupChecks } from "~/lib/startup.server";
 
@@ -53,6 +54,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {children}
         <ScrollRestoration />
         <Scripts />
+        <InstallPrompt />
       </body>
     </html>
   );
