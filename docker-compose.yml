@@ -3,23 +3,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/jovalle/watchtower:${DOCKER_TAG:-latest}
+    cap_drop:
+      - ALL
     container_name: watchtower
-    restart: unless-stopped
-    ports:
-      - "${PORT:-9001}:9001"
     environment:
-      - NODE_ENV=production
-      - PORT=9001
-      - SESSION_SECRET=${SESSION_SECRET:?"Please set SESSION_SECRET environment variable"}
-      - PLEX_SERVER_URL=${PLEX_SERVER_URL:-http://plex:32400}
-      - PLEX_TOKEN=${PLEX_TOKEN:?"Please set PLEX_TOKEN environment variable"}
-      - PLEX_CLIENT_ID=${PLEX_CLIENT_ID:-watchtower-001}
-      # Optional: TMDB API key for recommendations (leave empty to disable)
-      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      IMDB_WATCHLISTS: ${WATCHTOWER_IMDB_WATCHLISTS:-}
+      NODE_ENV: production
+      PLEX_CLIENT_ID: ${WATCHTOWER_PLEX_CLIENT_ID:-watchtower-001}
+      PLEX_SERVER_URL: ${WATCHTOWER_PLEX_SERVER_URL:http://plex:32400}
+      PLEX_TOKEN: ${WATCHTOWER_PLEX_TOKEN:?"plex token not defined"}
+      PORT: ${WATCHTOWER_PORT:-9001}
+      SESSION_SECRET: ${WATCHTOWER_SESSION_SECRET:?watchtower session secret not defined}
+      TMDB_API_KEY: ${WATCHTOWER_TMDB_API_KEY:-} # Optional: TMDB API key for recommendations (leave empty to disable)
+      TRAKT_CLIENT_ID: ${WATCHTOWER_TRAKT_CLIENT_ID:-}
+      TRAKT_CLIENT_SECRET: ${WATCHTOWER_TRAKT_CLIENT_SECRET:-}
+      TRAKT_USERNAME: ${WATCHTOWER_TRAKT_USERNAME:-}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9001/"]
       interval: 30s
-      timeout: 3s
       retries: 3
       start_period: 10s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9001/"]
+      timeout: 3s
+    image: ghcr.io/jovalle/watchtower:${DOCKER_TAG:-latest}
+    ports:
+      - "${PORT:-9001}:9001"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: 1001:1001
+    volumes:
+      - ./data:/data
