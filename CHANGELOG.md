@@ -1,3 +1,23 @@
+## [1.2.0](https://github.com/jovalle/watchtower/compare/v1.1.0...v1.2.0) (2026-01-02)
+
+### 🚀 Features
+
+* **dashboard:** add real-time streaming sessions dashboard ([ad5e618](https://github.com/jovalle/watchtower/commit/ad5e61812a56237964aca558e89734fac47bb839))
+* **library:** add macOS dock-style magnification to alphabet sidebar ([f37723f](https://github.com/jovalle/watchtower/commit/f37723f5753641546d004a44febc6780765d1f96))
+* **plex:** add streaming session types and API client methods ([f7c0910](https://github.com/jovalle/watchtower/commit/f7c0910bcc50f5b0f07d09104338bb6f26358bd8))
+* **pwa:** add progressive web app support with install prompt ([0550301](https://github.com/jovalle/watchtower/commit/0550301ef8b882e071bea2bdb9e2643ababdd663))
+* **ui:** add FilterDropdown multi-select component ([1db9f18](https://github.com/jovalle/watchtower/commit/1db9f18f2bf9a1986384ebe853b5462f56c7d645))
+
+### 🐛 Bug Fixes
+
+* **player:** use named imports from hls.js to resolve lint warnings ([d7a8d4d](https://github.com/jovalle/watchtower/commit/d7a8d4dcefe5da6ceec8237cc32847df7cc09a78))
+* **ui:** improve ProxiedImage empty src handling and cache detection ([3a9d329](https://github.com/jovalle/watchtower/commit/3a9d32966bcac84ce1b92b7ff5f0028e2cf4a5a2))
+* **ui:** minor tweaks to header, library, and media components ([c59ac06](https://github.com/jovalle/watchtower/commit/c59ac0671efe60379d16c28c62023d079f9e9283))
+
+### ♻️ Refactoring
+
+* **media:** reorganize media detail and watchlist pages ([5f17298](https://github.com/jovalle/watchtower/commit/5f17298512b669f705a4e9c49fbff18bd1d5be05))
+
 ## [1.1.0](https://github.com/jovalle/watchtower/compare/v1.0.2...v1.1.0) (2026-01-01)
 
 ### 🚀 Features
