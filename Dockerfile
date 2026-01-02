@@ -29,7 +29,7 @@ RUN bun run build
 # ----------------------------------------
 # Stage 3: Production Runner (use Node.js for compatibility)
 # ----------------------------------------
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 
