@@ -30,15 +30,26 @@ export function ProxiedImage({
   loading = "lazy",
   fallback,
 }: ProxiedImageProps) {
-  const [status, setStatus] = useState<ImageStatus>("loading");
-  const [error, setError] = useState<ImageError | null>(null);
+  // Initialize state based on whether src is valid
+  const [status, setStatus] = useState<ImageStatus>(() => src ? "loading" : "error");
+  const [error, setError] = useState<ImageError | null>(() =>
+    src ? null : { type: "not_found", message: "No image URL" }
+  );
   const [retryCount, setRetryCount] = useState(0);
-  const [currentSrc, setCurrentSrc] = useState(src);
+  const [currentSrc, setCurrentSrc] = useState(src || "");
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const maxRetries = 2;
 
   // Reset when src changes
   useEffect(() => {
+    // Handle empty/missing src immediately - don't try to load
+    if (!src) {
+      setStatus("error");
+      setError({ type: "not_found", message: "No image URL" });
+      setCurrentSrc("");
+      return;
+    }
+
     setStatus("loading");
     setError(null);
     setRetryCount(0);
@@ -141,6 +152,17 @@ export function ProxiedImage({
   const isLoading = status === "loading" || status === "retrying";
   const hasError = status === "error";
 
+  // Ref to check if image is already loaded (from browser cache)
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Check if image is already loaded from cache on mount/src change
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current?.naturalWidth > 0 && status === "loading") {
+      setStatus("loaded");
+      setError(null);
+    }
+  }, [currentSrc, status]);
+
   // For images to fill containers properly with absolute positioning,
   // we render the image directly without a wrapper div when no error handling UI is needed
   return (
@@ -158,6 +180,7 @@ export function ProxiedImage({
 
       {/* Actual image - fills parent container */}
       <img
+        ref={imgRef}
         src={currentSrc}
         alt={alt}
         className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
