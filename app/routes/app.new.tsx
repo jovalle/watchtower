@@ -210,9 +210,15 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
     // Thumb paths look like "/library/metadata/xxx/thumb/yyy" and need the discover URL + token
     const buildDiscoverImageUrl = (path: string | undefined): string => {
       if (!path) return "";
+      // Relative paths starting with / go to Plex Discover API
       if (path.startsWith("/")) {
         return `${PLEX_DISCOVER_URL}${path}?X-Plex-Token=${token}`;
       }
+      // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        return `/api/plex/image?path=${encodeURIComponent(path)}`;
+      }
+      // Fallback for any other format
       return path;
     };
 
