@@ -325,6 +325,95 @@ export interface PlexStream {
 }
 
 // ============================================================================
+// Session/Activity Types
+// ============================================================================
+
+/**
+ * Session information for active playback.
+ */
+export interface PlexSession {
+  id: string;
+  bandwidth?: number;
+  location?: "lan" | "wan";
+}
+
+/**
+ * Player device information for active sessions.
+ */
+export interface PlexPlayer {
+  address?: string;
+  device?: string;
+  machineIdentifier: string;
+  model?: string;
+  platform?: string;
+  platformVersion?: string;
+  product?: string;
+  profile?: string;
+  state: "playing" | "paused" | "buffering";
+  title?: string;
+  local?: boolean;
+  relayed?: boolean;
+  secure?: boolean;
+  userID?: number;
+}
+
+/**
+ * Transcode session details for active playback.
+ */
+export interface PlexTranscodeSession {
+  key: string;
+  throttled?: boolean;
+  complete?: boolean;
+  progress?: number;
+  speed?: number;
+  size?: number;
+  videoDecision?: "transcode" | "copy" | "directplay";
+  audioDecision?: "transcode" | "copy" | "directplay";
+  subtitleDecision?: "transcode" | "copy" | "burn";
+  protocol?: string;
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  audioChannels?: number;
+  width?: number;
+  height?: number;
+  transcodeHwRequested?: boolean;
+  transcodeHwFullPipeline?: boolean;
+}
+
+/**
+ * User information for active sessions.
+ */
+export interface PlexSessionUser {
+  id: string;
+  title: string;
+  thumb?: string;
+}
+
+/**
+ * Active playback session combining media, player, session, and user info.
+ * Extends PlexMediaItem with session-specific properties.
+ */
+export interface PlexActiveSession extends PlexMediaItem {
+  Session?: PlexSession;
+  Player?: PlexPlayer;
+  User?: PlexSessionUser;
+  TranscodeSession?: PlexTranscodeSession;
+  /** Session ID for this playback */
+  sessionKey?: string;
+}
+
+/**
+ * Response wrapper for /status/sessions endpoint.
+ */
+export interface PlexSessionsResponse {
+  MediaContainer: {
+    size: number;
+    Metadata?: PlexActiveSession[];
+  };
+}
+
+// ============================================================================
 // Watchlist Types (from discover.provider.plex.tv)
 // ============================================================================
 
@@ -428,5 +517,38 @@ export interface PlexCollectionsResponse {
   MediaContainer: {
     size: number;
     Metadata?: PlexCollection[];
+  };
+}
+
+// ============================================================================
+// Session History Types
+// ============================================================================
+
+/**
+ * History item from the session history endpoint.
+ * Represents a completed watch session.
+ */
+export interface PlexHistoryItem {
+  historyKey: string;
+  ratingKey: string;
+  title: string;
+  type: "movie" | "episode";
+  thumb?: string;
+  parentTitle?: string;      // Show name for episodes
+  grandparentTitle?: string; // Show name for episodes
+  index?: number;            // Episode number
+  parentIndex?: number;      // Season number
+  viewedAt: number;          // Unix timestamp
+  accountID: number;
+  deviceID: number;
+}
+
+/**
+ * Response wrapper for session history endpoint.
+ */
+export interface PlexHistoryResponse {
+  MediaContainer: {
+    size: number;
+    Metadata?: PlexHistoryItem[];
   };
 }

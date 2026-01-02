@@ -24,6 +24,8 @@ import type {
   PlexPlaylistsResponse,
   PlexCollection,
   PlexCollectionsResponse,
+  PlexActiveSession,
+  PlexSessionsResponse,
 } from "./types";
 import { QUALITY_PROFILES } from "./types";
 
@@ -1230,6 +1232,85 @@ export class PlexClient {
     return {
       success: true,
       data: result.data.MediaContainer.Metadata || [],
+    };
+  }
+
+  // ============================================================================
+  // Session/Activity Methods
+  // ============================================================================
+
+  /**
+   * Get currently active playback sessions on the server.
+   * Returns all media currently being played by any user.
+   */
+  async getSessions(): Promise<PlexResult<PlexActiveSession[]>> {
+    const result = await this.request<PlexSessionsResponse>("/status/sessions");
+
+    if (!result.success) {
+      return result;
+    }
+
+    return {
+      success: true,
+      data: result.data.MediaContainer.Metadata || [],
+    };
+  }
+
+  /**
+   * Get recently viewed items across all library sections.
+   * Queries each section for items sorted by lastViewedAt descending.
+   *
+   * @param options.limit - Maximum number of items to return (default 10, max 50)
+   * @param options.offset - Number of items to skip for pagination (default 0)
+   */
+  async getRecentlyViewed(options: { limit?: number; offset?: number } = {}): Promise<PlexResult<{ items: PlexMediaItem[]; hasMore: boolean }>> {
+    const { limit = 10, offset = 0 } = options;
+    const clampedLimit = Math.min(Math.max(1, limit), 50);
+
+    // Get all library sections
+    const librariesResult = await this.getLibraries();
+    if (!librariesResult.success) {
+      return librariesResult;
+    }
+
+    // Query each video library section for recently viewed items
+    // We need to fetch enough items to cover offset + limit
+    const fetchSize = offset + clampedLimit + 10; // Fetch extra to ensure we have enough
+    const allItems: PlexMediaItem[] = [];
+
+    for (const library of librariesResult.data) {
+      // Only query movie and show libraries
+      if (library.type !== "movie" && library.type !== "show") {
+        continue;
+      }
+
+      const params = new URLSearchParams();
+      params.set("sort", "lastViewedAt:desc");
+      params.set("lastViewedAt>>", "0"); // Only items that have been viewed
+      params.set("X-Plex-Container-Size", fetchSize.toString());
+
+      const result = await this.request<PlexLibraryItemsResponse>(
+        `/library/sections/${library.key}/all?${params.toString()}`
+      );
+
+      if (result.success) {
+        const items = result.data.MediaContainer.Metadata || [];
+        allItems.push(...items);
+      }
+    }
+
+    // Sort combined results by lastViewedAt descending
+    const sorted = allItems
+      .filter(item => item.lastViewedAt)
+      .sort((a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0));
+
+    // Apply offset and limit for pagination
+    const paginated = sorted.slice(offset, offset + clampedLimit);
+    const hasMore = sorted.length > offset + clampedLimit;
+
+    return {
+      success: true,
+      data: { items: paginated, hasMore },
     };
   }
 }
