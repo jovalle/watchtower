@@ -1,3 +1,9 @@
+## [1.2.1](https://github.com/jovalle/watchtower/compare/v1.2.0...v1.2.1) (2026-01-02)
+
+### 🐛 Bug Fixes
+
+* proxy absolute image URLs to prevent mixed content errors ([9f43d3a](https://github.com/jovalle/watchtower/commit/9f43d3a05d328d9c6f53ab9f04df02de2f2afa3c))
+
 ## [1.2.0](https://github.com/jovalle/watchtower/compare/v1.1.0...v1.2.0) (2026-01-02)
 
 ### 🚀 Features
