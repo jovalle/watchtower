@@ -7,8 +7,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink, Link } from '@remix-run/react';
-import { Menu, Search, Bell } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 import { UserMenu } from '~/components/UserMenu';
+import { StreamingDashboard } from '~/components/StreamingDashboard';
 import { Container } from './Container';
 import { MobileMenu } from './MobileMenu';
 import type { PlexUser } from '~/lib/auth/plex.server';
@@ -121,13 +122,8 @@ export function Header({ user }: HeaderProps) {
                 <Search className="h-5 w-5" />
               </button>
 
-              {/* Notifications icon (future) */}
-              <button
-                className="hidden rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary sm:block"
-                aria-label="Notifications"
-              >
-                <Bell className="h-5 w-5" />
-              </button>
+              {/* Streaming Dashboard */}
+              <StreamingDashboard />
 
               {/* User Menu - visible on all sizes */}
               <div className="hidden sm:block">
