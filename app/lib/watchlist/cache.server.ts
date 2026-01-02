@@ -6,12 +6,12 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as crypto from "crypto";
 import { env } from "~/lib/env.server";
 import type { UnifiedWatchlistItem, WatchlistCounts } from "./types";
 
 // Cache configuration
 const CACHE_DIR = "watchlist";
-const CACHE_FILE = "watchlist-cache.json";
 const CACHE_FRESH_TTL_MS = 5 * 60 * 1000; // 5 minutes - considered fresh
 const CACHE_STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours - serve stale but trigger refresh
 
@@ -30,10 +30,17 @@ function getCacheDir(): string {
 }
 
 /**
- * Get the cache file path.
+ * Create a short hash from a token for use in cache keys.
  */
-function getCachePath(): string {
-  return path.join(getCacheDir(), CACHE_FILE);
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+}
+
+/**
+ * Get the cache file path for a specific user.
+ */
+function getCachePath(token: string): string {
+  return path.join(getCacheDir(), `watchlist-${hashToken(token)}.json`);
 }
 
 /**
@@ -67,13 +74,13 @@ export interface WatchlistCacheResult {
 }
 
 /**
- * Load cached watchlist data.
+ * Load cached watchlist data for a specific user.
  * Returns stale data with isStale=true if cache is old but still usable.
  * Returns null only if cache doesn't exist or is too old.
  */
-export async function getWatchlistCache(): Promise<WatchlistCacheResult | null> {
+export async function getWatchlistCache(token: string): Promise<WatchlistCacheResult | null> {
   try {
-    const data = await fs.readFile(getCachePath(), "utf-8");
+    const data = await fs.readFile(getCachePath(token), "utf-8");
     const cache = JSON.parse(data) as WatchlistCacheData;
 
     if (cache.version !== 1) {
@@ -107,9 +114,10 @@ export async function getWatchlistCache(): Promise<WatchlistCacheResult | null> 
 }
 
 /**
- * Save watchlist data to cache.
+ * Save watchlist data to cache for a specific user.
  */
 export async function setWatchlistCache(
+  token: string,
   items: UnifiedWatchlistItem[],
   counts: WatchlistCounts
 ): Promise<void> {
@@ -123,7 +131,7 @@ export async function setWatchlistCache(
       counts,
     };
 
-    await fs.writeFile(getCachePath(), JSON.stringify(cache, null, 2));
+    await fs.writeFile(getCachePath(token), JSON.stringify(cache, null, 2));
     console.log(`[WatchlistCache] Cached ${items.length} items`);
   } catch (error) {
     console.error("[WatchlistCache] Failed to save cache:", error);
@@ -131,12 +139,12 @@ export async function setWatchlistCache(
 }
 
 /**
- * Invalidate the watchlist cache.
+ * Invalidate the watchlist cache for a specific user.
  * Call this when the user modifies their watchlist.
  */
-export async function invalidateWatchlistCache(): Promise<void> {
+export async function invalidateWatchlistCache(token: string): Promise<void> {
   try {
-    await fs.unlink(getCachePath());
+    await fs.unlink(getCachePath(token));
     console.log("[WatchlistCache] Cache invalidated");
   } catch {
     // Ignore if file doesn't exist
@@ -146,7 +154,7 @@ export async function invalidateWatchlistCache(): Promise<void> {
 /**
  * Get cache status for debugging.
  */
-export async function getWatchlistCacheStatus(): Promise<{
+export async function getWatchlistCacheStatus(token: string): Promise<{
   exists: boolean;
   fresh: boolean;
   usable: boolean;
@@ -156,7 +164,7 @@ export async function getWatchlistCacheStatus(): Promise<{
   staleTtlSeconds: number;
 }> {
   try {
-    const data = await fs.readFile(getCachePath(), "utf-8");
+    const data = await fs.readFile(getCachePath(token), "utf-8");
     const cache = JSON.parse(data) as WatchlistCacheData;
     const ageSeconds = Math.round((Date.now() - cache.fetchedAt) / 1000);
 
