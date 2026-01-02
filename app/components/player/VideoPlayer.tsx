@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "@remix-run/react";
-import type Hls from "hls.js";
+import type HlsType from "hls.js";
 import {
   Play,
   Pause,
@@ -126,7 +126,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  const hlsRef = useRef<HlsType | null>(null);
   const episodePanelRef = useRef<HTMLDivElement>(null);
 
   // Playback state
@@ -299,16 +299,16 @@ export function VideoPlayer({
     // HLS.js for other browsers - dynamically import for code-splitting
     let cancelled = false;
 
-    import("hls.js").then(({ default: Hls }) => {
+    import("hls.js").then(({ default: HlsClass, Events, ErrorTypes }) => {
       if (cancelled) return;
 
-      if (!Hls.isSupported()) {
+      if (!HlsClass.isSupported()) {
         setError("HLS streaming not supported in this browser");
         return;
       }
 
       console.log("[VideoPlayer] Using HLS.js (dynamically loaded)");
-      const hls = new Hls({
+      const hls = new HlsClass({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
@@ -317,16 +317,16 @@ export function VideoPlayer({
       hlsRef.current = hls;
       hls.attachMedia(video);
 
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+      hls.on(Events.MEDIA_ATTACHED, () => {
         hls.loadSource(src);
       });
 
-      hls.on(Hls.Events.ERROR, (_, data) => {
+      hls.on(Events.ERROR, (_, data) => {
         console.error("[VideoPlayer] HLS error:", data.type, data.details);
         if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          if (data.type === ErrorTypes.NETWORK_ERROR) {
             hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          } else if (data.type === ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else {
             hls.destroy();
