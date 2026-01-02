@@ -1,6 +1,7 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { VitePWA } from "vite-plugin-pwa";
 
 declare module "@remix-run/node" {
   interface Future {
@@ -26,6 +27,19 @@ export default defineConfig({
     tsconfigPaths({
       // Ignore tmp directory which may contain reference projects
       ignoreConfigErrors: true,
+    }),
+    VitePWA({
+      registerType: "autoUpdate",
+      manifest: false, // Use existing public/manifest.json
+      workbox: {
+        // Minimal precaching - just the manifest for PWA installability
+        globPatterns: ["manifest.json"],
+        // No runtime caching - we want fresh data
+        runtimeCaching: [],
+      },
+      devOptions: {
+        enabled: false,
+      },
     }),
   ],
   build: {
