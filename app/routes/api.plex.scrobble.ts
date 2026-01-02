@@ -8,7 +8,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
 import { requirePlexToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
-import { invalidateCache } from "~/lib/plex/cache.server";
+import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 
 interface ScrobbleRequest {
   ratingKey: string;
@@ -53,8 +53,8 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: result.error.message }, { status });
   }
 
-  // Invalidate home cache so Continue Watching updates immediately
-  await invalidateCache("home");
+  // Invalidate user's home cache so Continue Watching updates immediately
+  await invalidateCache(getUserCacheKey("home", token));
 
   return json({ success: true });
 }

@@ -10,7 +10,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
 import { requirePlexToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
-import { invalidateCache } from "~/lib/plex/cache.server";
+import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 
 interface TimelineRequest {
   ratingKey: string;
@@ -74,9 +74,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: result.error.message }, { status });
   }
 
-  // Invalidate home cache when playback stops so Continue Watching updates immediately
+  // Invalidate user's home cache when playback stops so Continue Watching updates immediately
   if (state === "stopped") {
-    await invalidateCache("home");
+    await invalidateCache(getUserCacheKey("home", token));
   }
 
   return json({ success: true });

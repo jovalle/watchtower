@@ -13,7 +13,7 @@ import { Container } from "~/components/layout";
 import { ContextMenu, type ContextMenuItem } from "~/components/ui";
 import { requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
-import { getCache, setCache } from "~/lib/plex/cache.server";
+import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import type { PlexMediaItem } from "~/lib/plex/types";
@@ -129,8 +129,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
-  // Try cache first for instant loading
-  const cached = !forceRefresh ? await getCache<CachedHomeData>("home") : null;
+  // Try cache first for instant loading (user-specific cache key)
+  const cacheKey = getUserCacheKey("home", token);
+  const cached = !forceRefresh ? await getCache<CachedHomeData>(cacheKey) : null;
 
   if (cached && !cached.isStale) {
     // Fresh cache - return immediately
@@ -262,8 +263,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Limit to reasonable number for cycling
   const limitedCandidates = billboardCandidates.slice(0, 10);
 
-  // Cache the data for future requests
-  await setCache<CachedHomeData>("home", {
+  // Cache the data for future requests (user-specific)
+  await setCache<CachedHomeData>(cacheKey, {
     billboardCandidates: limitedCandidates,
     continueWatching,
     recentlyAdded,

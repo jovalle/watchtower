@@ -13,7 +13,7 @@ import { PosterCard } from "~/components/media";
 import { Typography } from "~/components/ui";
 import { requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
-import { getCache, setCache } from "~/lib/plex/cache.server";
+import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { PLEX_DISCOVER_URL } from "~/lib/plex/constants";
 import type { PlexMediaItem, PlexWatchlistItem } from "~/lib/plex/types";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
@@ -94,8 +94,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
-  // Try cache first for instant loading
-  const cached = !forceRefresh ? await getCache<CachedNewPopularData>("new-popular") : null;
+  // Try cache first for instant loading (user-specific cache key)
+  const cacheKey = getUserCacheKey("new-popular", token);
+  const cached = !forceRefresh ? await getCache<CachedNewPopularData>(cacheKey) : null;
 
   if (cached && !cached.isStale) {
     // Fresh cache - return immediately
@@ -356,8 +357,8 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
     worthTheWait: topItems.filter((_, i) => i >= 5), // Placeholder - use lower-ranked top items
   };
 
-  // Cache the data for future requests
-  await setCache<CachedNewPopularData>("new-popular", data);
+  // Cache the data for future requests (user-specific)
+  await setCache<CachedNewPopularData>(cacheKey, data);
 
   return json<LoaderData>(data);
 }
