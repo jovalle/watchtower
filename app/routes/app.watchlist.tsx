@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import { Container } from '~/components/layout';
 import { PosterCard } from '~/components/media/PosterCard';
-import { Typography } from '~/components/ui';
+import { Typography, FilterDropdown } from '~/components/ui';
+import type { FilterOption } from '~/components/ui';
 import { requirePlexToken } from '~/lib/auth/session.server';
 import { PlexClient } from '~/lib/plex/client.server';
 import { createTraktClient, isTraktEnabled } from '~/lib/trakt/client.server';
@@ -52,9 +53,9 @@ interface LoaderData {
 }
 
 type SortOption = 'addedAt:desc' | 'addedAt:asc' | 'title:asc' | 'title:desc' | 'score:desc';
-type SourceFilter = 'all' | WatchlistSource;
-type TypeFilter = 'all' | 'movie' | 'show';
-type AvailabilityFilter = 'all' | 'available' | 'unavailable';
+type SourceFilterValue = 'all' | WatchlistSource;
+type TypeFilterValue = 'all' | 'movie' | 'show';
+type AvailabilityFilterValue = 'all' | 'available' | 'unavailable';
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'addedAt:desc', label: 'Recently Added' },
@@ -239,10 +240,10 @@ export default function WatchlistPage() {
   const navigate = useNavigate();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Client-side filters and sorting state
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
+  // Client-side filters and sorting state (arrays for multi-select)
+  const [sourceFilters, setSourceFilters] = useState<SourceFilterValue[]>(['all']);
+  const [typeFilters, setTypeFilters] = useState<TypeFilterValue[]>(['all']);
+  const [availabilityFilters, setAvailabilityFilters] = useState<AvailabilityFilterValue[]>(['all']);
   const [sortOption, setSortOption] = useState<SortOption>('addedAt:desc');
 
   // Handle manual refresh - navigate to force refresh
@@ -264,21 +265,25 @@ export default function WatchlistPage() {
   const filteredAndSortedItems = useMemo(() => {
     let result = [...items];
 
-    // Filter by source
-    if (sourceFilter !== 'all') {
-      result = result.filter((item) => item.sources.includes(sourceFilter));
+    // Filter by source (if not "all")
+    if (!sourceFilters.includes('all')) {
+      result = result.filter((item) =>
+        sourceFilters.some((source) => item.sources.includes(source as WatchlistSource)),
+      );
     }
 
-    // Filter by type
-    if (typeFilter !== 'all') {
-      result = result.filter((item) => item.type === typeFilter);
+    // Filter by type (if not "all")
+    if (!typeFilters.includes('all')) {
+      result = result.filter((item) => typeFilters.includes(item.type as TypeFilterValue));
     }
 
-    // Filter by availability
-    if (availabilityFilter === 'available') {
-      result = result.filter((item) => item.isLocal);
-    } else if (availabilityFilter === 'unavailable') {
-      result = result.filter((item) => !item.isLocal);
+    // Filter by availability (if not "all")
+    if (!availabilityFilters.includes('all')) {
+      result = result.filter((item) => {
+        if (availabilityFilters.includes('available') && item.isLocal) return true;
+        if (availabilityFilters.includes('unavailable') && !item.isLocal) return true;
+        return false;
+      });
     }
 
     // Sort
@@ -300,7 +305,7 @@ export default function WatchlistPage() {
     });
 
     return result;
-  }, [items, sourceFilter, typeFilter, availabilityFilter, sortOption, getItemAddedAt]);
+  }, [items, sourceFilters, typeFilters, availabilityFilters, sortOption, getItemAddedAt]);
 
   // Calculate dynamic counts for all filter groups based on current filter state
   // Each count shows how many items would match if that option were selected (given other filters)
@@ -308,63 +313,67 @@ export default function WatchlistPage() {
     // Helper to apply filters except the one we're calculating counts for
     const applyFilters = (
       skipFilter: 'source' | 'type' | 'availability',
-      overrideSource?: SourceFilter,
-      overrideType?: TypeFilter,
-      overrideAvailability?: AvailabilityFilter,
+      overrideSource?: SourceFilterValue[],
+      overrideType?: TypeFilterValue[],
+      overrideAvailability?: AvailabilityFilterValue[],
     ) => {
       let result = [...items];
 
       // Apply source filter
-      const effectiveSource = skipFilter === 'source' ? (overrideSource ?? 'all') : sourceFilter;
-      if (effectiveSource !== 'all') {
-        result = result.filter((item) => item.sources.includes(effectiveSource));
+      const effectiveSources = skipFilter === 'source' ? (overrideSource ?? ['all']) : sourceFilters;
+      if (!effectiveSources.includes('all')) {
+        result = result.filter((item) =>
+          effectiveSources.some((source) => item.sources.includes(source as WatchlistSource)),
+        );
       }
 
       // Apply type filter
-      const effectiveType = skipFilter === 'type' ? (overrideType ?? 'all') : typeFilter;
-      if (effectiveType !== 'all') {
-        result = result.filter((item) => item.type === effectiveType);
+      const effectiveTypes = skipFilter === 'type' ? (overrideType ?? ['all']) : typeFilters;
+      if (!effectiveTypes.includes('all')) {
+        result = result.filter((item) => effectiveTypes.includes(item.type as TypeFilterValue));
       }
 
       // Apply availability filter
       const effectiveAvailability =
-        skipFilter === 'availability' ? (overrideAvailability ?? 'all') : availabilityFilter;
-      if (effectiveAvailability === 'available') {
-        result = result.filter((item) => item.isLocal);
-      } else if (effectiveAvailability === 'unavailable') {
-        result = result.filter((item) => !item.isLocal);
+        skipFilter === 'availability' ? (overrideAvailability ?? ['all']) : availabilityFilters;
+      if (!effectiveAvailability.includes('all')) {
+        result = result.filter((item) => {
+          if (effectiveAvailability.includes('available') && item.isLocal) return true;
+          if (effectiveAvailability.includes('unavailable') && !item.isLocal) return true;
+          return false;
+        });
       }
 
       return result;
     };
 
     // Source filter counts (apply type and availability filters, vary source)
-    const sourceBase = applyFilters('source', 'all');
+    const sourceBase = applyFilters('source', ['all']);
     const sourceCounts = {
       all: sourceBase.length,
-      plex: applyFilters('source', 'plex').length,
-      trakt: applyFilters('source', 'trakt').length,
-      imdb: applyFilters('source', 'imdb').length,
+      plex: applyFilters('source', ['plex']).length,
+      trakt: applyFilters('source', ['trakt']).length,
+      imdb: applyFilters('source', ['imdb']).length,
     };
 
     // Type filter counts (apply source and availability filters, vary type)
-    const typeBase = applyFilters('type', undefined, 'all');
+    const typeBase = applyFilters('type', undefined, ['all']);
     const typeCounts = {
       all: typeBase.length,
-      movies: applyFilters('type', undefined, 'movie').length,
-      shows: applyFilters('type', undefined, 'show').length,
+      movies: applyFilters('type', undefined, ['movie']).length,
+      shows: applyFilters('type', undefined, ['show']).length,
     };
 
     // Availability filter counts (apply source and type filters, vary availability)
-    const availabilityBase = applyFilters('availability', undefined, undefined, 'all');
+    const availabilityBase = applyFilters('availability', undefined, undefined, ['all']);
     const availabilityCounts = {
       all: availabilityBase.length,
-      available: applyFilters('availability', undefined, undefined, 'available').length,
-      unavailable: applyFilters('availability', undefined, undefined, 'unavailable').length,
+      available: applyFilters('availability', undefined, undefined, ['available']).length,
+      unavailable: applyFilters('availability', undefined, undefined, ['unavailable']).length,
     };
 
     return { source: sourceCounts, type: typeCounts, availability: availabilityCounts };
-  }, [items, sourceFilter, typeFilter, availabilityFilter]);
+  }, [items, sourceFilters, typeFilters, availabilityFilters]);
 
   const handlePlay = (item: UnifiedWatchlistItem) => {
     if (!item.isLocal || !item.localRatingKey) {
@@ -393,141 +402,134 @@ export default function WatchlistPage() {
   // Show score badges when sorting by score
   const showScoreBadges = sortOption === 'score:desc';
 
+  // Build filter options with dynamic counts
+  const sourceOptions = useMemo((): FilterOption<SourceFilterValue>[] => {
+    const options: FilterOption<SourceFilterValue>[] = [
+      { value: 'all', label: 'All', count: dynamicCounts.source.all },
+      {
+        value: 'plex',
+        label: 'Plex',
+        count: dynamicCounts.source.plex,
+        icon: <span className="font-semibold text-mango">P</span>,
+      },
+    ];
+    if (traktEnabled) {
+      options.push({
+        value: 'trakt',
+        label: 'Trakt',
+        count: dynamicCounts.source.trakt,
+        icon: <span className="font-semibold text-red-500">T</span>,
+      });
+    }
+    if (imdbEnabled) {
+      options.push({
+        value: 'imdb',
+        label: 'IMDb',
+        count: dynamicCounts.source.imdb,
+        icon: <span className="font-semibold text-yellow-400">I</span>,
+      });
+    }
+    return options;
+  }, [dynamicCounts.source, traktEnabled, imdbEnabled]);
+
+  const typeOptions = useMemo(
+    (): FilterOption<TypeFilterValue>[] => [
+      { value: 'all', label: 'All', count: dynamicCounts.type.all },
+      {
+        value: 'movie',
+        label: 'Movies',
+        count: dynamicCounts.type.movies,
+        icon: <Film className="h-3.5 w-3.5" />,
+      },
+      {
+        value: 'show',
+        label: 'Shows',
+        count: dynamicCounts.type.shows,
+        icon: <Tv className="h-3.5 w-3.5" />,
+      },
+    ],
+    [dynamicCounts.type],
+  );
+
+  const availabilityOptions = useMemo(
+    (): FilterOption<AvailabilityFilterValue>[] => [
+      { value: 'all', label: 'All', count: dynamicCounts.availability.all },
+      {
+        value: 'available',
+        label: 'In Library',
+        count: dynamicCounts.availability.available,
+        icon: <span className="h-2 w-2 rounded-full bg-green-500" />,
+      },
+      {
+        value: 'unavailable',
+        label: 'Not in Library',
+        count: dynamicCounts.availability.unavailable,
+        icon: <span className="h-2 w-2 rounded-full bg-red-500" />,
+      },
+    ],
+    [dynamicCounts.availability],
+  );
+
+  // Check if any filters are active (not "all")
+  const hasActiveFilters =
+    !sourceFilters.includes('all') ||
+    !typeFilters.includes('all') ||
+    !availabilityFilters.includes('all');
+
   return (
     <Container size="wide" className="py-8">
       {/* Header with title and controls */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <Typography variant="title" as="h1">
-          Watchlist
-        </Typography>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Source filter toggle buttons */}
-          <div className="flex items-center rounded-md border border-border-subtle bg-background-elevated">
-            <button
-              onClick={() => setSourceFilter('all')}
-              className={`px-3 py-1.5 text-sm transition-colors ${
-                sourceFilter === 'all'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              All ({dynamicCounts.source.all})
-            </button>
-            <button
-              onClick={() => setSourceFilter('plex')}
-              className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                sourceFilter === 'plex'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              <span className="font-semibold text-mango">P</span>
-              Plex ({dynamicCounts.source.plex})
-            </button>
-            {traktEnabled && (
-              <button
-                onClick={() => setSourceFilter('trakt')}
-                className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                  sourceFilter === 'trakt'
-                    ? 'bg-accent-primary/20 text-accent-primary'
-                    : 'text-foreground-secondary hover:text-foreground-primary'
-                }`}
-              >
-                <span className="font-semibold text-red-500">T</span>
-                Trakt ({dynamicCounts.source.trakt})
-              </button>
+        <div className="flex items-center gap-3">
+          <Typography variant="title" as="h1">
+            Watchlist
+          </Typography>
+          {/* Refresh button */}
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border-subtle bg-background-elevated text-foreground-secondary transition-colors hover:bg-background-hover hover:text-foreground-primary disabled:opacity-50"
+            title={isRefreshing ? 'Refreshing...' : 'Refresh watchlist'}
+          >
+            {isRefreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
             )}
-            {imdbEnabled && (
-              <button
-                onClick={() => setSourceFilter('imdb')}
-                className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                  sourceFilter === 'imdb'
-                    ? 'bg-accent-primary/20 text-accent-primary'
-                    : 'text-foreground-secondary hover:text-foreground-primary'
-                }`}
-              >
-                <span className="font-semibold text-yellow-400">I</span>
-                IMDb ({dynamicCounts.source.imdb})
-              </button>
-            )}
-          </div>
+          </button>
+        </div>
 
-          {/* Type filter buttons */}
-          <div className="flex items-center rounded-md border border-border-subtle bg-background-elevated">
-            <button
-              onClick={() => setTypeFilter('all')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors ${
-                typeFilter === 'all'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              All ({dynamicCounts.type.all})
-            </button>
-            <button
-              onClick={() => setTypeFilter('movie')}
-              className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                typeFilter === 'movie'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              <Film className="h-3.5 w-3.5" />
-              Movies ({dynamicCounts.type.movies})
-            </button>
-            <button
-              onClick={() => setTypeFilter('show')}
-              className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                typeFilter === 'show'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              <Tv className="h-3.5 w-3.5" />
-              Shows ({dynamicCounts.type.shows})
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Source filter dropdown */}
+          <FilterDropdown
+            label="Source"
+            options={sourceOptions}
+            selected={sourceFilters}
+            onChange={setSourceFilters}
+            allValue="all"
+          />
 
-          {/* Availability filter buttons */}
-          <div className="flex items-center rounded-md border border-border-subtle bg-background-elevated">
-            <button
-              onClick={() => setAvailabilityFilter('all')}
-              className={`px-3 py-1.5 text-sm transition-colors ${
-                availabilityFilter === 'all'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              All ({dynamicCounts.availability.all})
-            </button>
-            <button
-              onClick={() => setAvailabilityFilter('available')}
-              className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                availabilityFilter === 'available'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              <span className="h-2 w-2 rounded-full bg-green-500" />
-              In Library ({dynamicCounts.availability.available})
-            </button>
-            <button
-              onClick={() => setAvailabilityFilter('unavailable')}
-              className={`flex items-center gap-1.5 border-l border-border-subtle px-3 py-1.5 text-sm transition-colors ${
-                availabilityFilter === 'unavailable'
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-foreground-secondary hover:text-foreground-primary'
-              }`}
-            >
-              <span className="h-2 w-2 rounded-full bg-red-500" />
-              Not in Library ({dynamicCounts.availability.unavailable})
-            </button>
-          </div>
+          {/* Type filter dropdown */}
+          <FilterDropdown
+            label="Type"
+            options={typeOptions}
+            selected={typeFilters}
+            onChange={setTypeFilters}
+            allValue="all"
+          />
+
+          {/* Availability filter dropdown */}
+          <FilterDropdown
+            label="Availability"
+            options={availabilityOptions}
+            selected={availabilityFilters}
+            onChange={setAvailabilityFilters}
+            allValue="all"
+          />
 
           {/* Sort dropdown */}
           {items.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <SortAsc className="h-4 w-4 text-foreground-secondary" />
               <select
                 value={sortOption}
@@ -542,20 +544,6 @@ export default function WatchlistPage() {
               </select>
             </div>
           )}
-
-          {/* Refresh button */}
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border-subtle bg-background-elevated text-foreground-secondary transition-colors hover:bg-background-hover hover:text-foreground-primary disabled:opacity-50"
-            title={isRefreshing ? 'Refreshing...' : 'Refresh watchlist'}
-          >
-            {isRefreshing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-          </button>
         </div>
       </div>
 
@@ -577,8 +565,7 @@ export default function WatchlistPage() {
             <Typography variant="caption" className="text-foreground-muted">
               {filteredAndSortedItems.length}{' '}
               {filteredAndSortedItems.length === 1 ? 'item' : 'items'}
-              {(sourceFilter !== 'all' || typeFilter !== 'all') &&
-                ` (filtered from ${items.length})`}
+              {hasActiveFilters && ` (filtered from ${items.length})`}
             </Typography>
             {isStale && !isRefreshing && (
               <button

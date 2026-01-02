@@ -850,18 +850,19 @@ export default function MediaDetailPage() {
               </div>
             )}
 
-            <Container size="wide" className="relative py-8 md:py-12">
-              <div className="flex gap-6 md:gap-8">
+            <Container size="wide" className="relative py-6 sm:py-8 md:py-12">
+              {/* Mobile: Centered stack, Desktop: Side-by-side */}
+              <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6 md:gap-8">
                 {/* Poster with badge */}
                 <div className="flex-shrink-0">
-                  <div className="relative w-36 md:w-44 lg:w-52">
+                  <div className="relative w-32 sm:w-36 md:w-44 lg:w-52">
                     {/* Episode count badge */}
                     {leafCount !== undefined && leafCount > 0 && (
-                      <div className="absolute right-0 top-0 z-10 flex h-8 min-w-8 items-center justify-center rounded-bl-lg bg-black/70 px-2">
+                      <div className="absolute right-0 top-0 z-10 flex h-7 min-w-7 items-center justify-center rounded-bl-lg bg-black/70 px-1.5 sm:h-8 sm:min-w-8 sm:px-2">
                         {isWatched ? (
-                          <Check className="h-5 w-5 text-white" />
+                          <Check className="h-4 w-4 text-white sm:h-5 sm:w-5" />
                         ) : (
-                          <span className="text-sm font-semibold text-white">{leafCount}</span>
+                          <span className="text-xs font-semibold text-white sm:text-sm">{leafCount}</span>
                         )}
                       </div>
                     )}
@@ -873,32 +874,32 @@ export default function MediaDetailPage() {
                     />
                     {/* On Deck indicator */}
                     {onDeck && (
-                      <div className="mt-3 text-center text-sm text-foreground-secondary">
+                      <div className="mt-2 text-center text-xs text-foreground-secondary sm:mt-3 sm:text-sm">
                         On Deck — S{onDeck.seasonIndex} · E{onDeck.episodeIndex}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Info section */}
-                <div className="flex-1 pt-2">
+                {/* Info section - centered on mobile, left-aligned on desktop */}
+                <div className="w-full text-center sm:flex-1 sm:pt-2 sm:text-left">
                   {/* Title */}
-                  <Typography variant="hero" className="mb-1">
+                  <h1 className="mb-1 text-2xl font-bold text-foreground-primary sm:text-3xl md:text-4xl lg:text-5xl">
                     {type === "season" && showTitle ? showTitle : metadata.title}
-                  </Typography>
+                  </h1>
 
                   {/* Season subtitle */}
                   {type === "season" && (
-                    <Typography variant="title" className="mb-3 text-foreground-secondary">
+                    <Typography variant="title" className="mb-2 text-foreground-secondary sm:mb-3">
                       Season {seasonIndex}
                     </Typography>
                   )}
 
-                  {/* Metadata row */}
-                  <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-foreground-secondary">
+                  {/* Metadata row - centered on mobile */}
+                  <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-sm text-foreground-secondary sm:justify-start sm:gap-3">
                     {year && <span>{year}</span>}
                     {genres.length > 0 && (
-                      <span>{genres.slice(0, 2).join(", ")}</span>
+                      <span className="hidden sm:inline">{genres.slice(0, 2).join(", ")}</span>
                     )}
                     {rating && (
                       <span className="rounded bg-white/10 px-2 py-0.5">
@@ -919,9 +920,9 @@ export default function MediaDetailPage() {
                     )}
                   </div>
 
-                  {/* Action buttons */}
-                  <div className="mb-4 flex items-center gap-3">
-                    <Button variant="primary" size="lg" onClick={handlePlay}>
+                  {/* Action buttons - full width on mobile, inline on desktop */}
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                    <Button variant="primary" size="lg" onClick={handlePlay} className="w-full sm:w-auto">
                       <Play className="mr-2 h-5 w-5 fill-current" />
                       {playButtonLabel()}
                     </Button>
@@ -932,46 +933,55 @@ export default function MediaDetailPage() {
                         size="lg"
                         onClick={handleAddToList}
                         disabled={isAddingToList}
+                        className="w-full sm:w-auto"
                       >
                         {isInList ? (
-                          <Check className="h-5 w-5" />
+                          <>
+                            <Check className="mr-2 h-5 w-5 sm:mr-0" />
+                            <span className="sm:hidden">In Watchlist</span>
+                          </>
                         ) : (
-                          <Plus className="h-5 w-5" />
+                          <>
+                            <Plus className="mr-2 h-5 w-5 sm:mr-0" />
+                            <span className="sm:hidden">Add to Watchlist</span>
+                          </>
                         )}
                       </Button>
                     )}
-                    {/* External Links */}
-                    {tmdbId && (
-                      <a
-                        href={
-                          type === "season" && seasonIndex !== undefined
-                            ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}`
-                            : `https://www.themoviedb.org/tv/${tmdbId}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex h-11 items-center gap-1.5 rounded-lg bg-[#01b4e4]/20 px-4 text-sm font-medium text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
-                      >
-                        TMDB
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
-                    {imdbId && (
-                      <a
-                        href={`https://www.imdb.com/title/${imdbId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex h-11 items-center gap-1.5 rounded-lg bg-[#f5c518]/20 px-4 text-sm font-medium text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
-                      >
-                        IMDb
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
+                    {/* External Links - hidden on very small screens */}
+                    <div className="hidden gap-2 sm:flex">
+                      {tmdbId && (
+                        <a
+                          href={
+                            type === "season" && seasonIndex !== undefined
+                              ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}`
+                              : `https://www.themoviedb.org/tv/${tmdbId}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex h-11 items-center gap-1.5 rounded-lg bg-[#01b4e4]/20 px-4 text-sm font-medium text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
+                        >
+                          TMDB
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
+                      {imdbId && (
+                        <a
+                          href={`https://www.imdb.com/title/${imdbId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex h-11 items-center gap-1.5 rounded-lg bg-[#f5c518]/20 px-4 text-sm font-medium text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
+                        >
+                          IMDb
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Summary */}
+                  {/* Summary - clamp to 3 lines on mobile, 4 on desktop */}
                   {metadata.summary && (
-                    <Typography variant="body" className="max-w-2xl text-foreground-secondary line-clamp-4">
+                    <Typography variant="body" className="max-w-2xl text-foreground-secondary line-clamp-3 sm:line-clamp-4">
                       {metadata.summary}
                     </Typography>
                   )}
@@ -982,55 +992,57 @@ export default function MediaDetailPage() {
 
           {/* Seasons Row (TV Shows only) */}
           {type === "show" && seasons && seasons.length > 0 && (
-            <Container size="wide" className="mt-8">
-              <Typography variant="title" className="mb-4">
+            <Container size="wide" className="mt-6 sm:mt-8">
+              <Typography variant="title" className="mb-3 sm:mb-4">
                 Seasons
               </Typography>
-              <div className="flex gap-4 overflow-x-auto pb-4 pt-2 pr-2 scrollbar-hide">
-                {seasons.map((season) => (
-                  <Link
-                    key={season.ratingKey}
-                    to={`/app/media/season/${season.ratingKey}`}
-                    className="group flex-shrink-0"
-                  >
-                    <div className="relative w-32 md:w-36">
-                      {/* Episode count or checkmark badge */}
-                      <div className="absolute right-0 top-0 z-10 flex h-6 min-w-6 items-center justify-center rounded-bl-lg bg-black/70 px-1.5">
-                        {season.viewedLeafCount >= season.leafCount && season.leafCount > 0 ? (
-                          <Check className="h-3.5 w-3.5 text-white" />
-                        ) : (
-                          <span className="text-xs font-semibold text-white">{season.leafCount}</span>
-                        )}
+              <div className="-mx-5 px-5 sm:mx-0 sm:px-0">
+                <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-4 pt-2 sm:snap-none sm:gap-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  {seasons.map((season) => (
+                    <Link
+                      key={season.ratingKey}
+                      to={`/app/media/season/${season.ratingKey}`}
+                      className="group flex-shrink-0 snap-start"
+                    >
+                      <div className="relative w-28 sm:w-32 md:w-36">
+                        {/* Episode count or checkmark badge */}
+                        <div className="absolute right-0 top-0 z-10 flex h-6 min-w-6 items-center justify-center rounded-bl-lg bg-black/70 px-1.5">
+                          {season.viewedLeafCount >= season.leafCount && season.leafCount > 0 ? (
+                            <Check className="h-3.5 w-3.5 text-white" />
+                          ) : (
+                            <span className="text-xs font-semibold text-white">{season.leafCount}</span>
+                          )}
+                        </div>
+                        {/* Season poster */}
+                        <div className="overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
+                          <img
+                            src={season.thumb}
+                            alt={season.title}
+                            className="aspect-[2/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                        </div>
+                        {/* Season info */}
+                        <div className="mt-2">
+                          <Typography variant="body" className="text-sm font-medium sm:text-base">
+                            {season.title}
+                          </Typography>
+                          <Typography variant="caption" className="text-foreground-muted">
+                            {season.leafCount} ep{season.leafCount !== 1 ? "s" : ""}
+                          </Typography>
+                        </div>
                       </div>
-                      {/* Season poster */}
-                      <div className="overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
-                        <img
-                          src={season.thumb}
-                          alt={season.title}
-                          className="aspect-[2/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          loading="lazy"
-                        />
-                      </div>
-                      {/* Season info */}
-                      <div className="mt-2">
-                        <Typography variant="body" className="font-medium">
-                          {season.title}
-                        </Typography>
-                        <Typography variant="caption" className="text-foreground-muted">
-                          {season.leafCount} episode{season.leafCount !== 1 ? "s" : ""}
-                        </Typography>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
+                    </Link>
+                  ))}
+                </div>
               </div>
             </Container>
           )}
 
           {/* Episodes Grid (Seasons only) */}
           {type === "season" && (
-            <Container size="wide" className="mt-8">
-              <Typography variant="title" className="mb-4">
+            <Container size="wide" className="mt-6 sm:mt-8">
+              <Typography variant="title" className="mb-3 sm:mb-4">
                 {leafCount} Episode{leafCount !== 1 ? "s" : ""}
               </Typography>
 
@@ -1039,15 +1051,15 @@ export default function MediaDetailPage() {
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
                 </div>
               ) : episodes && episodes.length > 0 ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
                   {episodes.map((episode) => (
                     <Link
                       key={episode.ratingKey}
                       to={`/app/media/episode/${episode.ratingKey}`}
-                      className="group"
+                      className="group flex gap-3 sm:flex-col sm:gap-0"
                     >
-                      {/* Episode Thumbnail */}
-                      <div className="relative overflow-hidden rounded-lg bg-background-elevated">
+                      {/* Episode Thumbnail - small side thumbnail on mobile, full width on sm+ */}
+                      <div className="relative w-28 flex-shrink-0 overflow-hidden rounded-lg bg-background-elevated sm:w-full">
                         <img
                           src={episode.thumb}
                           alt={episode.title}
@@ -1072,13 +1084,13 @@ export default function MediaDetailPage() {
                           </div>
                         )}
                       </div>
-                      {/* Episode Info - Plex style: title then episode number */}
-                      <div className="mt-2">
-                        <Typography variant="body" className="font-medium line-clamp-1 group-hover:text-accent-primary">
+                      {/* Episode Info - side text on mobile, below thumbnail on sm+ */}
+                      <div className="flex flex-1 flex-col justify-center sm:mt-2">
+                        <Typography variant="body" className="text-sm font-medium line-clamp-2 group-hover:text-accent-primary sm:text-base sm:line-clamp-1">
                           {episode.title}
                         </Typography>
                         <Typography variant="caption" className="text-foreground-muted">
-                          Episode {episode.index}
+                          Episode {episode.index}{episode.duration && ` · ${episode.duration}`}
                         </Typography>
                       </div>
                     </Link>
@@ -1094,21 +1106,21 @@ export default function MediaDetailPage() {
 
           {/* Cast Section */}
           {cast.length > 0 && (
-            <Container size="wide" className="mt-8">
+            <Container size="wide" className="mt-6 sm:mt-8">
               <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
             </Container>
           )}
 
           {/* TMDB Recommendations */}
           {recommendations.length > 0 && (
-            <Container size="wide" className="mt-8">
-              <div className="mb-4 flex items-baseline justify-between">
+            <Container size="wide" className="mt-6 sm:mt-8">
+              <div className="mb-3 flex items-baseline justify-between sm:mb-4">
                 <Typography variant="title">Recommendations</Typography>
                 <span className="text-xs text-foreground-muted">
                   Powered by TMDB
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 sm:gap-4 md:grid-cols-5 lg:grid-cols-6">
                 {recommendations.map((rec) => (
                   <a
                     key={rec.id}
@@ -1117,7 +1129,7 @@ export default function MediaDetailPage() {
                     rel="noopener noreferrer"
                     className="group relative"
                   >
-                    <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated">
+                    <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
                       {rec.posterUrl ? (
                         <img
                           src={rec.posterUrl}
@@ -1125,24 +1137,24 @@ export default function MediaDetailPage() {
                           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                         />
                       ) : (
-                        <div className="flex h-full items-center justify-center text-foreground-muted">
+                        <div className="flex h-full items-center justify-center text-xs text-foreground-muted sm:text-sm">
                           No Image
                         </div>
                       )}
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-1.5 sm:mt-2">
                       <Typography
                         variant="body"
-                        className="line-clamp-1 text-sm group-hover:text-accent-primary"
+                        className="line-clamp-1 text-xs group-hover:text-accent-primary sm:text-sm"
                       >
                         {rec.title}
                       </Typography>
-                      <div className="flex items-center gap-2 text-xs text-foreground-muted">
+                      <div className="flex items-center gap-1 text-xs text-foreground-muted sm:gap-2">
                         {rec.releaseDate && (
                           <span>{rec.releaseDate.substring(0, 4)}</span>
                         )}
                         {rec.rating > 0 && (
-                          <span className="flex items-center gap-0.5">
+                          <span className="hidden items-center gap-0.5 sm:flex">
                             <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
                             {rec.rating.toFixed(1)}
                           </span>
@@ -1157,89 +1169,78 @@ export default function MediaDetailPage() {
           )}
         </>
       ) : (
-        /* ===== ORIGINAL HERO LAYOUT FOR MOVIES AND EPISODES ===== */
+        /* ===== PLEX-STYLE RESPONSIVE LAYOUT FOR MOVIES AND EPISODES ===== */
         <>
-          {/* Hero Section - Full bleed */}
-          <div
-            className={`relative w-full overflow-hidden ${
-              type === "episode"
-                ? "h-[50vh] min-h-[350px] md:h-[60vh] md:min-h-[450px]"
-                : "h-[60vh] min-h-[400px] md:h-[70vh] md:min-h-[500px]"
-            }`}
-          >
-            {/* Backdrop image */}
-            {backdropUrl ? (
-              <div className="absolute inset-0 animate-fadeIn">
-                <img
-                  src={backdropUrl}
-                  alt={metadata.title}
-                  className="h-full w-full object-cover object-center"
-                />
-              </div>
-            ) : (
-              <div className="absolute inset-0 bg-gradient-to-b from-background-elevated to-background-primary" />
-            )}
+          {/* Hero Section - Responsive with mobile-first design */}
+          <div className="relative w-full">
+            {/* Backdrop container - shorter on mobile */}
+            <div className="relative h-[40vh] min-h-[280px] sm:h-[50vh] sm:min-h-[350px] md:h-[60vh] md:min-h-[450px]">
+              {/* Backdrop image */}
+              {backdropUrl ? (
+                <div className="absolute inset-0 animate-fadeIn">
+                  <img
+                    src={backdropUrl}
+                    alt={metadata.title}
+                    className="h-full w-full object-cover object-center"
+                  />
+                </div>
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-b from-background-elevated to-background-primary" />
+              )}
 
-            {/* Gradient overlays for cinematic effect */}
-            <div className="absolute inset-0 bg-black/30" />
-            <div className="absolute inset-0 bg-gradient-to-r from-background-primary/90 via-background-primary/50 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-background-primary via-background-primary/60 to-transparent" />
+              {/* Gradient overlays - stronger on mobile for readability */}
+              <div className="absolute inset-0 bg-black/40 sm:bg-black/30" />
+              <div className="absolute inset-0 bg-gradient-to-t from-background-primary via-background-primary/80 to-transparent sm:via-background-primary/60" />
+              {/* Side gradient only on larger screens */}
+              <div className="absolute inset-0 hidden bg-gradient-to-r from-background-primary/80 via-transparent to-transparent sm:block" />
+            </div>
 
-            {/* Content container */}
-            <div className="absolute inset-x-0 bottom-8 md:bottom-16">
-              <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8">
-                <div className="flex gap-6 md:gap-8">
-                  {/* Poster/Thumbnail - show poster for movies, thumbnail for episodes */}
-                  {type === "episode" ? (
-                    <div className="hidden w-48 flex-shrink-0 md:block lg:w-64">
-                      {/* Episode thumbnail */}
-                      {posterUrl && (
-                        <img
-                          src={posterUrl}
-                          alt={metadata.title}
-                          className="w-full rounded-lg shadow-2xl aspect-video object-cover"
-                        />
-                      )}
+            {/* Content overlapping backdrop - Plex style */}
+            <div className="relative -mt-32 sm:-mt-40 md:-mt-48">
+              <Container size="wide">
+                {/* Mobile: Centered poster + stacked content */}
+                {/* Desktop: Side-by-side layout */}
+                <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-end sm:gap-6 md:gap-8">
+                  {/* Poster - visible on all sizes, smaller on mobile */}
+                  {posterUrl && (
+                    <div className={`flex-shrink-0 ${
+                      type === "episode"
+                        ? "w-40 sm:w-48 md:w-56 lg:w-64"
+                        : "w-32 sm:w-40 md:w-48 lg:w-56"
+                    }`}>
+                      <img
+                        src={posterUrl}
+                        alt={metadata.title}
+                        className={`w-full rounded-lg shadow-2xl ring-1 ring-white/10 ${
+                          type === "episode" ? "aspect-video object-cover" : ""
+                        }`}
+                      />
                     </div>
-                  ) : (
-                    posterUrl && (
-                      <div className="hidden w-48 flex-shrink-0 md:block lg:w-56">
-                        <img
-                          src={posterUrl}
-                          alt={metadata.title}
-                          className="w-full rounded-lg shadow-2xl"
-                        />
-                      </div>
-                    )
                   )}
 
-                  {/* Title and metadata */}
-                  <div className="max-w-2xl animate-slideUp">
-                    {/* Breadcrumbs for episodes */}
+                  {/* Title and metadata - centered on mobile, left-aligned on desktop */}
+                  <div className="w-full text-center sm:flex-1 sm:pb-2 sm:text-left">
+                    {/* Breadcrumbs for episodes - hidden on mobile */}
                     {breadcrumbs.length > 0 && (
-                      <div className="mb-3">
+                      <div className="mb-2 hidden sm:block">
                         <Breadcrumbs items={breadcrumbs} />
                       </div>
                     )}
 
-                    {/* Season/Episode indicator */}
+                    {/* Season indicator for episodes */}
                     {type === "episode" && seasonIndex !== undefined && (
-                      <Typography
-                        variant="caption"
-                        className="mb-2 block text-accent-primary"
-                      >
+                      <Typography variant="caption" className="mb-1 block text-accent-primary">
                         Season {seasonIndex}
                       </Typography>
                     )}
 
-                    {/* Title */}
-                    <Typography variant="hero" className="mb-3 md:mb-4">
+                    {/* Title - smaller on mobile */}
+                    <h1 className="mb-2 text-2xl font-bold text-foreground-primary sm:text-3xl md:text-4xl lg:text-5xl">
                       {displayTitle}
-                    </Typography>
+                    </h1>
 
-                    {/* Metadata row */}
-                    <div className="mb-4 flex flex-wrap items-center gap-3 text-sm md:text-base">
-                      {/* Air date for episodes */}
+                    {/* Metadata row - wrapped and centered on mobile */}
+                    <div className="mb-4 flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start sm:gap-3 sm:text-base">
                       {type === "episode" && originallyAired && (
                         <span className="flex items-center gap-1 text-foreground-secondary">
                           <Calendar className="h-4 w-4" />
@@ -1250,12 +1251,8 @@ export default function MediaDetailPage() {
                           })}
                         </span>
                       )}
-                      {/* Year for movies */}
                       {type === "movie" && year && (
-                        <span className="flex items-center gap-1 text-foreground-secondary">
-                          <Calendar className="h-4 w-4" />
-                          {year}
-                        </span>
+                        <span className="text-foreground-secondary">{year}</span>
                       )}
                       {duration && (
                         <span className="flex items-center gap-1 text-foreground-secondary">
@@ -1282,36 +1279,32 @@ export default function MediaDetailPage() {
                       )}
                     </div>
 
-                    {/* Tagline */}
+                    {/* Tagline - hidden on very small screens */}
                     {metadata.tagline && (
-                      <Typography
-                        variant="subtitle"
-                        className="mb-4 italic text-foreground-secondary"
-                      >
+                      <Typography variant="subtitle" className="mb-4 hidden italic text-foreground-secondary sm:block">
                         &quot;{metadata.tagline}&quot;
                       </Typography>
                     )}
 
-                    {/* Action buttons */}
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Button variant="primary" size="lg" onClick={handlePlay}>
+                    {/* Action buttons - full width on mobile, inline on desktop */}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+                      <Button variant="primary" size="lg" onClick={handlePlay} className="w-full sm:w-auto">
                         <Play className="mr-2 h-5 w-5 fill-current" />
                         {viewOffset ? "Resume" : isWatched ? "Play Again" : "Play"}
                       </Button>
-                      {/* Play from beginning - shown when there's a resume position */}
                       {viewOffset && (
-                        <Button variant="secondary" size="lg" onClick={handlePlayFromBeginning}>
+                        <Button variant="secondary" size="lg" onClick={handlePlayFromBeginning} className="w-full sm:w-auto">
                           <RotateCcw className="mr-2 h-5 w-5" />
                           From Start
                         </Button>
                       )}
-                      {/* Watchlist button - only for movies */}
                       {type === "movie" && (
                         <Button
                           variant="secondary"
                           size="lg"
                           onClick={handleAddToList}
                           disabled={isAddingToList}
+                          className="w-full sm:w-auto"
                         >
                           {isInList ? (
                             <>
@@ -1321,7 +1314,7 @@ export default function MediaDetailPage() {
                           ) : (
                             <>
                               <Plus className="mr-2 h-5 w-5" />
-                              Add to Watchlist
+                              Watchlist
                             </>
                           )}
                         </Button>
@@ -1329,36 +1322,33 @@ export default function MediaDetailPage() {
                     </div>
                   </div>
                 </div>
-              </div>
+              </Container>
             </div>
           </div>
 
           {/* Details Section */}
-          <Container size="wide" className="relative z-10 mt-8 space-y-8">
-            {/* Summary, cast, and metadata */}
-            <div className="grid gap-8 lg:grid-cols-3">
-              {/* Main content - summary and cast */}
-              <div className="lg:col-span-2">
-                {metadata.summary && (
-                  <div className="mb-4">
-                    <Typography variant="title" className="mb-3">
-                      Overview
-                    </Typography>
-                    <Typography variant="body" className="text-foreground-secondary">
-                      {metadata.summary}
-                    </Typography>
-                  </div>
-                )}
-                {/* Cast inline with overview on desktop */}
-                {cast.length > 0 && (
-                  <div className="mt-4">
-                    <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
-                  </div>
-                )}
+          <Container size="wide" className="relative z-10 mt-6 space-y-6 sm:mt-8 sm:space-y-8">
+            {/* Summary - full width on all sizes */}
+            {metadata.summary && (
+              <div>
+                <Typography variant="title" className="mb-2 sm:mb-3">
+                  Overview
+                </Typography>
+                <Typography variant="body" className="text-foreground-secondary">
+                  {metadata.summary}
+                </Typography>
               </div>
+            )}
 
-              {/* Sidebar - metadata */}
-              <div className="space-y-4">
+            {/* Cast - horizontal scroll */}
+            {cast.length > 0 && (
+              <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
+            )}
+
+            {/* Metadata grid - 2 cols on mobile, sidebar on desktop */}
+            <div className="grid gap-6 sm:gap-8 lg:grid-cols-3">
+              {/* Main metadata - spans 2 cols on desktop */}
+              <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:col-span-2">
                 {/* Genres */}
                 {genres.length > 0 && (
                   <div>
