@@ -13,12 +13,21 @@ import type { UnifiedWatchlistItem } from '~/lib/watchlist/types';
 /**
  * Build image URL for Plex items.
  * Extracted for testing purposes.
+ * For relative paths, uses Plex Discover API directly.
+ * For absolute URLs (including HTTP with IP addresses), uses the local proxy
+ * to avoid mixed content issues when serving over HTTPS.
  */
 function buildPlexImageUrl(thumb: string | undefined, token: string): string {
   if (!thumb) return '';
+  // Relative paths starting with / go to Plex Discover API
   if (thumb.startsWith('/')) {
     return `https://discover.provider.plex.tv${thumb}?X-Plex-Token=${token}`;
   }
+  // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
+  if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
+    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
+  }
+  // Fallback for any other format
   return thumb;
 }
 
@@ -53,9 +62,14 @@ describe('buildPlexImageUrl', () => {
     expect(buildPlexImageUrl(undefined, 'token123')).toBe('');
   });
 
-  it('returns thumb as-is if not starting with /', () => {
+  it('proxies absolute URLs to avoid mixed content', () => {
     const url = 'https://example.com/poster.jpg';
-    expect(buildPlexImageUrl(url, 'token123')).toBe(url);
+    expect(buildPlexImageUrl(url, 'token123')).toBe(`/api/plex/image?path=${encodeURIComponent(url)}`);
+  });
+
+  it('proxies HTTP URLs with IP addresses to avoid mixed content', () => {
+    const url = 'http://192.168.1.100:32400/library/metadata/123/thumb/456';
+    expect(buildPlexImageUrl(url, 'token123')).toBe(`/api/plex/image?path=${encodeURIComponent(url)}`);
   });
 
   it('prepends Plex discover URL and appends token for relative paths', () => {

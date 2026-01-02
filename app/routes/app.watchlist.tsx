@@ -67,12 +67,21 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 /**
  * Build image URL for Plex items.
+ * For relative paths, uses Plex Discover API directly.
+ * For absolute URLs (including HTTP with IP addresses), uses the local proxy
+ * to avoid mixed content issues when serving over HTTPS.
  */
 function buildPlexImageUrl(thumb: string | undefined, token: string): string {
   if (!thumb) return '';
+  // Relative paths starting with / go to Plex Discover API
   if (thumb.startsWith('/')) {
     return `${PLEX_DISCOVER_URL}${thumb}?X-Plex-Token=${token}`;
   }
+  // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
+  if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
+    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
+  }
+  // Fallback for any other format
   return thumb;
 }
 
