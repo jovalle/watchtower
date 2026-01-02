@@ -639,7 +639,7 @@ export function StreamingDashboard() {
 
       {/* Panel - bottom sheet on mobile, dropdown on desktop */}
       <div
-        className={`fixed inset-x-0 bottom-0 z-50 flex max-h-[80vh] origin-bottom flex-col rounded-t-2xl bg-background-elevated shadow-xl ring-1 ring-border-subtle transition-all duration-300 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:z-auto sm:mt-2 sm:max-h-none sm:w-80 sm:origin-top-right sm:rounded-lg ${
+        className={`fixed inset-x-0 bottom-0 z-50 flex max-h-[80vh] origin-bottom flex-col rounded-t-2xl bg-background-elevated pb-safe shadow-xl ring-1 ring-border-subtle transition-all duration-300 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:z-auto sm:mt-2 sm:max-h-none sm:w-80 sm:origin-top-right sm:rounded-lg sm:pb-0 ${
           isOpen
             ? "translate-y-0 scale-100 opacity-100 sm:translate-y-0"
             : "pointer-events-none translate-y-full scale-100 opacity-0 sm:translate-y-0 sm:scale-95"
