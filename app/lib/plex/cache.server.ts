@@ -6,6 +6,7 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as crypto from "crypto";
 import { env } from "~/lib/env.server";
 
 // Cache configuration
@@ -119,4 +120,31 @@ export async function invalidateCache(key: string): Promise<void> {
   } catch {
     // Ignore if file doesn't exist
   }
+}
+
+/**
+ * Create a short hash from a token for use in cache keys.
+ * Uses first 12 chars of SHA-256 hash for uniqueness while keeping filenames short.
+ */
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+}
+
+/**
+ * Create a user-specific cache key by appending a hash of the user's token.
+ * This ensures each user has their own cached data.
+ */
+export function getUserCacheKey(baseKey: string, token: string): string {
+  return `${baseKey}-${hashToken(token)}`;
+}
+
+/**
+ * Invalidate all user-specific caches for a given token.
+ * Useful when user data changes (e.g., after scrobble, timeline update).
+ */
+export async function invalidateUserCaches(token: string): Promise<void> {
+  const userKeys = ["home", "new-popular"];
+  await Promise.all(
+    userKeys.map((key) => invalidateCache(getUserCacheKey(key, token)))
+  );
 }

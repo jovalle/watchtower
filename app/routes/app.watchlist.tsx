@@ -165,8 +165,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let isStale = false;
   let cachedAt = Math.floor(Date.now() / 1000); // Default to now
 
-  // Try cache first (unless forcing refresh)
-  const cached = !forceRefresh ? await getWatchlistCache() : null;
+  // Try cache first (unless forcing refresh) - user-specific cache
+  const cached = !forceRefresh ? await getWatchlistCache(token) : null;
 
   if (cached) {
     // Use cached data but refresh library availability and watched status
@@ -221,8 +221,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     counts = result.counts;
     cachedAt = Math.floor(Date.now() / 1000);
 
-    // Cache the result
-    await setWatchlistCache(rawItems, counts);
+    // Cache the result (user-specific)
+    await setWatchlistCache(token, rawItems, counts);
   }
 
   // Sort by addedAt descending by default
