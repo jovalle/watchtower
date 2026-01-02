@@ -11,6 +11,26 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /* Safe area inset utilities for notched devices */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+  .bottom-safe {
+    bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* CSS Custom Properties for Design Tokens */
@@ -47,12 +67,27 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    background-color: var(--color-background-primary);
+    /* Prevent overscroll bounce showing white on mobile */
+    overscroll-behavior: none;
   }
 
   body {
     margin: 0;
     padding: 0;
     font-feature-settings: "kern" 1, "liga" 1;
+    background-color: var(--color-background-primary);
+    color: var(--color-foreground-primary);
+    /* Ensure body fills viewport and prevents overflow artifacts */
+    min-height: 100vh;
+    min-height: 100dvh; /* Dynamic viewport height for mobile */
+    overflow-x: hidden;
+    /* Prevent pull-to-refresh and overscroll on mobile */
+    overscroll-behavior: none;
+    /* Safe area padding for notched devices */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   /* Hide scrollbar for cleaner look */

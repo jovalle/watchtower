@@ -56,7 +56,7 @@ export function InstallPrompt() {
   if (!mounted || !showBanner) return null;
 
   return (
-    <div className="fixed bottom-0 inset-x-0 z-50 p-4 bg-background-secondary border-t border-border-subtle">
+    <div className="fixed bottom-0 inset-x-0 z-50 p-4 pb-safe bg-background-primary border-t border-border-subtle">
       <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Download className="h-5 w-5 text-accent-primary" />
