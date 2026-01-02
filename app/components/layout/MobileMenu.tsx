@@ -96,7 +96,7 @@ export function MobileMenu({ isOpen, onClose, navItems, user }: MobileMenuProps)
         </nav>
 
         {/* User section at bottom */}
-        <div className="absolute bottom-0 left-0 right-0 border-t border-border-subtle p-4">
+        <div className="absolute bottom-0 left-0 right-0 border-t border-border-subtle p-4 pb-safe">
           {/* User info */}
           <div className="mb-3 flex items-center gap-3">
             {user.thumb ? (

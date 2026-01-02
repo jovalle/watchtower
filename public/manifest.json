@@ -4,7 +4,7 @@
   "description": "A modern media streaming interface for Plex",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0D0D0D",
+  "background_color": "#0a0a0a",
   "theme_color": "#FDBE02",
   "icons": [
     {
