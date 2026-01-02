@@ -13,9 +13,18 @@ export function MediaRow({ title, children }: MediaRowProps) {
   const [scrollX, setScrollX] = useState(0);
   const [maxScroll, setMaxScroll] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
 
   const showLeftArrow = scrollX > 0;
   const showRightArrow = scrollX < maxScroll;
+
+  // Track desktop vs mobile for transform vs native scroll
+  useEffect(() => {
+    const checkDesktop = () => setIsDesktop(window.innerWidth >= 640);
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
 
   const updateMaxScroll = useCallback(() => {
     const container = containerRef.current;
@@ -70,16 +79,17 @@ export function MediaRow({ title, children }: MediaRowProps) {
         {title}
       </Typography>
 
-      {/* Scroll container - overflow hidden with padding buffer for hover effects */}
+      {/* Scroll container - native touch scroll on mobile, transform-based on desktop */}
       <div
         ref={containerRef}
-        className="relative -mx-5 overflow-hidden px-5"
+        className="relative -mx-5 overflow-x-auto px-5 sm:overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         onWheel={handleWheel}
+        style={{ touchAction: 'pan-x' }}
       >
-        {/* Left navigation arrow */}
+        {/* Left navigation arrow - hidden on mobile (touch), visible on desktop hover */}
         <button
           onClick={() => scroll("left")}
-          className={`absolute left-5 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 ${
+          className={`absolute left-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 sm:flex ${
             isHovered && showLeftArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"
@@ -89,22 +99,22 @@ export function MediaRow({ title, children }: MediaRowProps) {
           <ChevronLeft className="h-6 w-6" />
         </button>
 
-        {/* Content container - transforms for scrolling */}
+        {/* Content container - static on mobile (uses native scroll), transforms on desktop */}
         <div
           ref={contentRef}
-          className="flex items-center gap-4 py-5 md:gap-6"
-          style={{
+          className="flex snap-x snap-mandatory items-center gap-4 py-5 sm:snap-none md:gap-6"
+          style={isDesktop ? {
             transform: `translateX(-${scrollX}px)`,
             transition: 'transform 0.3s ease-out',
-          }}
+          } : undefined}
         >
           {children}
         </div>
 
-        {/* Right navigation arrow */}
+        {/* Right navigation arrow - hidden on mobile (touch), visible on desktop hover */}
         <button
           onClick={() => scroll("right")}
-          className={`absolute right-5 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 ${
+          className={`absolute right-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 sm:flex ${
             isHovered && showRightArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"
