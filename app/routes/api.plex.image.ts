@@ -24,10 +24,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // Build the direct image URL
-  // Plex image paths look like: /library/metadata/12345/thumb/1234567890
+  // Plex image paths can be:
+  // 1. Relative paths: /library/metadata/12345/thumb/1234567890
+  // 2. Absolute URLs: https://metadata-static.plex.tv/... (for external metadata)
   // Some paths may already have query params (e.g., ?width=400&height=600)
+  const isAbsoluteUrl = path.startsWith('http://') || path.startsWith('https://');
   const separator = path.includes('?') ? '&' : '?';
-  const imageUrl = `${env.PLEX_SERVER_URL}${path}${separator}X-Plex-Token=${token}`;
+  const imageUrl = isAbsoluteUrl
+    ? `${path}${separator}X-Plex-Token=${token}`
+    : `${env.PLEX_SERVER_URL}${path}${separator}X-Plex-Token=${token}`;
 
   try {
     const plexResponse = await fetch(imageUrl, {
@@ -43,7 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Log detailed error
       console.error(`[Image Proxy] FAILED ${status} ${statusText}`);
       console.error(`[Image Proxy]   Path: ${path}`);
-      console.error(`[Image Proxy]   URL: ${env.PLEX_SERVER_URL}${path}`);
+      console.error(`[Image Proxy]   URL: ${isAbsoluteUrl ? path : `${env.PLEX_SERVER_URL}${path}`}`);
 
       // Check for rate limiting
       if (status === 429) {

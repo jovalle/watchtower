@@ -92,15 +92,23 @@ function SortDropdown({ value, options, onChange, direction, onDirectionToggle }
       >
         {currentLabel}
         {onDirectionToggle && (
-          <button
+          <span
+            role="button"
+            tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
               onDirectionToggle();
             }}
-            className="ml-0.5"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                onDirectionToggle();
+              }
+            }}
+            className="ml-0.5 cursor-pointer"
           >
             <DirectionIcon className="h-3.5 w-3.5" />
-          </button>
+          </span>
         )}
       </button>
 

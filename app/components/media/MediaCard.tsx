@@ -124,7 +124,7 @@ export function MediaCard({
       onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       onMouseLeave={() => setShowRemoveConfirm(false)}
-      className={`group relative cursor-pointer origin-center will-change-transform transition-transform duration-200 ease-out hover:z-10 hover:scale-105 focus:z-10 focus:scale-105 ${
+      className={`group relative cursor-pointer origin-center snap-start will-change-transform transition-transform duration-200 ease-out hover:z-10 hover:scale-105 focus:z-10 focus:scale-105 ${
         fullWidth
           ? "w-full"
           : "w-[280px] flex-shrink-0 md:w-[340px] lg:w-[400px]"
@@ -238,10 +238,10 @@ export function MediaCard({
                         onRemove();
                         setShowRemoveConfirm(false);
                       }}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-red-600 transition-transform duration-200 hover:scale-110"
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-red-600 transition-transform duration-200 hover:scale-110 focus:scale-110"
                       aria-label="Confirm removal"
                     >
-                      <Check className="h-4 w-4" />
+                      <Check className="h-5 w-5" />
                     </button>
                   </>
                 ) : (
@@ -250,11 +250,11 @@ export function MediaCard({
                       e.stopPropagation();
                       setShowRemoveConfirm(true);
                     }}
-                    className="flex h-9 w-9 items-center justify-center text-white transition-transform duration-200 hover:scale-110"
+                    className="flex h-11 w-11 items-center justify-center text-white transition-transform duration-200 hover:scale-110 focus:scale-110"
                     aria-label="Remove from Continue Watching"
                     title="Remove from Continue Watching"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-5 w-5" />
                   </button>
                 )}
               </div>
@@ -267,7 +267,7 @@ export function MediaCard({
                   e.stopPropagation();
                   onAddToWatchlist();
                 }}
-                className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full transition-transform duration-200 hover:scale-110 ${
+                className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full transition-transform duration-200 hover:scale-110 focus:scale-110 ${
                   isInWatchlist
                     ? "bg-accent-primary text-black"
                     : "bg-mango-hover text-black hover:bg-mango-hover"
@@ -276,9 +276,9 @@ export function MediaCard({
                 title={isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
               >
                 {isInWatchlist ? (
-                  <Check className="h-4 w-4" />
+                  <Check className="h-5 w-5" />
                 ) : (
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-5 w-5" />
                 )}
               </button>
             )}
@@ -286,10 +286,10 @@ export function MediaCard({
             {/* Play button */}
             <button
               onClick={handlePlayClick}
-              className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-white text-black transition-transform duration-200 hover:scale-110"
+              className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-transform duration-200 hover:scale-110 focus:scale-110"
               aria-label={`Play ${title}`}
             >
-              <Play className="h-4 w-4 fill-current" />
+              <Play className="h-5 w-5 fill-current" />
             </button>
           </div>
         </div>
