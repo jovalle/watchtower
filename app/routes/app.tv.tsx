@@ -1,5 +1,5 @@
 /**
- * TV Shows library page - displays all TV shows with filtering and sorting.
+ * Series library page - displays all TV series with filtering and sorting.
  * GET /app/tv
  */
 
@@ -12,14 +12,14 @@ import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { LibraryHeader, AlphabetSidebar } from "~/components/library";
 import { ContextMenu, type ContextMenuItem } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "TV Shows | Watchtower" },
-    { name: "description", content: "Browse your TV show library" },
+    { title: "Series | Watchtower" },
+    { name: "description", content: "Browse your TV series library" },
   ];
 };
 
@@ -71,11 +71,12 @@ interface LoaderData {
 }
 
 const SORT_OPTIONS = [
-  { value: "titleSort", label: "Title" },
-  { value: "originallyAvailableAt", label: "First Aired" },
+  { value: "titleSort", label: "Alphabetical" },
+  { value: "audienceRating", label: "Audience Score" },
+  { value: "rating", label: "Critic Score" },
+  { value: "originallyAvailableAt", label: "Release Date" },
   { value: "addedAt", label: "Date Added" },
-  { value: "rating", label: "Score" },
-  { value: "userRating", label: "Rating" },
+  { value: "userRating", label: "Your Rating" },
   { value: "leafCount", label: "Episode Count" },
 ];
 
@@ -98,7 +99,7 @@ function formatReleaseDate(dateStr?: string): string | undefined {
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const url = new URL(request.url);
 
   const sort = url.searchParams.get("sort") || "titleSort";
@@ -210,10 +211,30 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
 
   // Client-side sorting for leafCount (episode count) since Plex doesn't support this sort field
   if (sort === "leafCount" && items.length > 0) {
-    items = items.sort((a, b) => {
+    items = [...items].sort((a, b) => {
       const aCount = a.leafCount ?? 0;
       const bCount = b.leafCount ?? 0;
       return sortDirection === "desc" ? bCount - aCount : aCount - bCount;
+    });
+  }
+
+  // Apply client-side sorting for rating fields (Plex API doesn't handle nulls consistently)
+  if (sort === "audienceRating" || sort === "userRating" || sort === "rating") {
+    const getRatingValue = (item: ShowItemView): number | null => {
+      if (sort === "userRating") return item.userRating ?? null;
+      if (sort === "audienceRating") return item.audienceRating ?? null;
+      return item.audienceRating ?? null;
+    };
+
+    items = [...items].sort((a, b) => {
+      const aVal = getRatingValue(a);
+      const bVal = getRatingValue(b);
+      // Items without ratings go to the end
+      if (aVal === null && bVal === null) return 0;
+      if (aVal === null) return 1;
+      if (bVal === null) return -1;
+      // Sort by rating value
+      return sortDirection === "desc" ? bVal - aVal : aVal - bVal;
     });
   }
 
@@ -253,8 +274,8 @@ interface ContextMenuState {
 
 // Helper to format sort indicator based on current sort
 function getSortIndicator(item: ShowItemView, sort: string): string | undefined {
-  // Skip rating indicators - handled by showRating prop
-  if (sort === "rating" || sort === "userRating") {
+  // Skip rating indicators - handled by showRating/showScore props
+  if (sort === "audienceRating" || sort === "rating" || sort === "userRating") {
     return undefined;
   }
   if (sort === "originallyAvailableAt" && item.releaseDate) {
@@ -502,8 +523,9 @@ export default function TVShowsPage() {
     setSearchParams(newParams);
   }, [searchParams, setSearchParams]);
 
-  // Check sorting mode - distinguish between Score (TMDB) and My Rating (user's Plex rating)
-  const isSortingByScore = currentFilters.sort === "rating";
+  // Check sorting mode for badge display
+  const isSortingByAudienceScore = currentFilters.sort === "audienceRating";
+  const isSortingByCriticScore = currentFilters.sort === "rating";
   const isSortingByMyRating = currentFilters.sort === "userRating";
 
   return (
@@ -511,7 +533,7 @@ export default function TVShowsPage() {
       <Container size="wide" className="pt-6">
         {/* Plex-style Library Header */}
         <LibraryHeader
-          title="TV Shows"
+          title="Series"
           itemCount={items.length}
           currentFilter={currentFilters.filter}
           onFilterChange={handleFilterChange}
@@ -522,7 +544,7 @@ export default function TVShowsPage() {
             const newParams = new URLSearchParams(searchParams);
             newParams.set("sort", sort);
             // Default to descending for rating, episode count, and date sorts
-            const defaultDesc = ["rating", "userRating", "leafCount", "addedAt"].includes(sort);
+            const defaultDesc = ["audienceRating", "rating", "userRating", "leafCount", "addedAt"].includes(sort);
             const newDirection = sort !== currentFilters.sort
               ? (defaultDesc ? "desc" : "asc")
               : direction;
@@ -551,17 +573,17 @@ export default function TVShowsPage() {
           <div className="mt-8 flex flex-col items-center justify-center py-16 text-center">
             <Tv className="mb-4 h-16 w-16 text-foreground-muted" />
             <p className="mb-2 text-lg font-medium text-foreground-primary">
-              No TV shows found
+              No series found
             </p>
             <p className="text-foreground-secondary">
               {libraryKey
-                ? "Your TV show library appears to be empty."
-                : "No TV show library found on your Plex server."}
+                ? "Your series library appears to be empty."
+                : "No series library found on your Plex server."}
             </p>
           </div>
         )}
 
-        {/* TV Shows Grid - Vertical Posters */}
+        {/* Series Grid - Vertical Posters */}
         {!isLoading && items.length > 0 && (
           <div
             ref={gridRef}
@@ -583,9 +605,9 @@ export default function TVShowsPage() {
                   rating={item.userRating}
                   score={item.audienceRating}
                   isInWatchlist={getIsInWatchlist(item)}
-                  sortIndicator={!isSortingByScore && !isSortingByMyRating ? getSortIndicator(item, currentFilters.sort) : undefined}
+                  sortIndicator={!isSortingByAudienceScore && !isSortingByCriticScore && !isSortingByMyRating ? getSortIndicator(item, currentFilters.sort) : undefined}
                   showRating={isSortingByMyRating}
-                  showScore={isSortingByScore}
+                  showScore={isSortingByAudienceScore || isSortingByCriticScore}
                   onClick={() => navigate(`/app/media/show/${item.ratingKey}`)}
                   onMoreInfo={() => navigate(`/app/media/show/${item.ratingKey}`)}
                   onPlay={() => navigate(`/app/media/show/${item.ratingKey}`)}

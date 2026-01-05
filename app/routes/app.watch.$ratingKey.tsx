@@ -11,7 +11,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { VideoPlayer } from "~/components/player";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { QUALITY_PROFILES } from "~/lib/plex/types";
@@ -88,8 +88,26 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 // Use shared image URL helper
 import { buildPlexImageUrl } from "~/lib/plex/images";
 
+/**
+ * Detect if the request is from a mobile device.
+ * Mobile devices often can't play certain video codecs natively.
+ */
+function isMobileDevice(userAgent: string): boolean {
+  const mobilePatterns = [
+    /iPhone/i,
+    /iPad/i,
+    /iPod/i,
+    /Android/i,
+    /webOS/i,
+    /BlackBerry/i,
+    /Windows Phone/i,
+    /Mobile/i,
+  ];
+  return mobilePatterns.some((pattern) => pattern.test(userAgent));
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const { ratingKey } = params;
 
   if (!ratingKey) {
@@ -108,6 +126,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Media not found", { status: 404 });
   }
   const metadata = metadataResult.data;
+
+  // Detect mobile device for automatic transcoding
+  const userAgent = request.headers.get("User-Agent") || "";
+  const isMobile = isMobileDevice(userAgent);
 
   // Parse URL parameters
   const url = new URL(request.url);
@@ -135,10 +157,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookieHeader = request.headers.get("Cookie");
   const storedPref = getPlaybackPref(cookieHeader, ratingKey);
   const useStoredTranscode = storedPref === "transcode" && !forceTranscodeParam && qualityId === "original";
-  const forceTranscode = forceTranscodeParam || useStoredTranscode;
 
-  // Select quality profile
-  const effectiveQualityId = useStoredTranscode ? "1080p-20" : qualityId;
+  // Force transcoding for mobile devices to ensure compatible H.264/AAC format
+  // Mobile browsers (especially iOS Safari) have limited codec support
+  const forceTranscode = forceTranscodeParam || useStoredTranscode || isMobile;
+
+  // Select quality profile - use 1080p transcoding for mobile or stored preference
+  const effectiveQualityId = (useStoredTranscode || (isMobile && qualityId === "original")) ? "1080p-20" : qualityId;
   const selectedQuality = QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) || QUALITY_PROFILES[0];
 
   // Get stream URL - offset is in SECONDS
@@ -150,7 +175,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Logging
   console.log(`[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`);
-  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${playbackInfo.method}`);
+  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${playbackInfo.method}, Mobile: ${isMobile}`);
 
   // Build display title
   let displayTitle = metadata.title;
