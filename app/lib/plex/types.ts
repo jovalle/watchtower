@@ -99,6 +99,7 @@ export interface PlexMediaItem {
   audienceRating?: number;
   rating?: number;
   userRating?: number; // User's personal rating (0-10 scale)
+  lastRatedAt?: number; // Unix timestamp when user last rated this item
   viewCount?: number;
   lastViewedAt?: number;
   viewOffset?: number;
@@ -153,6 +154,8 @@ export interface PlexMetadata extends PlexMediaItem {
   Writer?: PlexTag[];
   Role?: PlexRole[];
   Similar?: Array<{ id?: number; tag: string; ratingKey?: string }>;
+  // External IDs (IMDb, TMDB, TVDB, etc.)
+  Guid?: Array<{ id: string }>;
   // Media/stream info
   Media?: Array<{
     id: number;

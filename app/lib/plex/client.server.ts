@@ -1315,17 +1315,3 @@ export class PlexClient {
   }
 }
 
-/**
- * Create a PlexClient from environment configuration.
- */
-export function createPlexClientFromEnv(): PlexClient {
-  // Import dynamically to avoid circular dependencies
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { env } = require("~/lib/env.server");
-
-  return new PlexClient({
-    serverUrl: env.PLEX_SERVER_URL,
-    token: env.PLEX_TOKEN,
-    clientId: env.PLEX_CLIENT_ID,
-  });
-}
