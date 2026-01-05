@@ -11,7 +11,7 @@ import { Flame, TrendingUp, Clock, Star } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { Typography } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { PLEX_DISCOVER_URL } from "~/lib/plex/constants";
@@ -90,7 +90,7 @@ function formatRuntime(durationMs?: number): string | undefined {
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
@@ -357,8 +357,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
     worthTheWait: topItems.filter((_, i) => i >= 5), // Placeholder - use lower-ranked top items
   };
 
-  // Cache the data for future requests (user-specific)
-  await setCache<CachedNewPopularData>(cacheKey, data);
+  // Only cache if we have actual data - prevents caching empty results from API failures
+  const hasData = trendingItems.length > 0 || topItems.length > 0 || comingSoonItems.length > 0;
+  if (hasData) {
+    await setCache<CachedNewPopularData>(cacheKey, data);
+  }
 
   return json<LoaderData>(data);
 }
