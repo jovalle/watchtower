@@ -7,26 +7,38 @@ services:
       - ALL
     container_name: watchtower
     environment:
-      IMDB_WATCHLISTS: ${WATCHTOWER_IMDB_WATCHLISTS:-}
-      NODE_ENV: production
-      PLEX_CLIENT_ID: ${WATCHTOWER_PLEX_CLIENT_ID:-watchtower-001}
-      PLEX_SERVER_URL: ${WATCHTOWER_PLEX_SERVER_URL:http://plex:32400}
-      PLEX_TOKEN: ${WATCHTOWER_PLEX_TOKEN:?"plex token not defined"}
+      # Required
+      PLEX_TOKEN: ${PLEX_TOKEN:?PLEX_TOKEN is required}
+      SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-in-production}
+      # Server config (defaults work for local Docker with Plex container)
+      PLEX_SERVER_URL: ${PLEX_SERVER_URL:-http://plex:32400}
+      PLEX_CLIENT_ID: ${PLEX_CLIENT_ID:-watchtower-001}
       PORT: ${WATCHTOWER_PORT:-9001}
-      SESSION_SECRET: ${WATCHTOWER_SESSION_SECRET:?watchtower session secret not defined}
-      TMDB_API_KEY: ${WATCHTOWER_TMDB_API_KEY:-} # Optional: TMDB API key for recommendations (leave empty to disable)
-      TRAKT_CLIENT_ID: ${WATCHTOWER_TRAKT_CLIENT_ID:-}
-      TRAKT_CLIENT_SECRET: ${WATCHTOWER_TRAKT_CLIENT_SECRET:-}
-      TRAKT_USERNAME: ${WATCHTOWER_TRAKT_USERNAME:-}
+      NODE_ENV: production
+      # Cookie security: false for LAN/HTTP, true for HTTPS (see .env.example)
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      # Optional integrations (leave empty to disable)
+      OMDB_API_KEY: ${OMDB_API_KEY:-}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID:-}
     healthcheck:
       interval: 30s
       retries: 3
       start_period: 10s
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9001/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9001/",
+        ]
       timeout: 3s
-    image: ghcr.io/jovalle/watchtower:${DOCKER_TAG:-latest}
+    image: watchtower:local
+    pull_policy: never
     ports:
-      - "${PORT:-9001}:9001"
+      - "${WATCHTOWER_PORT:-9001}:9001"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

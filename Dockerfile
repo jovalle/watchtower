@@ -40,6 +40,7 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Set production environment
 ENV NODE_ENV=production
 ENV PORT=9001
+ENV HOST=0.0.0.0
 
 # Copy built application with correct ownership
 COPY --from=builder --chown=remix:nodejs /app/build ./build
