@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Form } from "@remix-run/react";
-import { ChevronDown, LogOut, User } from "lucide-react";
+import { Form, Link } from "@remix-run/react";
+import { ChevronDown, LogOut, Settings, User } from "lucide-react";
 import type { PlexUser } from "~/lib/auth/plex.server";
 
 interface UserMenuProps {
@@ -96,6 +96,15 @@ export function UserMenu({ user }: UserMenuProps) {
 
         {/* Menu items */}
         <div className="py-1">
+          <Link
+            to="/app/settings"
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm text-foreground-secondary transition-colors hover:bg-background-primary hover:text-foreground-primary"
+            role="menuitem"
+            onClick={() => setIsOpen(false)}
+          >
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
           <Form method="post" action="/auth/logout">
             <button
               type="submit"
