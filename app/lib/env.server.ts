@@ -32,7 +32,15 @@ export const env = {
   },
 
   /**
-   * Plex authentication token for API access
+   * Plex server admin token for LIMITED operations only.
+   *
+   * SECURITY: This token has full access to the Plex server and should
+   * NEVER be used for user-facing operations. It is only used for:
+   * - Server health checks (api.plex.health.ts)
+   *
+   * All authenticated user operations MUST use the user's own token
+   * obtained via OAuth (from requirePlexToken). Using this token for
+   * user operations would bypass per-user access controls.
    */
   get PLEX_TOKEN(): string {
     return getEnvVar("PLEX_TOKEN");
@@ -74,6 +82,19 @@ export const env = {
   },
 
   /**
+   * Whether to use secure cookies (requires HTTPS).
+   * Defaults to true in production, false in development.
+   * Set to "false" for LAN deployments without HTTPS.
+   */
+  get SECURE_COOKIES(): boolean {
+    const value = process.env.SECURE_COOKIES;
+    if (value !== undefined) {
+      return value.toLowerCase() === "true";
+    }
+    return this.isProduction;
+  },
+
+  /**
    * Data directory path for caching (logos, metadata, etc.)
    * Defaults to ./data in dev, /data in Docker/production
    */
@@ -93,28 +114,6 @@ export const env = {
     return value && value.trim() ? value.trim() : null;
   },
 
-  /**
-   * Trakt username for fetching public watchlist (optional)
-   * Leave empty to disable Trakt integration
-   */
-  get TRAKT_USERNAME(): string | null {
-    const value = process.env.TRAKT_USERNAME;
-    return value && value.trim() ? value.trim() : null;
-  },
-
-  /**
-   * IMDB user watchlist IDs (comma-separated, optional)
-   * Format: ur12345678 or ls12345678
-   * Example: IMDB_WATCHLISTS=ur65830902,ls012345678
-   */
-  get IMDB_WATCHLISTS(): string[] {
-    const value = process.env.IMDB_WATCHLISTS;
-    if (!value || !value.trim()) return [];
-    return value
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => /^(ur|ls)\d+$/.test(id));
-  },
 } as const;
 
 export type Env = typeof env;
