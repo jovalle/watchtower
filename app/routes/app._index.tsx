@@ -11,7 +11,7 @@ import { Plus, ListX, X } from "lucide-react";
 import { Billboard, MediaCard, MediaRow } from "~/components/media";
 import { Container } from "~/components/layout";
 import { ContextMenu, type ContextMenuItem } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { env } from "~/lib/env.server";
@@ -125,7 +125,7 @@ interface CachedHomeData {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
@@ -263,12 +263,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Limit to reasonable number for cycling
   const limitedCandidates = billboardCandidates.slice(0, 10);
 
-  // Cache the data for future requests (user-specific)
-  await setCache<CachedHomeData>(cacheKey, {
-    billboardCandidates: limitedCandidates,
-    continueWatching,
-    recentlyAdded,
-  });
+  // Only cache if we have actual data - prevents caching empty results from API failures
+  const hasData = limitedCandidates.length > 0 || continueWatching.length > 0 || recentlyAdded.length > 0;
+  if (hasData) {
+    await setCache<CachedHomeData>(cacheKey, {
+      billboardCandidates: limitedCandidates,
+      continueWatching,
+      recentlyAdded,
+    });
+  }
 
   return json<LoaderData>({
     billboardCandidates: limitedCandidates,

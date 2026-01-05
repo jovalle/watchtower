@@ -9,7 +9,7 @@ import { useLoaderData, Link } from "@remix-run/react";
 import { ListVideo, FolderOpen, Film, Tv } from "lucide-react";
 import { Container } from "~/components/layout";
 import { Typography } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import type { PlexPlaylist } from "~/lib/plex/types";
@@ -47,7 +47,7 @@ function buildImageUrl(
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
 
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,

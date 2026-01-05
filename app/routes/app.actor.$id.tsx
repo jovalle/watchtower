@@ -10,7 +10,7 @@ import { User } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { Typography } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import type { PlexMediaItem } from "~/lib/plex/types";
@@ -47,7 +47,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const name = data?.actorName ?? "Actor";
   return [
     { title: `${name} | Watchtower` },
-    { name: "description", content: `Movies and TV shows featuring ${name}` },
+    { name: "description", content: `Movies and series featuring ${name}` },
   ];
 };
 
@@ -106,7 +106,7 @@ function transformToView(
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const { id } = params;
   const url = new URL(request.url);
 
@@ -198,7 +198,7 @@ export default function ActorPage() {
             </Typography>
             <Typography variant="body" className="text-foreground-secondary">
               {movies.length} Movie{movies.length !== 1 ? "s" : ""},{" "}
-              {shows.length} TV Show{shows.length !== 1 ? "s" : ""}
+              {shows.length} Series
             </Typography>
           </div>
         </div>
@@ -247,11 +247,11 @@ export default function ActorPage() {
           </div>
         )}
 
-        {/* TV Shows Section */}
+        {/* Series Section */}
         {shows.length > 0 && (
           <div className="mb-8">
             <Typography variant="title" className="mb-4">
-              TV Shows
+              Series
             </Typography>
             <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
               {shows.map((item) => (

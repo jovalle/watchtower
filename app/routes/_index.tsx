@@ -1,40 +1,9 @@
 import { useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json, redirect } from '@remix-run/node';
-import { Form, useNavigation, useLoaderData } from '@remix-run/react';
+import { redirect } from '@remix-run/node';
+import { Form, useNavigation } from '@remix-run/react';
 import { Play, Tv, Film, Users, Plus, X } from 'lucide-react';
 import { getPlexToken } from '~/lib/auth/session.server';
-import { PlexClient } from '~/lib/plex/client.server';
-import { env } from '~/lib/env.server';
-import type { PlexMediaItem } from '~/lib/plex/types';
-
-interface TrendingItem {
-  rank: number;
-  title: string;
-  year: string;
-  poster: string;
-  genres: string[];
-  runtime: string;
-  summary: string;
-}
-
-interface LoaderData {
-  trending: TrendingItem[];
-}
-
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
-
-function formatRuntime(durationMs?: number): string {
-  if (!durationMs) return '';
-  const minutes = Math.floor(durationMs / 60000);
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (hours > 0) {
-    return `${hours}h ${remainingMinutes}m`;
-  }
-  return `${remainingMinutes}m`;
-}
 
 const FAQ_ITEMS = [
   {
@@ -93,34 +62,6 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
   );
 }
 
-function Top10Card({ rank, poster, title }: TrendingItem) {
-  return (
-    <div className="group relative flex flex-shrink-0 items-center">
-      {/* Large outlined number - Netflix style */}
-      <div className="relative z-0 flex items-center">
-        <span
-          className="select-none font-black italic leading-none"
-          style={{
-            fontSize: '160px',
-            color: '#141414',
-            WebkitTextStroke: '4px #595959',
-            paintOrder: 'stroke fill',
-            marginRight: '-28px',
-          }}
-        >
-          {rank}
-        </span>
-      </div>
-      {/* Poster */}
-      <div className="relative z-10 w-[136px] transition-transform duration-300 group-hover:scale-105">
-        <div className="aspect-[2/3] overflow-hidden rounded-[4px] bg-background-elevated shadow-lg">
-          <img src={poster} alt={title} className="h-full w-full object-cover" loading="lazy" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export const meta: MetaFunction = () => {
   return [
     { title: 'Watchtower' },
@@ -128,20 +69,10 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-// Curated list of trending titles to display on the landing page
-const TRENDING_TITLES = [
-  { title: 'The Bond Cocktail', year: 1999, type: 'movie' },
-  { title: 'Casino Royale', year: 1954, type: 'movie' },
-  { title: 'Grease', year: 1978, type: 'movie' },
-  { title: 'West Side Story', year: 1961, type: 'movie' },
-  { title: 'The Cable Guy', year: 1996, type: 'movie' },
-  { title: 'Tom and Jerry', year: 1940, type: 'show' },
-  { title: 'Amistad', year: 1997, type: 'movie' },
-  { title: 'Beverly Hills Cop III', year: 1994, type: 'movie' },
-  { title: 'Encino Man', year: 1992, type: 'movie' },
-  { title: 'The Patriot', year: 2000, type: 'movie' },
-] as const;
-
+/**
+ * Landing page loader - only checks if user is already logged in.
+ * No server content is exposed to unauthenticated users.
+ */
 export async function loader({ request }: LoaderFunctionArgs) {
   const userToken = await getPlexToken(request);
 
@@ -150,80 +81,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect('/app');
   }
 
-  // Fetch curated content from Plex using server token for public display
-  const client = new PlexClient({
-    serverUrl: env.PLEX_SERVER_URL,
-    token: env.PLEX_TOKEN,
-    clientId: env.PLEX_CLIENT_ID,
-  });
-
-  const trending: TrendingItem[] = [];
-
-  try {
-    // Get libraries
-    const librariesResult = await client.getLibraries();
-    if (librariesResult.success) {
-      const movieLibrary = librariesResult.data.find((lib) => lib.type === 'movie');
-      const tvLibrary = librariesResult.data.find((lib) => lib.type === 'show');
-
-      // Fetch all items from both libraries to search through
-      const [allMovies, allShows] = await Promise.all([
-        movieLibrary
-          ? client.getLibraryItems(movieLibrary.key, { limit: 500 })
-          : Promise.resolve({ success: false as const, error: { code: 0, message: '' } }),
-        tvLibrary
-          ? client.getLibraryItems(tvLibrary.key, { limit: 500 })
-          : Promise.resolve({ success: false as const, error: { code: 0, message: '' } }),
-      ]);
-
-      // Build lookup maps by title+year for fast matching
-      const movieMap = new Map<string, PlexMediaItem>();
-      const showMap = new Map<string, PlexMediaItem>();
-
-      if (allMovies.success) {
-        allMovies.data.forEach((item) => {
-          const key = `${item.title.toLowerCase()}|${item.year}`;
-          movieMap.set(key, item);
-        });
-      }
-
-      if (allShows.success) {
-        allShows.data.forEach((item) => {
-          const key = `${item.title.toLowerCase()}|${item.year}`;
-          showMap.set(key, item);
-        });
-      }
-
-      // Find each curated title
-      TRENDING_TITLES.forEach((target, index) => {
-        const key = `${target.title.toLowerCase()}|${target.year}`;
-        const item = target.type === 'show' ? showMap.get(key) : movieMap.get(key);
-
-        if (item) {
-          trending.push({
-            rank: index + 1,
-            title: item.title,
-            year: item.year?.toString() || '',
-            poster: buildPlexImageUrl(item.thumb),
-            genres: item.Genre?.map((g: { tag: string }) => g.tag) || [],
-            runtime:
-              target.type === 'show' && item.childCount
-                ? `${item.childCount} Seasons`
-                : formatRuntime(item.duration),
-            summary: item.summary || '',
-          });
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Failed to fetch trending content:', error);
-  }
-
-  return json<LoaderData>({ trending });
+  return null;
 }
 
 export default function Index() {
-  const { trending } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
 
@@ -352,24 +213,6 @@ export default function Index() {
           </div>
         </div>
       </section>
-
-      {/* Trending Now Section - Netflix style */}
-      {trending.length > 0 && (
-        <section className="border-t-8 border-background-elevated bg-background-primary py-12 md:py-16">
-          <div className="mx-auto max-w-6xl">
-            <h2 className="mb-4 px-6 text-xl font-semibold text-foreground-primary md:text-2xl">
-              Trending Now
-            </h2>
-            <div className="overflow-x-auto overflow-y-hidden">
-              <div className="flex gap-2 px-6 pb-2">
-                {trending.map((film) => (
-                  <Top10Card key={film.rank} {...film} />
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* FAQ Section */}
       <section className="border-t-8 border-background-elevated bg-background-primary py-12 md:py-20">

@@ -10,7 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media/PosterCard";
 import { Typography } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import type { PlexMediaItem } from "~/lib/plex/types";
@@ -72,7 +72,7 @@ function formatRuntime(durationMs?: number): string | undefined {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const { type, ratingKey } = params;
 
   // Validate type parameter

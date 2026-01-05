@@ -12,7 +12,7 @@ import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { LibraryHeader, AlphabetSidebar } from "~/components/library";
 import { ContextMenu, type ContextMenuItem } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 
@@ -67,12 +67,13 @@ interface LoaderData {
 }
 
 const SORT_OPTIONS = [
-  { value: "titleSort", label: "Title" },
+  { value: "titleSort", label: "Alphabetical" },
+  { value: "audienceRating", label: "Audience Score" },
+  { value: "rating", label: "Critic Score" },
   { value: "originallyAvailableAt", label: "Release Date" },
+  { value: "duration", label: "Runtime" },
   { value: "addedAt", label: "Date Added" },
-  { value: "rating", label: "Score" },
-  { value: "userRating", label: "Rating" },
-  { value: "duration", label: "Duration" },
+  { value: "userRating", label: "Your Rating" },
 ];
 
 
@@ -105,7 +106,7 @@ function formatReleaseDate(dateStr?: string): string | undefined {
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const url = new URL(request.url);
 
   const sort = url.searchParams.get("sort") || "titleSort";
@@ -204,9 +205,30 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
     : [];
 
   // Apply client-side genre filtering (Plex API requires genre IDs, not names)
-  const items = genreFilter
+  let items = genreFilter
     ? allItems.filter((item) => item.details.genres?.includes(genreFilter))
     : allItems;
+
+  // Apply client-side sorting for rating fields (Plex API doesn't handle nulls consistently)
+  if (sort === "audienceRating" || sort === "userRating" || sort === "rating") {
+    const getRatingValue = (item: MovieItemView): number | null => {
+      if (sort === "userRating") return item.userRating ?? null;
+      if (sort === "audienceRating") return item.audienceRating ?? null;
+      // For critic rating, we'd need to add it to the view model if needed
+      return item.audienceRating ?? null;
+    };
+
+    items = [...items].sort((a, b) => {
+      const aVal = getRatingValue(a);
+      const bVal = getRatingValue(b);
+      // Items without ratings go to the end
+      if (aVal === null && bVal === null) return 0;
+      if (aVal === null) return 1;
+      if (bVal === null) return -1;
+      // Sort by rating value
+      return sortDirection === "desc" ? bVal - aVal : aVal - bVal;
+    });
+  }
 
   // Extract available filter values from raw items (before filtering)
   // For filtered views, we'd need a separate call to get all genres/years
@@ -246,8 +268,8 @@ interface ContextMenuState {
 
 // Helper to format sort indicator based on current sort
 function getSortIndicator(item: MovieItemView, sort: string): string | undefined {
-  // Skip rating indicators - handled by showRating prop
-  if (sort === "rating" || sort === "userRating") {
+  // Skip rating indicators - handled by showRating/showScore props
+  if (sort === "audienceRating" || sort === "rating" || sort === "userRating") {
     return undefined;
   }
   if (sort === "originallyAvailableAt" && item.releaseDate) {
@@ -494,8 +516,9 @@ export default function MoviesPage() {
     setSearchParams(newParams);
   }, [searchParams, setSearchParams]);
 
-  // Check sorting mode - distinguish between Score (TMDB) and My Rating (user's Plex rating)
-  const isSortingByScore = currentFilters.sort === "rating";
+  // Check sorting mode for badge display
+  const isSortingByAudienceScore = currentFilters.sort === "audienceRating";
+  const isSortingByCriticScore = currentFilters.sort === "rating";
   const isSortingByMyRating = currentFilters.sort === "userRating";
 
   return (
@@ -514,7 +537,7 @@ export default function MoviesPage() {
             const newParams = new URLSearchParams(searchParams);
             newParams.set("sort", sort);
             // Default to descending for rating and date sorts
-            const defaultDesc = ["rating", "userRating", "addedAt", "originallyAvailableAt"].includes(sort);
+            const defaultDesc = ["audienceRating", "rating", "userRating", "addedAt", "originallyAvailableAt"].includes(sort);
             const newDirection = sort !== currentFilters.sort
               ? (defaultDesc ? "desc" : "asc")
               : direction;
@@ -573,9 +596,9 @@ export default function MoviesPage() {
                   rating={item.userRating}
                   score={item.audienceRating}
                   isInWatchlist={getIsInWatchlist(item)}
-                  sortIndicator={!isSortingByScore && !isSortingByMyRating ? getSortIndicator(item, currentFilters.sort) : undefined}
+                  sortIndicator={!isSortingByAudienceScore && !isSortingByCriticScore && !isSortingByMyRating ? getSortIndicator(item, currentFilters.sort) : undefined}
                   showRating={isSortingByMyRating}
-                  showScore={isSortingByScore}
+                  showScore={isSortingByAudienceScore || isSortingByCriticScore}
                   onClick={() => navigate(`/app/media/movie/${item.ratingKey}`)}
                   onMoreInfo={() => navigate(`/app/media/movie/${item.ratingKey}`)}
                   onPlay={() => navigate(`/app/watch/${item.ratingKey}`)}
