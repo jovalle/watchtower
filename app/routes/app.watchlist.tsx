@@ -9,7 +9,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useNavigate } from '@remix-run/react';
+import { useLoaderData, useFetcher, useNavigate } from '@remix-run/react';
 import {
   ListVideo,
   SortAsc,
@@ -22,13 +22,14 @@ import { Container } from '~/components/layout';
 import { PosterCard } from '~/components/media/PosterCard';
 import { Typography, FilterDropdown } from '~/components/ui';
 import type { FilterOption } from '~/components/ui';
-import { requirePlexToken } from '~/lib/auth/session.server';
+import { requireServerToken, requirePlexToken } from '~/lib/auth/session.server';
+import { requireUser } from '~/lib/auth/user.server';
 import { PlexClient } from '~/lib/plex/client.server';
-import { createTraktClient, isTraktEnabled } from '~/lib/trakt/client.server';
+import { createTraktClient, isTraktAvailable } from '~/lib/trakt/client.server';
 import { createTMDBClient } from '~/lib/tmdb/client.server';
-import { isIMDBEnabled } from '~/lib/imdb/client.server';
 import { getUnifiedWatchlist } from '~/lib/watchlist/service.server';
 import { getWatchlistCache, setWatchlistCache } from '~/lib/watchlist/cache.server';
+import { getUserSettings } from '~/lib/settings/storage.server';
 import { env } from '~/lib/env.server';
 import { PLEX_DISCOVER_URL } from '~/lib/plex/constants';
 import type { WatchlistSource, WatchlistCounts, UnifiedWatchlistItem } from '~/lib/watchlist/types';
@@ -52,17 +53,24 @@ interface LoaderData {
   cachedAt: number;
 }
 
-type SortOption = 'addedAt:desc' | 'addedAt:asc' | 'title:asc' | 'title:desc' | 'score:desc';
+type SortOption =
+  | 'addedAt:desc'
+  | 'addedAt:asc'
+  | 'title:asc'
+  | 'title:desc'
+  | 'score:desc'
+  | 'score:asc'
+  | 'year:desc'
+  | 'year:asc';
 type SourceFilterValue = 'all' | WatchlistSource;
 type TypeFilterValue = 'all' | 'movie' | 'show';
 type AvailabilityFilterValue = 'all' | 'available' | 'unavailable';
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'addedAt:desc', label: 'Recently Added' },
-  { value: 'addedAt:asc', label: 'Oldest Added' },
-  { value: 'title:asc', label: 'Title A-Z' },
-  { value: 'title:desc', label: 'Title Z-A' },
-  { value: 'score:desc', label: 'Highest Score' },
+  { value: 'addedAt:desc', label: 'Date Added' },
+  { value: 'title:asc', label: 'Alphabetical' },
+  { value: 'score:desc', label: 'Audience Score' },
+  { value: 'year:desc', label: 'Release Date' },
 ];
 
 /**
@@ -96,13 +104,34 @@ function getEarliestAddedAt(item: UnifiedWatchlistItem): number {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  // Get both tokens:
+  // - serverToken: for accessing the local Plex server (library browsing)
+  // - plexToken: for plex.tv cloud services (Discover API, watchlist)
+  const serverToken = await requireServerToken(request);
+  const plexToken = await requirePlexToken(request);
+  const user = await requireUser(request);
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get('refresh') === 'true';
 
+  // Fetch per-user settings for Trakt/IMDB sources
+  const userSettings = await getUserSettings(user.id);
+  const traktUsername = userSettings?.traktUsername || null;
+  const imdbWatchlistIds = userSettings?.imdbWatchlistIds || [];
+
+  console.log(`[Watchlist] User ${user.id} settings: trakt=${traktUsername}, imdb=${imdbWatchlistIds.join(',') || 'none'}, forceRefresh=${forceRefresh}`);
+  console.log(`[Watchlist] Token types - serverToken: ${serverToken?.substring(0, 8)}..., plexToken: ${plexToken?.substring(0, 8)}...`);
+
+  // Use serverToken for local library access
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,
-    token,
+    token: serverToken,
+    clientId: env.PLEX_CLIENT_ID,
+  });
+
+  // Use plexToken for Discover API (watchlist) - this is the user's plex.tv token
+  const discoverClient = new PlexClient({
+    serverUrl: env.PLEX_SERVER_URL,
+    token: plexToken,
     clientId: env.PLEX_CLIENT_ID,
   });
 
@@ -165,8 +194,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let isStale = false;
   let cachedAt = Math.floor(Date.now() / 1000); // Default to now
 
-  // Try cache first (unless forcing refresh) - user-specific cache
-  const cached = !forceRefresh ? await getWatchlistCache(token) : null;
+  // Try cache first (unless forcing refresh) - user-specific cache keyed by plexToken
+  const cached = !forceRefresh ? await getWatchlistCache(plexToken) : null;
 
   if (cached) {
     // Use cached data but refresh library availability and watched status
@@ -200,9 +229,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const traktClient = createTraktClient();
     const tmdbClient = createTMDBClient();
 
+    // Use discoverClient (with plexToken) for Discover API, client (with serverToken) for local library
     const result = await getUnifiedWatchlist(
-      client,
-      token,
+      discoverClient, // Client with plexToken for plex.tv Discover API
+      plexToken,
       traktClient,
       tmdbClient,
       'all',
@@ -216,13 +246,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       localItemsByGuid,
       localItemsByTitleYear,
+      { traktUsername, imdbWatchlistIds },
     );
     rawItems = result.items;
     counts = result.counts;
     cachedAt = Math.floor(Date.now() / 1000);
 
-    // Cache the result (user-specific)
-    await setWatchlistCache(token, rawItems, counts);
+    // Cache the result (user-specific, keyed by plexToken)
+    await setWatchlistCache(plexToken, rawItems, counts);
   }
 
   // Sort by addedAt descending by default
@@ -232,22 +263,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return bTime - aTime;
   });
 
+  // Trakt is enabled if client ID is configured AND user has set a username
+  const traktEnabled = isTraktAvailable() && !!traktUsername;
+  // IMDB is enabled if user has configured watchlist IDs
+  const imdbEnabled = imdbWatchlistIds.length > 0;
+
   return json<LoaderData>({
     items,
     counts,
-    token,
-    traktEnabled: isTraktEnabled(),
-    imdbEnabled: isIMDBEnabled(),
+    token: plexToken, // plexToken for Discover API image URLs
+    traktEnabled,
+    imdbEnabled,
     isStale,
     cachedAt,
   });
 }
 
 export default function WatchlistPage() {
-  const { items, traktEnabled, imdbEnabled, isStale, cachedAt } =
-    useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof loader>();
   const navigate = useNavigate();
-  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Track refresh state from fetcher
+  const isRefreshing = fetcher.state === 'loading';
+
+  // Use fetcher data if available AND has items, otherwise use loader data
+  // This prevents visual emptying if refresh returns empty results temporarily
+  // Also preserve current data while refresh is in progress
+  const effectiveData = useMemo(() => {
+    // While refreshing, always show current data (don't flash empty)
+    if (isRefreshing) {
+      return fetcher.data?.items?.length ? fetcher.data : loaderData;
+    }
+    // After refresh completes, prefer fetcher data if it has items
+    if (fetcher.data?.items?.length) {
+      return fetcher.data;
+    }
+    // Fall back to loader data
+    return loaderData;
+  }, [fetcher.data, loaderData, isRefreshing]);
+
+  const { items, traktEnabled, imdbEnabled, isStale, cachedAt } = effectiveData;
 
   // Client-side filters and sorting state (arrays for multi-select)
   const [sourceFilters, setSourceFilters] = useState<SourceFilterValue[]>(['all']);
@@ -255,11 +311,10 @@ export default function WatchlistPage() {
   const [availabilityFilters, setAvailabilityFilters] = useState<AvailabilityFilterValue[]>(['all']);
   const [sortOption, setSortOption] = useState<SortOption>('addedAt:desc');
 
-  // Handle manual refresh - navigate to force refresh
+  // Handle manual refresh - use fetcher to load in background without navigation
   const handleRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    navigate('/app/watchlist?refresh=true');
-  }, [navigate]);
+    fetcher.load('/app/watchlist?refresh=true');
+  }, [fetcher]);
 
   // Get addedAt with cachedAt as fallback
   const getItemAddedAt = useCallback(
@@ -305,7 +360,12 @@ export default function WatchlistPage() {
       if (sortField === 'score') {
         const aScore = a.rating ?? 0;
         const bScore = b.rating ?? 0;
-        return bScore - aScore; // Always descending for score
+        return sortDir === 'asc' ? aScore - bScore : bScore - aScore;
+      }
+      if (sortField === 'year') {
+        const aYear = a.year ?? 0;
+        const bYear = b.year ?? 0;
+        return sortDir === 'asc' ? aYear - bYear : bYear - aYear;
       }
       // Default: sort by addedAt
       const aTime = getItemAddedAt(a);

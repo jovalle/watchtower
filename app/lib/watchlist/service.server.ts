@@ -9,13 +9,20 @@ import type { TraktClient } from "~/lib/trakt/client.server";
 import type { TraktWatchlistItem } from "~/lib/trakt/types";
 import type { TMDBClient } from "~/lib/tmdb/client.server";
 import { getIMDBWatchlists, type IMDBWatchlistItem } from "~/lib/imdb/client.server";
-import { env } from "~/lib/env.server";
 import type {
   UnifiedWatchlistItem,
   WatchlistSource,
   WatchlistFilter,
   WatchlistCounts,
 } from "./types";
+
+/**
+ * Per-user watchlist settings.
+ */
+export interface WatchlistUserSettings {
+  traktUsername: string | null;
+  imdbWatchlistIds: string[];
+}
 
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 
@@ -164,19 +171,25 @@ function getEarliestAddedAt(item: UnifiedWatchlistItem): number {
 
 /**
  * Fetch IMDB watchlists and enrich with TMDB poster data and ratings.
+ * @param listIds Array of IMDB list IDs (ur* or ls*)
  */
 async function getIMDBWatchlistWithPosters(
-  tmdbClient: TMDBClient | null
+  tmdbClient: TMDBClient | null,
+  listIds: string[]
 ): Promise<UnifiedWatchlistItem[]> {
-  const items = await getIMDBWatchlists();
+  const items = await getIMDBWatchlists(listIds);
   const unified = items.map(imdbToUnified);
 
-  // Fetch poster URLs and ratings from TMDB
+  // Fetch poster URLs, titles, and ratings from TMDB
   if (tmdbClient) {
     for (const item of unified) {
       if (item.imdbId) {
         const findResult = await tmdbClient.findByIMDB(item.imdbId);
         if (findResult.success && findResult.data) {
+          // Update title from TMDB if current title is just an IMDb ID (fallback from HTML parsing)
+          if (findResult.data.title && item.title.startsWith("tt")) {
+            item.title = findResult.data.title;
+          }
           if (findResult.data.posterPath && !item.thumb) {
             item.thumb = `${TMDB_IMAGE_BASE_URL}/w342${findResult.data.posterPath}`;
           }
@@ -320,6 +333,7 @@ async function getPlexWatchlistWithRatings(
 
 /**
  * Fetch unified watchlist from all enabled sources.
+ * @param userSettings Per-user settings for Trakt/IMDB sources
  */
 export async function getUnifiedWatchlist(
   plexClient: PlexClient,
@@ -329,9 +343,16 @@ export async function getUnifiedWatchlist(
   filter: WatchlistFilter = "all",
   buildPlexImageUrl: (thumb: string | undefined, token: string) => string,
   localItemsByGuid: Map<string, LocalItemData>,
-  localItemsByTitleYear?: Map<string, LocalItemData>
+  localItemsByTitleYear?: Map<string, LocalItemData>,
+  userSettings?: WatchlistUserSettings
 ): Promise<UnifiedWatchlistResult> {
   const counts: WatchlistCounts = { all: 0, plex: 0, trakt: 0, imdb: 0 };
+
+  // Extract user settings with defaults
+  const traktUsername = userSettings?.traktUsername || null;
+  const imdbWatchlistIds = userSettings?.imdbWatchlistIds || [];
+
+  console.log(`[WatchlistService] Settings received: trakt=${traktUsername}, imdb=[${imdbWatchlistIds.join(',')}]`);
 
   // Fetch from all sources in parallel
   const [plexItems, traktItems, imdbItems] = await Promise.all([
@@ -344,17 +365,17 @@ export async function getUnifiedWatchlist(
     // Trakt watchlist
     (async () => {
       if (filter !== "all" && filter !== "trakt") return [];
-      if (!traktClient || !env.TRAKT_USERNAME) return [];
+      if (!traktClient || !traktUsername) return [];
 
-      return getTraktWatchlistWithPosters(traktClient, env.TRAKT_USERNAME, tmdbClient);
+      return getTraktWatchlistWithPosters(traktClient, traktUsername, tmdbClient);
     })(),
 
     // IMDB watchlist
     (async () => {
       if (filter !== "all" && filter !== "imdb") return [];
-      if (env.IMDB_WATCHLISTS.length === 0) return [];
+      if (imdbWatchlistIds.length === 0) return [];
 
-      return getIMDBWatchlistWithPosters(tmdbClient);
+      return getIMDBWatchlistWithPosters(tmdbClient, imdbWatchlistIds);
     })(),
   ]);
 
