@@ -10,11 +10,11 @@
 
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
 
   // Parse query params
   const url = new URL(request.url);
