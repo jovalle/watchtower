@@ -259,10 +259,10 @@ export function PosterCard({
           </div>
         ) : null}
 
-        {/* Availability indicator (small dot with pulse animation, bottom-right on poster) */}
+        {/* Availability indicator (subtle dot, bottom-right on poster) */}
         {isAvailable !== undefined && (
           <div
-            className={`absolute bottom-2 right-2 z-10 h-2.5 w-2.5 animate-pulse rounded-full shadow-sm ${
+            className={`absolute bottom-2 right-2 z-10 h-2 w-2 rounded-full opacity-70 ${
               isAvailable ? "bg-green-500" : "bg-red-500"
             }`}
             title={isAvailable ? "Available in library" : "Not in library"}
@@ -333,6 +333,13 @@ export function PosterCard({
                 <span className="flex items-center gap-0.5 text-white">
                   <Star className="h-3 w-3 fill-white" />
                   {score.toFixed(1)}
+                </span>
+              )}
+              {/* User's rating - always show when they've rated the movie (mango star) */}
+              {!showRating && rating !== undefined && rating > 0 && (
+                <span className="flex items-center gap-0.5 text-mango">
+                  <Star className="h-3 w-3 fill-mango" />
+                  {rating.toFixed(1)}
                 </span>
               )}
             </div>

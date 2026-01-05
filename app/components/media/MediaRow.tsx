@@ -18,9 +18,10 @@ export function MediaRow({ title, children }: MediaRowProps) {
   const showLeftArrow = scrollX > 0;
   const showRightArrow = scrollX < maxScroll;
 
-  // Track desktop vs mobile for transform vs native scroll
+  // Track desktop vs tablet/mobile for transform vs native scroll
+  // Use 1024px breakpoint to ensure iPads use native touch scrolling
   useEffect(() => {
-    const checkDesktop = () => setIsDesktop(window.innerWidth >= 640);
+    const checkDesktop = () => setIsDesktop(window.innerWidth >= 1024);
     checkDesktop();
     window.addEventListener('resize', checkDesktop);
     return () => window.removeEventListener('resize', checkDesktop);
@@ -82,14 +83,14 @@ export function MediaRow({ title, children }: MediaRowProps) {
       {/* Scroll container - native touch scroll on mobile, transform-based on desktop */}
       <div
         ref={containerRef}
-        className="relative -mx-5 overflow-x-auto px-5 sm:overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        className="relative -mx-5 overflow-x-auto px-5 lg:overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         onWheel={handleWheel}
         style={{ touchAction: 'pan-x' }}
       >
         {/* Left navigation arrow - hidden on mobile (touch), visible on desktop hover */}
         <button
           onClick={() => scroll("left")}
-          className={`absolute left-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 sm:flex ${
+          className={`absolute left-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 lg:flex ${
             isHovered && showLeftArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"
@@ -102,7 +103,7 @@ export function MediaRow({ title, children }: MediaRowProps) {
         {/* Content container - static on mobile (uses native scroll), transforms on desktop */}
         <div
           ref={contentRef}
-          className="flex snap-x snap-mandatory items-center gap-4 py-5 sm:snap-none md:gap-6"
+          className="flex snap-x snap-mandatory items-center gap-4 py-5 lg:snap-none md:gap-6"
           style={isDesktop ? {
             transform: `translateX(-${scrollX}px)`,
             transition: 'transform 0.3s ease-out',
@@ -114,7 +115,7 @@ export function MediaRow({ title, children }: MediaRowProps) {
         {/* Right navigation arrow - hidden on mobile (touch), visible on desktop hover */}
         <button
           onClick={() => scroll("right")}
-          className={`absolute right-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 sm:flex ${
+          className={`absolute right-5 top-1/2 z-20 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/70 text-white transition-opacity duration-200 hover:bg-black/90 lg:flex ${
             isHovered && showRightArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"

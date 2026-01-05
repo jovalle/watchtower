@@ -26,7 +26,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Home', to: '/app' },
   { label: 'Movies', to: '/app/movies' },
-  { label: 'TV Shows', to: '/app/tv' },
+  { label: 'Series', to: '/app/tv' },
   { label: 'New & Popular', to: '/app/new' },
   { label: 'Watchlist', to: '/app/watchlist' },
   { label: 'Lists', to: '/app/lists' },

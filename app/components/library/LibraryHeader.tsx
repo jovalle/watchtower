@@ -19,7 +19,7 @@ interface ActiveFilter {
 }
 
 interface LibraryHeaderProps {
-  /** Page title (e.g., "Movies", "TV Shows") */
+  /** Page title (e.g., "Movies", "Series") */
   title: string;
   /** Total item count */
   itemCount?: number;
