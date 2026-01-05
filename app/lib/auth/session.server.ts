@@ -7,7 +7,9 @@ import { createCookieSessionStorage, redirect } from "@remix-run/node";
 import { env } from "~/lib/env.server";
 
 type SessionData = {
-  plexToken: string;
+  plexToken: string;      // OAuth token for plex.tv API calls
+  serverToken: string;    // Server-specific token for Plex server API calls
+  isOwner: boolean;       // Whether the user owns this Plex server
   pendingPinId: number;
 };
 
@@ -23,7 +25,7 @@ const sessionStorage = createCookieSessionStorage<SessionData, SessionFlashData>
     path: "/",
     sameSite: "lax",
     secrets: [env.SESSION_SECRET],
-    secure: env.isProduction,
+    secure: env.SECURE_COOKIES,
   },
 });
 
@@ -67,6 +69,46 @@ export async function requirePlexToken(request: Request): Promise<string> {
     throw redirect("/auth/redirect");
   }
   return token;
+}
+
+/**
+ * Get the server-specific token from the session, if it exists.
+ * This token should be used for Plex server API calls.
+ */
+export async function getServerToken(request: Request): Promise<string | null> {
+  const session = await getSession(request);
+  const token = session.get("serverToken");
+  return token ?? null;
+}
+
+/**
+ * Require a valid server token, redirecting to login if not present.
+ * Use this for routes that need to access the Plex server directly.
+ */
+export async function requireServerToken(request: Request): Promise<string> {
+  const token = await getServerToken(request);
+  if (!token) {
+    throw redirect("/auth/redirect");
+  }
+  return token;
+}
+
+/**
+ * Set the server-specific token and owner status in the session.
+ */
+export async function setServerToken(request: Request, serverToken: string, isOwner: boolean = false): Promise<string> {
+  const session = await getSession(request);
+  session.set("serverToken", serverToken);
+  session.set("isOwner", isOwner);
+  return commitSession(session);
+}
+
+/**
+ * Check if the current user is the server owner.
+ */
+export async function isServerOwner(request: Request): Promise<boolean> {
+  const session = await getSession(request);
+  return session.get("isOwner") === true;
 }
 
 /**
