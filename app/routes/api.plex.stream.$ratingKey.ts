@@ -11,12 +11,12 @@
  */
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
   const { ratingKey } = params;
 
   if (!ratingKey) {

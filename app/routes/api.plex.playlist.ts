@@ -7,7 +7,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 
@@ -15,7 +15,7 @@ import { env } from "~/lib/env.server";
  * GET - Return all playlists with their current items for checking membership.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
 
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,
@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * POST/DELETE - Add or remove items from a playlist.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
 
   const body = await request.json();
   const { playlistRatingKey, itemRatingKey, playlistItemId } = body;

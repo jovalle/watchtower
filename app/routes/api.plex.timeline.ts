@@ -8,7 +8,7 @@
 
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
 import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 
@@ -28,7 +28,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const token = await requirePlexToken(request);
+  const token = await requireServerToken(request);
 
   let body: unknown;
   try {
