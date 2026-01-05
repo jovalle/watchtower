@@ -9,14 +9,14 @@
  */
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
-
   const url = new URL(request.url);
   const path = url.searchParams.get("path");
+
+  const token = await requireServerToken(request);
 
   if (!path) {
     console.error("[Image Proxy] Missing path parameter");
