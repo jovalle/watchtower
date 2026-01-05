@@ -9,7 +9,7 @@
  * - Episodes: shows episode details with breadcrumb to show > season
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Link, useNavigate } from "@remix-run/react";
@@ -17,10 +17,11 @@ import { Play, Plus, Check, Star, Clock, Calendar, ExternalLink, ChevronRight, H
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
 import { Typography, Button } from "~/components/ui";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
+import { createOMDbClient } from "~/lib/omdb/client.server";
 import type { PlexMediaItem, PlexMetadata, PlexRole } from "~/lib/plex/types";
 import type { TMDBRecommendation } from "~/lib/tmdb/types";
 
@@ -66,9 +67,18 @@ interface LoaderData {
   posterUrl: string;
   year: string | null;
   duration: string | null;
-  rating: string | null;
+  contentRating: string | null;
+  criticRating: string | null;
   audienceRating: string | null;
   userRating: string | null;
+  lastRatedAt?: number; // Unix timestamp when user last rated this item
+  isAudienceFromPlex: boolean; // True if audienceRating is from Plex (fallback), false if from OMDb
+  externalRatings: {
+    imdb?: { rating: string; votes: string };
+    rottenTomatoes?: { rating: string };
+    metacritic?: { rating: string };
+  } | null;
+  plexAudienceRating: string | null; // Original Plex audience rating for tooltip display
   genres: string[];
   directors: string[];
   writers: string[];
@@ -171,6 +181,300 @@ function formatRating(rating?: number): string | null {
   return rating.toFixed(1);
 }
 
+/**
+ * Parse a Rotten Tomatoes rating string (e.g., "95%") to a 0-10 scale number.
+ */
+function parseRTRating(rating: string): number | null {
+  const match = rating.match(/^(\d+)%$/);
+  if (match) {
+    return parseInt(match[1], 10) / 10;
+  }
+  return null;
+}
+
+/**
+ * Parse a Metacritic rating string (e.g., "85/100") to a 0-10 scale number.
+ */
+function parseMetacriticRating(rating: string): number | null {
+  const match = rating.match(/^(\d+)\/100$/);
+  if (match) {
+    return parseInt(match[1], 10) / 10;
+  }
+  return null;
+}
+
+/**
+ * Extract critic rating from OMDb data as an average of all available sources.
+ * Averages Rotten Tomatoes and Metacritic scores, converting to 10-scale.
+ * @param externalRatings - OMDb ratings data
+ * @returns Rating as string (e.g., "9.5") or null if not available
+ */
+function getOMDbCriticRating(externalRatings: ExternalRatings | null): string | null {
+  if (!externalRatings) return null;
+
+  const scores: number[] = [];
+
+  // Parse Rotten Tomatoes (format: "95%")
+  if (externalRatings.rottenTomatoes?.rating) {
+    const rtScore = parseRTRating(externalRatings.rottenTomatoes.rating);
+    if (rtScore !== null) scores.push(rtScore);
+  }
+
+  // Parse Metacritic (format: "85/100")
+  if (externalRatings.metacritic?.rating) {
+    const mcScore = parseMetacriticRating(externalRatings.metacritic.rating);
+    if (mcScore !== null) scores.push(mcScore);
+  }
+
+  if (scores.length === 0) return null;
+
+  const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+  return average.toFixed(1);
+}
+
+/**
+ * Extract audience rating from OMDb data as an average of available sources.
+ * Currently uses IMDb rating. Falls back to Plex audienceRating if no OMDb data.
+ * @param externalRatings - OMDb ratings data
+ * @param plexAudienceRating - Plex audience rating as fallback
+ * @returns Rating as string (e.g., "8.2") or null if not available
+ */
+function getOMDbAudienceRating(
+  externalRatings: ExternalRatings | null,
+  plexAudienceRating?: number
+): string | null {
+  const scores: number[] = [];
+
+  // Parse IMDb rating (format: "8.2")
+  if (externalRatings?.imdb?.rating) {
+    const imdbScore = parseFloat(externalRatings.imdb.rating);
+    if (!isNaN(imdbScore)) scores.push(imdbScore);
+  }
+
+  // If we have OMDb scores, use their average
+  if (scores.length > 0) {
+    const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+    return average.toFixed(1);
+  }
+
+  // Fall back to Plex audience rating
+  if (plexAudienceRating !== undefined && plexAudienceRating !== null) {
+    return plexAudienceRating.toFixed(1);
+  }
+
+  return null;
+}
+
+type RatingType = "critic" | "audience" | "user";
+
+interface ExternalRatings {
+  imdb?: { rating: string; votes: string };
+  rottenTomatoes?: { rating: string };
+  metacritic?: { rating: string };
+}
+
+interface RatingBadgeProps {
+  type: RatingType;
+  value: string;
+  externalRatings?: ExternalRatings | null;
+  lastRatedAt?: number; // For user rating: when they rated it
+  isAudienceFromPlex?: boolean; // For audience rating: true if using Plex fallback
+  plexAudienceRating?: string | null; // Original Plex rating for tooltip
+}
+
+const RATING_CONFIG: Record<RatingType, { color: string; title: string }> = {
+  critic: {
+    color: "fill-red-500 text-red-500",
+    title: "Critic Scores",
+  },
+  audience: {
+    color: "fill-orange-400 text-orange-400",
+    title: "Audience Scores",
+  },
+  user: {
+    color: "fill-yellow-400 text-yellow-400",
+    title: "Your Rating",
+  },
+};
+
+function formatVotes(votes: string): string {
+  const num = parseInt(votes, 10);
+  if (isNaN(num)) return votes;
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(0)}K`;
+  return votes;
+}
+
+function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFromPlex, plexAudienceRating }: RatingBadgeProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const badgeRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  const config = RATING_CONFIG[type];
+
+  // Close tooltip when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handleClickOutside(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node;
+      if (
+        badgeRef.current &&
+        !badgeRef.current.contains(target) &&
+        tooltipRef.current &&
+        !tooltipRef.current.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, [isOpen]);
+
+  // Format the lastRatedAt timestamp
+  const formatRatedDate = (timestamp: number): string => {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  // Build tooltip content based on type
+  const renderTooltipContent = () => {
+    if (type === "user") {
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-foreground-secondary">Your Rating</span>
+            <span className="font-medium text-foreground-primary">{value}/10</span>
+          </div>
+          {lastRatedAt && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-foreground-secondary">Rated</span>
+              <span className="text-sm text-foreground-muted">{formatRatedDate(lastRatedAt)}</span>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-foreground-muted">
+            Your personal rating set in Plex.
+          </p>
+        </div>
+      );
+    }
+
+    if (type === "critic") {
+      const hasRatings = externalRatings?.rottenTomatoes || externalRatings?.metacritic;
+      return (
+        <div className="space-y-2">
+          {hasRatings ? (
+            <>
+              <div className="space-y-1.5">
+                {externalRatings?.rottenTomatoes && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground-secondary">Rotten Tomatoes</span>
+                    <span className="font-medium text-foreground-primary">{externalRatings.rottenTomatoes.rating}</span>
+                  </div>
+                )}
+                {externalRatings?.metacritic && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground-secondary">Metacritic</span>
+                    <span className="font-medium text-foreground-primary">{externalRatings.metacritic.rating}</span>
+                  </div>
+                )}
+              </div>
+              {externalRatings?.rottenTomatoes && externalRatings?.metacritic && (
+                <div className="border-t border-border-subtle pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-foreground-secondary">Average</span>
+                    <span className="font-medium text-foreground-primary">{value}/10</span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-foreground-secondary">
+              Professional critic reviews from Rotten Tomatoes and Metacritic.
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    if (type === "audience") {
+      const hasExternalRatings = externalRatings?.imdb;
+      return (
+        <div className="space-y-2">
+          {hasExternalRatings ? (
+            <>
+              <div className="space-y-1.5">
+                {externalRatings?.imdb && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground-secondary">IMDb</span>
+                    <span className="font-medium text-foreground-primary">
+                      {externalRatings.imdb.rating}/10
+                      <span className="ml-1 text-xs text-foreground-muted">
+                        ({formatVotes(externalRatings.imdb.votes)} votes)
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : isAudienceFromPlex && plexAudienceRating ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground-secondary">Plex</span>
+                <span className="font-medium text-foreground-primary">{plexAudienceRating}/10</span>
+              </div>
+              <p className="mt-2 text-xs text-foreground-muted">
+                Audience rating from Plex metadata.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-foreground-secondary">
+              Average audience ratings from IMDb.
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        ref={badgeRef}
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/10"
+      >
+        <Star className={`h-4 w-4 ${config.color}`} />
+        <span className="text-foreground-primary">{value}</span>
+      </button>
+      {isOpen && (
+        <div
+          ref={tooltipRef}
+          className="absolute left-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-subtle bg-background-elevated p-3 shadow-xl"
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <Star className={`h-4 w-4 ${config.color}`} />
+            <span className="font-medium text-foreground-primary">{config.title}</span>
+          </div>
+          {renderTooltipContent()}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function formatFileSize(bytes?: number): string | null {
   if (!bytes) return null;
   const gb = bytes / (1024 * 1024 * 1024);
@@ -243,7 +547,11 @@ function formatResolution(width?: number, height?: number, resolution?: string):
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const token = await requirePlexToken(request);
+  // Get both tokens:
+  // - serverToken: for local Plex server operations
+  // - plexToken: for plex.tv cloud services (Discover API / watchlist)
+  const serverToken = await requireServerToken(request);
+  const plexToken = await requirePlexToken(request);
   const { type, ratingKey } = params;
 
   // Validate type parameter - now supports all content types
@@ -256,9 +564,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Missing rating key", { status: 400 });
   }
 
+  // Client for local server operations
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,
-    token,
+    token: serverToken,
+    clientId: env.PLEX_CLIENT_ID,
+  });
+
+  // Client for Discover API operations (watchlist check)
+  const discoverClient = new PlexClient({
+    serverUrl: env.PLEX_SERVER_URL,
+    token: plexToken,
     clientId: env.PLEX_CLIENT_ID,
   });
 
@@ -345,11 +661,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // Check if item is in watchlist
+  // Check if item is in watchlist (uses Discover API with plexToken)
   let isInWatchlist = false;
   if (metadata.guid) {
     try {
-      const watchlistResult = await client.getWatchlist();
+      const watchlistResult = await discoverClient.getWatchlist();
       if (watchlistResult.success) {
         isInWatchlist = watchlistResult.data.some(
           (item) => item.guid === metadata.guid
@@ -364,12 +680,41 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // For episodes/seasons, use parent art as backdrop if not available
   const artPath = metadata.art || (type === "episode" ? metadata.grandparentArt : undefined);
 
-  // Extract external IDs from Plex GUID
-  const guidToCheck = metadata.guid;
-  const imdbMatch = guidToCheck?.match(/imdb:\/\/(tt\d+)/);
-  const tmdbMatch = guidToCheck?.match(/tmdb:\/\/(\d+)/);
-  const tmdbId = tmdbMatch ? parseInt(tmdbMatch[1], 10) : undefined;
-  const imdbId = imdbMatch?.[1];
+  // Extract external IDs from Plex Guid array (contains external references like imdb://, tmdb://)
+  // Also fall back to checking the main guid field for older Plex agents
+  let imdbId: string | undefined;
+  let tmdbId: number | undefined;
+
+  // First check the Guid array (modern Plex agents)
+  if (metadata.Guid) {
+    for (const guidEntry of metadata.Guid) {
+      const imdbMatch = guidEntry.id.match(/imdb:\/\/(tt\d+)/);
+      const tmdbMatch = guidEntry.id.match(/tmdb:\/\/(\d+)/);
+      if (imdbMatch) {
+        imdbId = imdbMatch[1];
+      }
+      if (tmdbMatch) {
+        tmdbId = parseInt(tmdbMatch[1], 10);
+      }
+    }
+  }
+
+  // Fallback to main guid field (legacy agents)
+  if (!imdbId || !tmdbId) {
+    const guidToCheck = metadata.guid;
+    if (!imdbId) {
+      const imdbMatch = guidToCheck?.match(/imdb:\/\/(tt\d+)/);
+      if (imdbMatch) {
+        imdbId = imdbMatch[1];
+      }
+    }
+    if (!tmdbId) {
+      const tmdbMatch = guidToCheck?.match(/tmdb:\/\/(\d+)/);
+      if (tmdbMatch) {
+        tmdbId = parseInt(tmdbMatch[1], 10);
+      }
+    }
+  }
 
   // Extract media file info (for movies and episodes that have playable media)
   let mediaInfo: LoaderData["mediaInfo"];
@@ -428,6 +773,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }));
   }
 
+  // Fetch external ratings from OMDb if IMDb ID is available
+  let externalRatings: LoaderData["externalRatings"] = null;
+  if (imdbId && (type === "movie" || type === "show")) {
+    const omdbClient = createOMDbClient();
+    if (omdbClient) {
+      const ratingsResult = await omdbClient.getRatingsByIMDbId(imdbId);
+      if (ratingsResult.success) {
+        externalRatings = ratingsResult.data;
+      }
+    }
+  }
+
+  // Calculate audience rating with fallback logic
+  const calculatedAudienceRating = getOMDbAudienceRating(externalRatings, metadata.audienceRating);
+  const isAudienceFromPlex = !externalRatings?.imdb && metadata.audienceRating !== undefined;
+
   // Build processed data for the view
   const loaderData: LoaderData = {
     metadata,
@@ -435,9 +796,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     posterUrl: buildPlexImageUrl(metadata.thumb),
     year: metadata.year?.toString() ?? null,
     duration: formatRuntime(metadata.duration),
-    rating: metadata.contentRating ?? null,
-    audienceRating: formatRating(metadata.audienceRating),
+    contentRating: metadata.contentRating ?? null,
+    criticRating: getOMDbCriticRating(externalRatings) ?? formatRating(metadata.rating),
+    audienceRating: calculatedAudienceRating,
     userRating: formatRating(metadata.userRating),
+    lastRatedAt: metadata.lastRatedAt,
+    isAudienceFromPlex,
+    externalRatings,
+    plexAudienceRating: formatRating(metadata.audienceRating),
     genres: metadata.Genre?.map((g) => g.tag) ?? [],
     directors: metadata.Director?.map((d) => d.tag) ?? [],
     writers: metadata.Writer?.map((w) => w.tag) ?? [],
@@ -454,7 +820,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })),
     recommendations: [],
     serverUrl: env.PLEX_SERVER_URL,
-    token,
+    token: serverToken, // serverToken for local server operations (images, API calls)
     type,
     viewOffset: metadata.viewOffset,
     viewCount: metadata.viewCount ?? 0,
@@ -646,9 +1012,14 @@ export default function MediaDetailPage() {
     posterUrl,
     year,
     duration,
-    rating,
+    contentRating,
+    criticRating,
     audienceRating,
     userRating,
+    lastRatedAt,
+    isAudienceFromPlex,
+    externalRatings,
+    plexAudienceRating,
     genres,
     directors,
     writers,
@@ -901,22 +1272,19 @@ export default function MediaDetailPage() {
                     {genres.length > 0 && (
                       <span className="hidden sm:inline">{genres.slice(0, 2).join(", ")}</span>
                     )}
-                    {rating && (
+                    {contentRating && (
                       <span className="rounded bg-white/10 px-2 py-0.5">
-                        {rating}
+                        {contentRating}
                       </span>
+                    )}
+                    {criticRating && (
+                      <RatingBadge type="critic" value={criticRating} externalRatings={externalRatings} />
                     )}
                     {audienceRating && (
-                      <span className="flex items-center gap-1">
-                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                        {audienceRating}
-                      </span>
+                      <RatingBadge type="audience" value={audienceRating} externalRatings={externalRatings} isAudienceFromPlex={isAudienceFromPlex} plexAudienceRating={plexAudienceRating} />
                     )}
                     {userRating && (
-                      <span className="flex items-center gap-1">
-                        <Star className="h-4 w-4 fill-mango text-mango" />
-                        {userRating}
-                      </span>
+                      <RatingBadge type="user" value={userRating} lastRatedAt={lastRatedAt} />
                     )}
                   </div>
 
@@ -990,7 +1358,7 @@ export default function MediaDetailPage() {
             </Container>
           </div>
 
-          {/* Seasons Row (TV Shows only) */}
+          {/* Seasons Row (Series only) */}
           {type === "show" && seasons && seasons.length > 0 && (
             <Container size="wide" className="mt-6 sm:mt-8">
               <Typography variant="title" className="mb-3 sm:mb-4">
@@ -1260,22 +1628,19 @@ export default function MediaDetailPage() {
                           {duration}
                         </span>
                       )}
-                      {rating && (
+                      {contentRating && (
                         <span className="rounded bg-white/10 px-2 py-0.5 text-foreground-secondary">
-                          {rating}
+                          {contentRating}
                         </span>
+                      )}
+                      {criticRating && (
+                        <RatingBadge type="critic" value={criticRating} externalRatings={externalRatings} />
                       )}
                       {audienceRating && (
-                        <span className="flex items-center gap-1 text-foreground-secondary">
-                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          {audienceRating}
-                        </span>
+                        <RatingBadge type="audience" value={audienceRating} externalRatings={externalRatings} isAudienceFromPlex={isAudienceFromPlex} plexAudienceRating={plexAudienceRating} />
                       )}
                       {userRating && (
-                        <span className="flex items-center gap-1 text-foreground-secondary">
-                          <Star className="h-4 w-4 fill-mango text-mango" />
-                          {userRating}
-                        </span>
+                        <RatingBadge type="user" value={userRating} lastRatedAt={lastRatedAt} />
                       )}
                     </div>
 
