@@ -137,8 +137,9 @@ export function createTraktClient(): TraktClient | null {
 }
 
 /**
- * Check if Trakt integration is enabled.
+ * Check if Trakt integration is available (client ID configured).
+ * Actual per-user enablement depends on user settings.
  */
-export function isTraktEnabled(): boolean {
-  return !!(env.TRAKT_CLIENT_ID && env.TRAKT_USERNAME);
+export function isTraktAvailable(): boolean {
+  return !!env.TRAKT_CLIENT_ID;
 }
