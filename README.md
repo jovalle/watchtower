@@ -101,9 +101,23 @@ Open `http://localhost:9001`
 | `PLEX_CLIENT_ID`  |          | Client identifier (default: `watchtower-001`)                                                 |
 | `PORT`            |          | Server port (default: `9001`)                                                                 |
 | `TMDB_API_KEY`    |          | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
-| `TRAKT_CLIENT_ID` |          | Trakt API key for watchlist sync                                                              |
-| `TRAKT_USERNAME`  |          | Your Trakt username (watchlist must be public)                                                |
-| `IMDB_WATCHLISTS` |          | Comma-separated IMDB list IDs (e.g., `ur12345678,ls012345678`)                                |
+| `TRAKT_CLIENT_ID` |          | Trakt API key to enable Trakt integration (users set their own username in Settings)          |
+
+## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f6a8/512.gif" height="24"> Security Note
+
+> [!NOTE]
+> **Plex login may warn about an unfamiliar location**
+>
+> When signing in, Plex may display a security alert about a login attempt from an unknown IP address or location. This is expected — Watchtower proxies authentication requests through its server, so Plex sees the Watchtower host's IP rather than your device's. You can safely approve the login if you initiated it.
+
+> [!CAUTION]
+> **Plex "Networks without auth" setting can bypass authentication for all Watchtower users**
+>
+> If your Plex server has IP addresses or networks configured in **Settings → Network → List of IP addresses and networks that are allowed without auth** (e.g., `192.168.1.0/24`), be aware that Watchtower proxies requests to Plex on behalf of users. This means Plex sees the requests originating from the Watchtower server's IP address, not the end user's.
+>
+> If the Watchtower host is within an allowed subnet, **all Watchtower users will inherit auth-free access to your Plex server**, regardless of their own location or authentication status. This could unintentionally expose your library to anyone who can access Watchtower.
+>
+> **Recommendation:** Review your Plex network settings and avoid including the Watchtower host's subnet in the "allowed without auth" list unless this behavior is intentional.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f433/512.gif" height="24"> Docker Deployment
 
