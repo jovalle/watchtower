@@ -1,3 +1,26 @@
+## [1.3.0](https://github.com/jovalle/watchtower/compare/v1.2.1...v1.3.0) (2026-01-05)
+
+### 🚀 Features
+
+* **auth:** add server access verification for shared users ([f634ce7](https://github.com/jovalle/watchtower/commit/f634ce7a66b3452b6a4cc749467d35d4e75b9793))
+* **cache:** add cache clearing endpoint for server owners ([ea7dbc7](https://github.com/jovalle/watchtower/commit/ea7dbc707e632977006771a5454612ba115238c3))
+* **ratings:** add OMDb integration for external ratings display ([f8c3f5a](https://github.com/jovalle/watchtower/commit/f8c3f5a3d72b9b46f6c60a27ba624018ac2bad92))
+* **settings:** add per-user watchlist configuration ([963a8e8](https://github.com/jovalle/watchtower/commit/963a8e84bc74c38db4d2fdd0226e773170b3b384))
+* **watchlist:** integrate per-user settings for trakt/imdb sources ([0c478d0](https://github.com/jovalle/watchtower/commit/0c478d0be020166b98f5eb120fa5dae482eef748))
+
+### 🐛 Bug Fixes
+
+* isolate user-specific cache data to prevent cross-user data leakage ([d6d738a](https://github.com/jovalle/watchtower/commit/d6d738a1f8748710f5e47c91268f6ee287132c4f))
+* **mobile:** prevent white bar artifacts with proper backgrounds and safe-area insets ([08cf0c0](https://github.com/jovalle/watchtower/commit/08cf0c08fda3d2354309ab46474787cf2f1c7869))
+* **ui:** update components for new auth context ([73bac53](https://github.com/jovalle/watchtower/commit/73bac53aac51b45ece3c3dc0a10748833834d5aa))
+
+### ♻️ Refactoring
+
+* **api:** migrate plex routes to use server-specific tokens ([5fe1c53](https://github.com/jovalle/watchtower/commit/5fe1c53dfa2d5973e191df45d13bb5de0deeab36))
+* **config:** simplify env vars and add per-user settings migration ([52b4e77](https://github.com/jovalle/watchtower/commit/52b4e7723d67396766dc42d109897cbc192506e9))
+* **plex:** clean up client and add type definitions ([3bddced](https://github.com/jovalle/watchtower/commit/3bddced929db6f9912a2ab09da551384b198d063))
+* **routes:** update app routes for new auth system ([b8ecda4](https://github.com/jovalle/watchtower/commit/b8ecda48e5e4eb4519c77b4ed14dc38b027b2ce4))
+
 ## [1.2.1](https://github.com/jovalle/watchtower/compare/v1.2.0...v1.2.1) (2026-01-02)
 
 ### 🐛 Bug Fixes
