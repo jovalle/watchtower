@@ -4,8 +4,6 @@
  * Note: IMDB RSS feeds are broken (SSL cert issues), so we parse HTML instead.
  */
 
-import { env } from "~/lib/env.server";
-
 const IMDB_REQUEST_TIMEOUT = 15000; // 15 seconds
 
 /**
@@ -195,12 +193,57 @@ async function fetchIMDBWatchlist(
 }
 
 /**
- * Fetch all configured IMDB watchlists and merge them.
+ * Validation result for a single IMDB list.
  */
-export async function getIMDBWatchlists(): Promise<IMDBWatchlistItem[]> {
-  const listIds = env.IMDB_WATCHLISTS;
+export interface IMDBValidationResult {
+  valid: boolean;
+  itemCount?: number;
+  error?: string;
+}
 
-  console.log(`[IMDB] Configured watchlists: ${listIds.length > 0 ? listIds.join(", ") : "none"}`);
+/**
+ * Validate a single IMDB list ID.
+ * Checks format and accessibility of the list.
+ */
+export async function validateIMDBList(listId: string): Promise<IMDBValidationResult> {
+  // Validate format first
+  if (!listId.startsWith("ur") && !listId.startsWith("ls")) {
+    return {
+      valid: false,
+      error: "Invalid format: must start with 'ur' (user watchlist) or 'ls' (public list)",
+    };
+  }
+
+  // Check if list is accessible
+  const result = await fetchIMDBWatchlist(listId);
+
+  if (result.success) {
+    return {
+      valid: true,
+      itemCount: result.data.length,
+    };
+  }
+
+  // Handle specific error cases
+  if (result.error.code === 404) {
+    return {
+      valid: false,
+      error: "List not found or not public",
+    };
+  }
+
+  return {
+    valid: false,
+    error: result.error.message,
+  };
+}
+
+/**
+ * Fetch IMDB watchlists for the given list IDs and merge them.
+ * @param listIds Array of IMDB list IDs (ur* or ls*)
+ */
+export async function getIMDBWatchlists(listIds: string[]): Promise<IMDBWatchlistItem[]> {
+  console.log(`[IMDB] Fetching watchlists: ${listIds.length > 0 ? listIds.join(", ") : "none"}`);
 
   if (listIds.length === 0) {
     return [];
@@ -227,11 +270,4 @@ export async function getIMDBWatchlists(): Promise<IMDBWatchlistItem[]> {
   console.log(`[IMDB] Total unique items: ${items.length}`);
 
   return items;
-}
-
-/**
- * Check if IMDB integration is enabled.
- */
-export function isIMDBEnabled(): boolean {
-  return env.IMDB_WATCHLISTS.length > 0;
 }
