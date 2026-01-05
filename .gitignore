@@ -32,8 +32,14 @@ tmp/
 *.local
 
 # Local data cache (logos, metadata)
+.claude/
 .planning/
 data/
 
 # TypeScript
 *.tsbuildinfo
+
+# Local management
+commit-changes.sh
+Screenshot*.png
+TODO.md
