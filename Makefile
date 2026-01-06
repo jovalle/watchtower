@@ -1,4 +1,4 @@
-.PHONY: help install dev build start lint lint-fix typecheck test test-watch test-coverage \
+.PHONY: help install sync dev build start lint lint-fix typecheck test test-watch test-coverage \
         check ci compose clean
 
 # Default target
@@ -14,6 +14,10 @@ help:
 ## install: Install dependencies
 install:
 	bun install
+
+## sync: Sync lockfile with package.json (silent if no changes)
+sync:
+	@bun install --silent
 
 ## dev: Start development server
 dev:
@@ -60,7 +64,7 @@ ci:
 	$(MAKE) check
 
 ## compose: Build and run with Docker Compose
-compose:
+compose: sync
 	docker compose up --build
 
 ## clean: Clean build artifacts and caches
