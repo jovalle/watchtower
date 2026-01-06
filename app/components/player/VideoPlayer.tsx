@@ -63,6 +63,18 @@ const SCROBBLE_THRESHOLD = 0.9; // Mark as watched at 90%
 const CONTROLS_HIDE_DELAY = 3000;
 const SKIP_DURATION = 10;
 
+// Webkit fullscreen types for iOS
+interface WebkitDocument extends Document {
+  webkitFullscreenElement?: Element;
+  webkitExitFullscreen?: () => Promise<void>;
+}
+
+interface WebkitHTMLVideoElement extends HTMLVideoElement {
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+  webkitSupportsFullscreen?: boolean;
+}
+
 export interface VideoPlayerProps {
   src: string;
   title: string;
@@ -131,6 +143,7 @@ export function VideoPlayer({
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
+  const [wantsToPlay, setWantsToPlay] = useState(true); // User's intent - starts true for autoplay
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -148,6 +161,8 @@ export function VideoPlayer({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [hasTriedTranscode, setHasTriedTranscode] = useState(playbackMethod === "transcode");
+  // Scrubber lock for transcoded streams - prevents seeking until stream is ready
+  const [scrubberReady, setScrubberReady] = useState(playbackMethod === "direct_play");
 
   // Track/Episode panel state
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -164,11 +179,93 @@ export function VideoPlayer({
   const hasScrobbledRef = useRef(false);
   const hasInitializedRef = useRef(false);
   const currentMethodRef = useRef(playbackMethod);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isNavigatingRef = useRef(false); // Prevents duplicate stream reloads
+  const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSeekRef = useRef<number | null>(null); // Track pending seek position
 
   // Update method ref when prop changes
   useEffect(() => {
     currentMethodRef.current = playbackMethod;
   }, [playbackMethod]);
+
+  // Reset state when new stream loads
+  useEffect(() => {
+    console.log("[VideoPlayer] New stream loaded, resetting state");
+    isNavigatingRef.current = false;
+    pendingSeekRef.current = null;
+    hasInitializedRef.current = false;
+    // Clear error from previous stream
+    setError(null);
+    setIsLoading(true);
+    // Lock scrubber for transcoded streams until ready
+    setScrubberReady(playbackMethod === "direct_play");
+    // Clear any pending debounce from previous stream
+    if (seekDebounceRef.current) {
+      clearTimeout(seekDebounceRef.current);
+      seekDebounceRef.current = null;
+    }
+  }, [src, playbackMethod]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
+      }
+    };
+  }, []);
+
+  // Loading timeout - longer for transcode (30s) vs direct play (15s)
+  useEffect(() => {
+    if (isLoading && !error) {
+      const timeout = playbackMethod === "transcode" ? 30000 : 15000;
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.log("[VideoPlayer] Loading timeout - resetting navigation state");
+        // CRITICAL: Reset navigation ref so user can try again
+        isNavigatingRef.current = false;
+        pendingSeekRef.current = null;
+        setError("Loading is taking too long. The stream may be unavailable.");
+        setIsLoading(false);
+      }, timeout);
+    } else {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    }
+
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, [isLoading, error, playbackMethod]);
+
+  // Unlock scrubber for transcoded streams once enough buffer is available
+  // Requires 10 seconds of buffer ahead of current position
+  const MIN_BUFFER_FOR_SCRUB = 10; // seconds
+  useEffect(() => {
+    // Direct play always has scrubber ready
+    if (playbackMethod === "direct_play") {
+      setScrubberReady(true);
+      return;
+    }
+
+    // For transcoded streams, check buffer before enabling scrubber
+    if (!isLoading && !error && buffered > 0) {
+      const video = videoRef.current;
+      if (video) {
+        const bufferAhead = buffered - video.currentTime;
+        if (bufferAhead >= MIN_BUFFER_FOR_SCRUB) {
+          if (!scrubberReady) {
+            console.log(`[VideoPlayer] Scrubber ready (${bufferAhead.toFixed(1)}s buffered)`);
+            setScrubberReady(true);
+          }
+        }
+      }
+    }
+  }, [playbackMethod, isLoading, error, buffered, currentTime, scrubberReady]);
 
   /**
    * Report progress to Plex
@@ -235,6 +332,17 @@ export function VideoPlayer({
         ? Math.floor(video.currentTime * 1000)
         : Math.floor(resumePositionSeconds * 1000);
 
+      // Stop all media loading before navigation
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
       const params = new URLSearchParams();
       if (currentPos > 0) params.set("t", currentPos.toString());
       params.set("quality", newQuality.id);
@@ -259,6 +367,17 @@ export function VideoPlayer({
       ? Math.floor(video.currentTime * 1000)
       : Math.floor(resumePositionSeconds * 1000);
 
+    // Stop all media loading before navigation
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
     const params = new URLSearchParams();
     if (currentPos > 0) params.set("t", currentPos.toString());
     params.set("quality", "1080p-20");
@@ -267,6 +386,142 @@ export function VideoPlayer({
     console.log(`[VideoPlayer] Switching to transcode at ${currentPos}ms`);
     navigate(`/app/watch/${ratingKey}?${params.toString()}`, { replace: true });
   }, [hasTriedTranscode, navigate, ratingKey, resumePositionSeconds]);
+
+  /**
+   * Reload stream at a specific position (in seconds).
+   * This is the centralized function for handling out-of-buffer seeks.
+   * It includes guards against duplicate calls and debouncing for rapid scrubs.
+   */
+  const reloadStreamAtPosition = useCallback((targetSeconds: number, immediate = false) => {
+    // Guard against duplicate navigations - just update the pending target
+    if (isNavigatingRef.current) {
+      pendingSeekRef.current = targetSeconds;
+      return;
+    }
+
+    const video = videoRef.current;
+
+    const executeReload = (finalTargetSeconds: number) => {
+      // Double-check we're not already navigating
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+
+      // Lock scrubber until new stream is ready
+      setScrubberReady(false);
+
+      console.log(`[VideoPlayer] Reloading stream at ${finalTargetSeconds}s`);
+
+      // Tell Plex to stop the current transcode session before starting a new one
+      // This prevents session buildup that causes Plex to fail on subsequent seeks
+      if (video && ratingKey) {
+        const dur = Math.round((video.duration || 0) * 1000);
+        if (dur && !isNaN(dur)) {
+          navigator.sendBeacon("/api/plex/timeline", JSON.stringify({
+            ratingKey,
+            state: "stopped",
+            time: Math.round(finalTargetSeconds * 1000),
+            duration: dur,
+          }));
+        }
+      }
+
+      // Stop all media loading before navigation
+      if (video && video.src) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
+      setIsLoading(true);
+
+      const params = new URLSearchParams();
+      params.set("t", Math.floor(finalTargetSeconds * 1000).toString());
+      if (quality) {
+        params.set("quality", quality.id);
+        if (!quality.isOriginal) {
+          params.set("transcode", "1");
+        }
+      }
+
+      navigate(`/app/watch/${ratingKey}?${params.toString()}`, { replace: true });
+    };
+
+    // Clear any pending debounce
+    if (seekDebounceRef.current) {
+      clearTimeout(seekDebounceRef.current);
+      seekDebounceRef.current = null;
+    }
+
+    if (immediate) {
+      // For immediate mode, use the target directly
+      pendingSeekRef.current = null;
+      executeReload(targetSeconds);
+    } else {
+      // Debounce: wait 500ms before reloading to allow for iOS native scrubbing
+      // Each call resets the timer and updates the pending target
+      pendingSeekRef.current = targetSeconds;
+      seekDebounceRef.current = setTimeout(() => {
+        // Use the most recent pending target (may have been updated by subsequent calls)
+        const finalTarget = pendingSeekRef.current ?? targetSeconds;
+        pendingSeekRef.current = null;
+        seekDebounceRef.current = null;
+        executeReload(finalTarget);
+      }, 500);
+    }
+  }, [navigate, quality, ratingKey]);
+
+  /**
+   * Check if a time position is within the buffered range.
+   */
+  const isTimeBuffered = useCallback((time: number): boolean => {
+    const video = videoRef.current;
+    if (!video) return false;
+
+    for (let i = 0; i < video.buffered.length; i++) {
+      const start = video.buffered.start(i);
+      const end = video.buffered.end(i);
+      // Allow 5 second tolerance for ongoing buffer
+      if (time >= start - 1 && time <= end + 5) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  /**
+   * Seek to position - handles both buffered and unbuffered seeks.
+   * For transcoded streams, seeking beyond buffer requires reloading with new offset.
+   */
+  const seekToPosition = useCallback((targetTime: number, immediate = false) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Clamp to valid range
+    const clampedTime = Math.max(0, Math.min(targetTime, video.duration || duration));
+
+    // For transcoded streams, check if we need to reload
+    const isTranscoding = playbackMethod === "transcode" || playbackMethod === "direct_stream";
+
+    // Block out-of-buffer seeks when scrubber is locked (transcoding not ready)
+    if (isTranscoding && !scrubberReady && !isTimeBuffered(clampedTime)) {
+      console.log("[VideoPlayer] Scrubber locked - ignoring out-of-buffer seek");
+      return;
+    }
+
+    // For direct play, always use native seeking (HLS segments are all available)
+    // For transcoded streams, only allow native seeking within buffer
+    if (!isTranscoding || isTimeBuffered(clampedTime)) {
+      video.currentTime = clampedTime;
+      setCurrentTime(clampedTime);
+    } else {
+      // Seek beyond buffer in transcode mode - use centralized reload
+      reloadStreamAtPosition(clampedTime, immediate);
+    }
+  }, [duration, playbackMethod, isTimeBuffered, reloadStreamAtPosition, scrubberReady]);
 
   /**
    * Initialize HLS.js or native playback
@@ -371,7 +626,8 @@ export function VideoPlayer({
 
     const onCanPlay = () => {
       console.log("[VideoPlayer] Can play");
-      setIsLoading(false);
+      // Don't clear loading here - let onPlaying handle it
+      // This ensures loading spinner shows until video actually starts playing
 
       // Auto-play and initial seek (only once)
       if (!hasInitializedRef.current) {
@@ -389,9 +645,61 @@ export function VideoPlayer({
           video.muted = true;
           setIsMuted(true);
           video.play().catch(() => {
+            // Autoplay completely blocked - clear loading and show controls
+            setIsLoading(false);
+            setWantsToPlay(false);
             setShowControls(true);
           });
         });
+      } else if (wantsToPlay && video.paused) {
+        // Resume playback after buffering if user intended to play
+        video.play().catch(() => {});
+      }
+    };
+
+    /**
+     * Handle native seeking events (e.g., from iOS native fullscreen controls).
+     * For transcoded streams seeking outside buffer, we use a longer debounce
+     * to capture the final position when user stops dragging.
+     *
+     * NOTE: We can't rely on `seeked` event because it only fires when seek
+     * completes - seeking to an unbuffered position never completes (stalls).
+     */
+    const onSeeking = () => {
+      // Don't handle seeking during initial load or if navigation is already in progress
+      if (!hasInitializedRef.current || isNavigatingRef.current) return;
+
+      const isTranscoding = playbackMethod === "transcode" || playbackMethod === "direct_stream";
+      if (!isTranscoding) return;
+
+      const seekTarget = video.currentTime;
+
+      // Check if seek target is within buffered range
+      if (!isTimeBuffered(seekTarget)) {
+        // Track the pending seek target
+        pendingSeekRef.current = seekTarget;
+
+        // Show loading UI
+        setIsLoading(true);
+        setScrubberReady(false);
+
+        // Use debounced reload with longer timeout (500ms) to allow iOS scrubbing
+        // The debounce will reset with each seeking event, capturing the final position
+        reloadStreamAtPosition(seekTarget, false);
+      }
+    };
+
+    /**
+     * Handle seek completion - used for within-buffer seeks to clear loading state.
+     * For out-of-buffer seeks, the video stalls and seeked may not fire,
+     * so we rely on the debounced reload from onSeeking.
+     */
+    const onSeeked = () => {
+      // If we completed a seek within buffer, clear loading state
+      if (!isNavigatingRef.current && isTimeBuffered(video.currentTime)) {
+        setIsLoading(false);
+        setScrubberReady(true);
+        pendingSeekRef.current = null;
       }
     };
 
@@ -420,13 +728,18 @@ export function VideoPlayer({
 
     const onEnded = () => {
       setIsPlaying(false);
+      setWantsToPlay(false);
       reportProgress("stopped");
       markWatched();
       setShowControls(true);
     };
 
     const onWaiting = () => setIsLoading(true);
-    const onPlaying = () => setIsLoading(false);
+    const onPlaying = () => {
+      setIsLoading(false);
+      // Sync intent with actual state when video starts playing
+      setWantsToPlay(true);
+    };
 
     const onError = () => {
       const err = video.error;
@@ -465,6 +778,8 @@ export function VideoPlayer({
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("playing", onPlaying);
     video.addEventListener("error", onError);
+    video.addEventListener("seeking", onSeeking);
+    video.addEventListener("seeked", onSeeked);
 
     return () => {
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
@@ -476,8 +791,10 @@ export function VideoPlayer({
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("error", onError);
+      video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("seeked", onSeeked);
     };
-  }, [isSeeking, checkScrobble, reportProgress, markWatched, ratingKey, resumePositionSeconds, playbackMethod, hasTriedTranscode, retryWithTranscode]);
+    }, [isSeeking, checkScrobble, reportProgress, markWatched, ratingKey, resumePositionSeconds, playbackMethod, hasTriedTranscode, retryWithTranscode, wantsToPlay, isTimeBuffered, reloadStreamAtPosition]);
 
   // Progress reporting interval
   useEffect(() => {
@@ -505,11 +822,30 @@ export function VideoPlayer({
     };
   }, [ratingKey]);
 
-  // Fullscreen listener
+  // Fullscreen listener - handle both standard and webkit (iOS) events
   useEffect(() => {
-    const onFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const video = videoRef.current;
+
+    const onFullscreenChange = () => {
+      const isFs = !!(document.fullscreenElement || (document as WebkitDocument).webkitFullscreenElement);
+      setIsFullscreen(isFs);
+    };
+
+    // iOS video fullscreen events
+    const onWebkitBeginFullscreen = () => setIsFullscreen(true);
+    const onWebkitEndFullscreen = () => setIsFullscreen(false);
+
     document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    video?.addEventListener("webkitbeginfullscreen", onWebkitBeginFullscreen);
+    video?.addEventListener("webkitendfullscreen", onWebkitEndFullscreen);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onWebkitEndFullscreen);
+      video?.removeEventListener("webkitbeginfullscreen", onWebkitBeginFullscreen);
+      video?.removeEventListener("webkitendfullscreen", onWebkitEndFullscreen);
+    };
   }, []);
 
   // Controls auto-hide
@@ -518,10 +854,40 @@ export function VideoPlayer({
       clearTimeout(hideControlsTimeoutRef.current);
     }
     setShowControls(true);
-    if (isPlaying && !isSeeking && !showTooltip && !showSettingsPanel && !showEpisodePanel) {
+    if (wantsToPlay && !isSeeking && !showTooltip && !showSettingsPanel && !showEpisodePanel) {
       hideControlsTimeoutRef.current = setTimeout(() => setShowControls(false), CONTROLS_HIDE_DELAY);
     }
-  }, [isPlaying, isSeeking, showTooltip, showSettingsPanel, showEpisodePanel]);
+  }, [wantsToPlay, isSeeking, showTooltip, showSettingsPanel, showEpisodePanel]);
+
+  // Toggle fullscreen - handles both standard and iOS webkit APIs
+  const toggleFullscreen = useCallback(async () => {
+    const video = videoRef.current as WebkitHTMLVideoElement | null;
+    const doc = document as WebkitDocument;
+
+    // Check current fullscreen state (standard or webkit)
+    const isCurrentlyFullscreen = !!(document.fullscreenElement || doc.webkitFullscreenElement);
+
+    if (!isCurrentlyFullscreen) {
+      // Try iOS video fullscreen first (works on iPhones)
+      if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+        video.webkitEnterFullscreen();
+        return;
+      }
+      // Standard fullscreen API
+      if (containerRef.current?.requestFullscreen) {
+        await containerRef.current.requestFullscreen();
+      }
+    } else {
+      // Exit fullscreen
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (doc.webkitExitFullscreen) {
+        await doc.webkitExitFullscreen();
+      } else if (video?.webkitExitFullscreen) {
+        video.webkitExitFullscreen();
+      }
+    }
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -544,9 +910,11 @@ export function VideoPlayer({
         case " ":
         case "k":
           e.preventDefault();
-          if (video.paused) {
-            video.play();
+          if (video.paused || !wantsToPlay) {
+            setWantsToPlay(true);
+            video.play().catch(() => {});
           } else {
+            setWantsToPlay(false);
             video.pause();
           }
           break;
@@ -557,11 +925,7 @@ export function VideoPlayer({
           break;
         case "f":
           e.preventDefault();
-          if (!document.fullscreenElement) {
-            containerRef.current?.requestFullscreen();
-          } else {
-            document.exitFullscreen();
-          }
+          toggleFullscreen();
           break;
         case "e":
           // Toggle episode panel for TV shows
@@ -572,11 +936,11 @@ export function VideoPlayer({
           break;
         case "ArrowLeft":
           e.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - SKIP_DURATION);
+          seekToPosition(video.currentTime - SKIP_DURATION);
           break;
         case "ArrowRight":
           e.preventDefault();
-          video.currentTime = Math.min(video.duration, video.currentTime + SKIP_DURATION);
+          seekToPosition(video.currentTime + SKIP_DURATION);
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -594,15 +958,19 @@ export function VideoPlayer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [resetHideControlsTimer, showEpisodePanel, showSettingsPanel, showQualityMenu, episodes.length]);
+    }, [resetHideControlsTimer, toggleFullscreen, seekToPosition, showEpisodePanel, showSettingsPanel, showQualityMenu, episodes.length, wantsToPlay]);
 
   // Control handlers
   const togglePlay = () => {
     const video = videoRef.current;
     if (video) {
-      if (video.paused) {
-        video.play();
+      if (video.paused || !wantsToPlay) {
+        setWantsToPlay(true);
+        video.play().catch(() => {
+          // If play fails (e.g., not ready), intent is still set
+        });
       } else {
+        setWantsToPlay(false);
         video.pause();
       }
     }
@@ -626,22 +994,14 @@ export function VideoPlayer({
     }
   };
 
-  const toggleFullscreen = async () => {
-    if (!document.fullscreenElement) {
-      await containerRef.current?.requestFullscreen();
-    } else {
-      await document.exitFullscreen();
-    }
-  };
-
   const skipForward = () => {
     const video = videoRef.current;
-    if (video) video.currentTime = Math.min(video.duration, video.currentTime + SKIP_DURATION);
+    if (video) seekToPosition(video.currentTime + SKIP_DURATION);
   };
 
   const skipBack = () => {
     const video = videoRef.current;
-    if (video) video.currentTime = Math.max(0, video.currentTime - SKIP_DURATION);
+    if (video) seekToPosition(video.currentTime - SKIP_DURATION);
   };
 
   /**
@@ -680,31 +1040,28 @@ export function VideoPlayer({
     if (!isSeeking) setHoverTime(null);
   };
 
-  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const bar = progressBarRef.current;
-    const video = videoRef.current;
-    if (!bar || !video || !duration) return;
-    const rect = bar.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    video.currentTime = (x / rect.width) * duration;
-    setCurrentTime(video.currentTime);
-  };
-
   const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsSeeking(true);
-    handleProgressBarClick(e);
 
     const bar = progressBarRef.current;
-    const video = videoRef.current;
-    if (!bar || !video || !duration) return;
+    if (!bar || !duration) return;
+
+    // Calculate initial position
+    const rect = bar.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    let targetTime = (x / rect.width) * duration;
+    setCurrentTime(targetTime);
+    setHoverTime(targetTime);
+    setHoverPosition(x);
 
     const onMouseMove = (me: MouseEvent) => {
       const rect = bar.getBoundingClientRect();
       const x = Math.max(0, Math.min(me.clientX - rect.left, rect.width));
-      video.currentTime = (x / rect.width) * duration;
-      setCurrentTime(video.currentTime);
-      setHoverTime(video.currentTime);
+      targetTime = (x / rect.width) * duration;
+      // Only update visual state during drag
+      setCurrentTime(targetTime);
+      setHoverTime(targetTime);
       setHoverPosition(x);
     };
 
@@ -713,10 +1070,55 @@ export function VideoPlayer({
       setHoverTime(null);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      // Perform actual seek on release - use immediate mode to skip debounce
+      seekToPosition(targetTime, true);
     };
 
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+  };
+
+  // Touch event handlers for mobile scrubbing
+  const handleProgressBarTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsSeeking(true);
+
+    const bar = progressBarRef.current;
+    if (!bar || !duration) return;
+
+    const touch = e.touches[0];
+    const rect = bar.getBoundingClientRect();
+    const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+    let targetTime = (x / rect.width) * duration;
+    setCurrentTime(targetTime);
+    setHoverTime(targetTime);
+    setHoverPosition(x);
+
+    const onTouchMove = (te: TouchEvent) => {
+      te.preventDefault();
+      const touch = te.touches[0];
+      const rect = bar.getBoundingClientRect();
+      const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+      targetTime = (x / rect.width) * duration;
+      setCurrentTime(targetTime);
+      setHoverTime(targetTime);
+      setHoverPosition(x);
+    };
+
+    const onTouchEnd = () => {
+      setIsSeeking(false);
+      setHoverTime(null);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+      document.removeEventListener("touchcancel", onTouchEnd);
+      // Perform actual seek on release - use immediate mode to skip debounce
+      seekToPosition(targetTime, true);
+    };
+
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd);
+    document.addEventListener("touchcancel", onTouchEnd);
   };
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -736,7 +1138,7 @@ export function VideoPlayer({
       ref={containerRef}
       className="group relative flex h-full w-full items-center justify-center bg-black"
       onMouseMove={resetHideControlsTimer}
-      onMouseLeave={() => isPlaying && !isSeeking && setShowControls(false)}
+      onMouseLeave={() => wantsToPlay && !isSeeking && setShowControls(false)}
     >
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
@@ -749,14 +1151,27 @@ export function VideoPlayer({
         aria-label={`Video player: ${title}`}
       />
 
-      {/* Loading spinner */}
+      {/* Loading spinner with back button */}
       {isLoading && !error && (
-        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/50">
-          <div className={`h-16 w-16 animate-spin rounded-full border-4 ${
-            playbackMethod === "transcode"
-              ? "border-mango/20 border-t-mango"
-              : "border-white/20 border-t-white"
-          }`} />
+        <div className="absolute inset-0 z-40 bg-black/50">
+          {/* Back button always accessible during loading */}
+          <div className="absolute left-0 top-0 p-4">
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 rounded-full bg-black/50 p-2 text-white transition-colors hover:bg-black/70"
+            >
+              <ArrowLeft className="h-6 w-6" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+          </div>
+          {/* Centered spinner - absolutely positioned for true center */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className={`h-16 w-16 animate-spin rounded-full border-4 ${
+              playbackMethod === "transcode"
+                ? "border-mango/20 border-t-mango"
+                : "border-white/20 border-t-white"
+            }`} />
+          </div>
         </div>
       )}
 
@@ -765,10 +1180,16 @@ export function VideoPlayer({
         <div className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80">
           <p className="text-lg text-white">{error}</p>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded bg-mango px-6 py-2 font-medium text-black transition-colors hover:bg-mango-hover"
+            >
+              Retry
+            </button>
             {!hasTriedTranscode && playbackMethod === "direct_play" && (
               <button
                 onClick={retryWithTranscode}
-                className="rounded bg-mango px-6 py-2 font-medium text-black transition-colors hover:bg-mango-hover"
+                className="rounded bg-white/20 px-6 py-2 font-medium text-white transition-colors hover:bg-white/30"
               >
                 Try Transcoding
               </button>
@@ -812,7 +1233,7 @@ export function VideoPlayer({
           }}
           role="button"
           tabIndex={0}
-          aria-label={isPlaying ? "Pause video" : "Play video"}
+          aria-label={wantsToPlay ? "Pause video" : "Play video"}
         />
 
         {/* Bottom controls */}
@@ -841,12 +1262,16 @@ export function VideoPlayer({
                 {formatTime(currentTime)}
               </span>
 
+              {/* Progress bar - taller touch target on mobile via padding */}
               <div
                 ref={progressBarRef}
-                className="relative h-1 flex-1 cursor-pointer rounded-full bg-white/30 transition-all hover:h-2"
+                className={`relative h-1 flex-1 rounded-full bg-white/30 transition-all hover:h-2 ${
+                  scrubberReady ? "cursor-pointer" : "cursor-not-allowed"
+                } before:absolute before:-top-4 before:-bottom-4 before:left-0 before:right-0 before:content-[''] sm:before:-top-2 sm:before:-bottom-2`}
                 onMouseMove={handleProgressBarMouseMove}
                 onMouseLeave={handleProgressBarMouseLeave}
-                onMouseDown={handleProgressBarMouseDown}
+                onMouseDown={scrubberReady ? handleProgressBarMouseDown : undefined}
+                onTouchStart={scrubberReady ? handleProgressBarTouchStart : undefined}
                 role="slider"
                 tabIndex={0}
                 aria-label="Video progress"
@@ -854,15 +1279,17 @@ export function VideoPlayer({
                 aria-valuemax={duration}
                 aria-valuenow={currentTime}
                 aria-valuetext={formatTime(currentTime)}
+                aria-disabled={!scrubberReady}
                 onKeyDown={(e) => {
+                  if (!scrubberReady) return;
                   const video = videoRef.current;
                   if (!video) return;
                   if (e.key === "ArrowLeft") {
                     e.preventDefault();
-                    video.currentTime = Math.max(0, video.currentTime - SKIP_DURATION);
+                    seekToPosition(video.currentTime - SKIP_DURATION);
                   } else if (e.key === "ArrowRight") {
                     e.preventDefault();
-                    video.currentTime = Math.min(video.duration, video.currentTime + SKIP_DURATION);
+                    seekToPosition(video.currentTime + SKIP_DURATION);
                   }
                 }}
               >
@@ -874,12 +1301,44 @@ export function VideoPlayer({
                   className="pointer-events-none absolute h-full rounded-full bg-mango"
                   style={{ width: `${progressPercent}%` }}
                 />
+                {/* Scrubbing dot - with expanded touch target for mobile */}
+                {/* Shows locked state for transcoded streams until buffer is ready */}
                 <div
-                  className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-mango shadow-md transition-opacity ${
-                    hoverTime !== null || isSeeking ? "opacity-100" : "opacity-0 group-hover/progress:opacity-100"
-                  }`}
-                  style={{ left: `${progressPercent}%`, marginLeft: "-8px" }}
-                />
+                  className="absolute top-1/2 -translate-y-1/2"
+                  style={{ left: `${progressPercent}%`, marginLeft: "-22px" }}
+                >
+                  {/* Invisible expanded touch target - 44px minimum for mobile accessibility */}
+                  <div
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="Seek"
+                    aria-valuemin={0}
+                    aria-valuemax={duration || 0}
+                    aria-valuenow={currentTime}
+                    aria-disabled={!scrubberReady}
+                    className={`relative flex h-11 w-11 items-center justify-center ${
+                      scrubberReady ? "cursor-grab active:cursor-grabbing" : "cursor-not-allowed"
+                    }`}
+                    onMouseDown={scrubberReady ? handleProgressBarMouseDown : undefined}
+                    onTouchStart={scrubberReady ? handleProgressBarTouchStart : undefined}
+                  >
+                    {/* Visual dot */}
+                    <div
+                      className={`h-5 w-5 rounded-full shadow-md transition-all sm:h-4 sm:w-4 ${
+                        scrubberReady
+                          ? "bg-mango active:scale-125"
+                          : "bg-white/50"
+                      } ${
+                        hoverTime !== null || isSeeking ? "opacity-100 scale-125" : "opacity-100 sm:opacity-0 sm:group-hover/progress:opacity-100"
+                      }`}
+                    >
+                      {/* Loading ring when scrubber is locked */}
+                      {!scrubberReady && playbackMethod !== "direct_play" && (
+                        <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-mango" />
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <span className="min-w-[3rem] text-right text-xs text-white/80 sm:text-sm">
@@ -894,9 +1353,9 @@ export function VideoPlayer({
               <button
                 onClick={togglePlay}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
-                aria-label={isPlaying ? "Pause" : "Play"}
+                aria-label={wantsToPlay ? "Pause" : "Play"}
               >
-                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                {wantsToPlay ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
               </button>
 
               <button
