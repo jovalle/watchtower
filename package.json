@@ -8,7 +8,7 @@
     "build": "remix vite:build",
     "dev": "remix vite:dev",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
-    "start": "remix-serve ./build/server/index.js",
+    "start": "node --import tsx server.ts",
     "typecheck": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,16 +17,21 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@remix-run/express": "^2.17.2",
     "@remix-run/node": "^2.15.2",
     "@remix-run/react": "^2.15.2",
     "@remix-run/serve": "^2.15.2",
+    "@tanstack/react-virtual": "^3.13.16",
     "dotenv": "^17.2.3",
+    "express": "^5.2.1",
     "hls.js": "^1.6.15",
     "isbot": "^5.1.17",
+    "lru-cache": "^11.2.4",
     "lucide-react": "^0.562.0",
     "plex-oauth": "^2.1.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@remix-run/dev": "^2.15.2",
@@ -35,6 +40,7 @@
     "@semantic-release/git": "^10.0.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
+    "@types/express": "^5.0.6",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.50.1",
@@ -55,7 +61,6 @@
     "lint-staged": "^16.2.7",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.4.1",
     "vite-tsconfig-paths": "^5.1.4",
