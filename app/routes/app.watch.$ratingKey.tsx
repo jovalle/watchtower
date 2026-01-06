@@ -235,8 +235,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
+  // Build proxy URL - extract query params from Plex URL and use our HLS proxy
+  const plexUrl = new URL(playbackInfo.streamUrl);
+  const proxyStreamUrl = `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
+
   return json<LoaderData>({
-    streamUrl: playbackInfo.streamUrl,
+    streamUrl: proxyStreamUrl,
     title: displayTitle,
     posterUrl: buildPlexImageUrl(metadata.art || metadata.thumb),
     durationMs: metadata.duration || null,
