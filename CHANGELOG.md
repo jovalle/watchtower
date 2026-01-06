@@ -1,3 +1,20 @@
+## [1.4.0](https://github.com/jovalle/watchtower/compare/v1.3.0...v1.4.0) (2026-01-06)
+
+### 🚀 Features
+
+* **images:** add server-side image caching ([63c0139](https://github.com/jovalle/watchtower/commit/63c013992dee26cb44e72b813472cb2928def95a))
+* **player:** improve HLS/transcode stream handling ([c05d1a8](https://github.com/jovalle/watchtower/commit/c05d1a847d0408aa7ac557be84286f2e524a3cc6))
+* **server:** add custom Express server with structured logging ([ab8fa12](https://github.com/jovalle/watchtower/commit/ab8fa1296312fee4298f1de2dde1ff37bda5ff77))
+* **streaming:** add HLS proxy for transcoded video streams ([bc83d4f](https://github.com/jovalle/watchtower/commit/bc83d4f3277d8a2fd1b3f337a4c6527194ad30cb))
+
+### 🐛 Bug Fixes
+
+* **server:** resolve ESLint warning for dynamic import ([51700e1](https://github.com/jovalle/watchtower/commit/51700e175d3879f70844bf9b79d51b59142bb82b))
+
+### ♻️ Refactoring
+
+* **ui:** improve MediaRow scroll for touch devices ([31237c5](https://github.com/jovalle/watchtower/commit/31237c5397f160e40c613589d4ea57470307468b))
+
 ## [1.3.0](https://github.com/jovalle/watchtower/compare/v1.2.1...v1.3.0) (2026-01-05)
 
 ### 🚀 Features
