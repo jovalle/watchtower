@@ -73,7 +73,10 @@ function requestLogger(req: Request, res: Response, next: NextFunction) {
 }
 
 async function start() {
-  // Dynamically import the Remix build
+  // Dynamically import the Remix build (only exists after remix build)
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  // eslint-disable-next-line import/no-unresolved
   const build = await import("./build/server/index.js");
 
   // Trust proxy for correct IP detection behind reverse proxy
