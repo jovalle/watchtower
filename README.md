@@ -105,13 +105,11 @@ Open `http://localhost:9001`
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f6a8/512.gif" height="24"> Security Note
 
-> [!NOTE]
-> **Plex login may warn about an unfamiliar location**
+> [!NOTE] > **Plex login may warn about an unfamiliar location**
 >
 > When signing in, Plex may display a security alert about a login attempt from an unknown IP address or location. This is expected — Watchtower proxies authentication requests through its server, so Plex sees the Watchtower host's IP rather than your device's. You can safely approve the login if you initiated it.
 
-> [!CAUTION]
-> **Plex "Networks without auth" setting can bypass authentication for all Watchtower users**
+> [!CAUTION] > **Plex "Networks without auth" setting can bypass authentication for all Watchtower users**
 >
 > If your Plex server has IP addresses or networks configured in **Settings → Network → List of IP addresses and networks that are allowed without auth** (e.g., `192.168.1.0/24`), be aware that Watchtower proxies requests to Plex on behalf of users. This means Plex sees the requests originating from the Watchtower server's IP address, not the end user's.
 >
@@ -142,22 +140,22 @@ Here's what's on the horizon:
 
 ### Media Server Support
 
-- **Jellyfin integration** — First-class support for Jellyfin as an alternative to Plex
-- **Multi-server** — Connect multiple media servers simultaneously
+- [ ] **Jellyfin integration** — First-class support for Jellyfin as an alternative to Plex
+- [ ] **Multi-server** — Connect multiple media servers simultaneously
 
 ### Watchlist & Discovery
 
-- **Letterboxd sync** — Import watchlists from the film community's favorite platform
-- **Simkl integration** — Sync with Simkl for anime and TV tracking
-- **TMDb lists** — Browse and import TMDb curated lists
-- **TasteDive recommendations** — "If you liked X, you'll love Y" suggestions
+- [ ] **Letterboxd sync** — Import watchlists from the film community's favorite platform
+- [ ] **Simkl integration** — Sync with Simkl for anime and TV tracking
+- [ ] **TMDb lists** — Browse and import TMDb curated lists
+- [ ] **TasteDive recommendations** — "If you liked X, you'll love Y" suggestions
 
 ### Enhanced Features
 
-- **Watch party** — Synchronized viewing with friends
-- **Offline mode** — Download media for offline playback
-- **Smart playlists** — Auto-generated playlists based on mood, genre, or watch history
-- **Statistics dashboard** — Viewing habits, most-watched genres, watch time analytics (all private and local)
+- [ ] **Watch party** — Synchronized viewing with friends
+- [ ] **Offline mode** — Download media for offline playback
+- [ ] **Smart playlists** — Auto-generated playlists based on mood, genre, or watch history
+- [ ] **Statistics dashboard** — Viewing habits, most-watched genres, watch time analytics (all private and local)
 
 Have a feature request? [Open an issue](https://github.com/jovalle/watchtower/issues)
 
