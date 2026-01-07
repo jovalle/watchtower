@@ -86,7 +86,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 // Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+import { buildBackdropUrl } from "~/lib/plex/images";
 
 /**
  * Detect if the request is from a mobile device.
@@ -242,7 +242,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return json<LoaderData>({
     streamUrl: proxyStreamUrl,
     title: displayTitle,
-    posterUrl: buildPlexImageUrl(metadata.art || metadata.thumb),
+    posterUrl: buildBackdropUrl(metadata.art || metadata.thumb),
     durationMs: metadata.duration || null,
     resumePositionSeconds: resumeSeconds,
     type: metadata.type as "movie" | "show" | "episode",

@@ -67,8 +67,8 @@ interface LoaderData {
   recentlyAdded: MediaItemView[];
 }
 
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+// Use shared image URL helpers with proper sizing
+import { buildBackdropUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -99,7 +99,7 @@ function transformToView(
     title: isEpisode ? item.grandparentTitle || item.title : item.title,
     year: item.year?.toString(),
     type: item.type as "movie" | "show" | "episode",
-    backdropUrl: buildPlexImageUrl(item.art || item.grandparentThumb || item.thumb),
+    backdropUrl: buildBackdropUrl(item.art || item.grandparentThumb || item.thumb),
     progress,
     viewOffset: item.viewOffset,
     viewCount: item.viewCount ?? 0,

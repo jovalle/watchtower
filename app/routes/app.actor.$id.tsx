@@ -51,8 +51,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ];
 };
 
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+// Use shared image URL helpers with proper sizing
+import { buildPosterUrl, buildBackdropUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -87,10 +87,10 @@ function transformToView(
     ratingKey: item.ratingKey,
     title: item.title,
     year: item.year?.toString(),
-    posterUrl: buildPlexImageUrl(item.thumb),
+    posterUrl: buildPosterUrl(item.thumb),
     type: isShow ? "show" : "movie",
     details: {
-      backdropUrl: buildPlexImageUrl(item.art),
+      backdropUrl: buildBackdropUrl(item.art),
       releaseDate: formatReleaseDate(item.originallyAvailableAt),
       runtime: !isShow ? formatRuntime(item.duration) : undefined,
       seasons: isShow ? item.childCount : undefined,

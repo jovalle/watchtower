@@ -179,11 +179,12 @@ export function ProxiedImage({
       )}
 
       {/* Actual image - fills parent container */}
+      {/* GPU hints (backface-visibility, translateZ) prevent sharpness artifacts during scale transforms */}
       <img
         ref={imgRef}
         src={currentSrc}
         alt={alt}
-        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 [backface-visibility:hidden] [transform:translateZ(0)] ${
           status === "loaded" ? "opacity-100" : "opacity-0"
         }`}
         loading={loading}

@@ -81,8 +81,8 @@ const SORT_OPTIONS = [
 ];
 
 
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+// Use shared image URL helpers with proper sizing
+import { buildPosterUrl, buildBackdropUrl } from "~/lib/plex/images";
 
 function formatReleaseDate(dateStr?: string): string | undefined {
   if (!dateStr) return undefined;
@@ -176,7 +176,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
         guid: item.guid,
         title: item.title,
         year: item.year?.toString(),
-        posterUrl: buildPlexImageUrl(item.thumb),
+        posterUrl: buildPosterUrl(item.thumb),
         // logoUrl would come from TMDB integration (Phase 6)
         logoUrl: undefined,
         viewCount: item.viewCount ?? 0,
@@ -189,7 +189,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
         releaseDate: item.originallyAvailableAt,
         addedAt: item.addedAt,
         details: {
-          backdropUrl: buildPlexImageUrl(item.art),
+          backdropUrl: buildBackdropUrl(item.art),
           releaseDate: formatReleaseDate(item.originallyAvailableAt),
           seasons: item.childCount,
           episodes: item.leafCount,
