@@ -6,10 +6,10 @@
  * Uses stale-while-revalidate caching for fast loading.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, Suspense } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
-import { useLoaderData, useFetcher, useNavigate } from '@remix-run/react';
+import { json, defer } from '@remix-run/node';
+import { useLoaderData, useFetcher, useNavigate, Await } from '@remix-run/react';
 import {
   ListVideo,
   SortAsc,
@@ -41,17 +41,21 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-interface LoaderData {
+/** Data that may be deferred (loaded in background on first visit) */
+interface WatchlistData {
   items: UnifiedWatchlistItem[];
   counts: WatchlistCounts;
+  isStale: boolean;
+  cachedAt: number;
+}
+
+/** Combined loader data - watchlistData may be a promise on first visit */
+type LoaderData = {
   token: string;
   traktEnabled: boolean;
   imdbEnabled: boolean;
-  /** Whether the cache is stale and a background refresh would help */
-  isStale: boolean;
-  /** Timestamp when data was cached (unix seconds) - used as fallback for items without addedAt */
-  cachedAt: number;
-}
+  watchlistData: WatchlistData;
+};
 
 type SortOption =
   | 'addedAt:desc'
@@ -74,20 +78,25 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 ];
 
 /**
- * Build image URL for Plex items.
+ * Build image URL for Plex items with proper sizing for crisp display.
  * For relative paths, uses Plex Discover API directly.
  * For absolute URLs (including HTTP with IP addresses), uses the local proxy
  * to avoid mixed content issues when serving over HTTPS.
  */
 function buildPlexImageUrl(thumb: string | undefined, token: string): string {
   if (!thumb) return '';
+  // Standard poster dimensions (400x600 for 2:3 aspect ratio)
+  const width = 400;
+  const height = 600;
   // Relative paths starting with / go to Plex Discover API
   if (thumb.startsWith('/')) {
-    return `${PLEX_DISCOVER_URL}${thumb}?X-Plex-Token=${token}`;
+    return `${PLEX_DISCOVER_URL}${thumb}?X-Plex-Token=${token}&width=${width}&height=${height}`;
   }
   // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
   if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
-    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
+    const separator = thumb.includes('?') ? '&' : '?';
+    const pathWithDims = `${thumb}${separator}width=${width}&height=${height}`;
+    return `/api/plex/image?path=${encodeURIComponent(pathWithDims)}`;
   }
   // Fallback for any other format
   return thumb;
@@ -121,110 +130,109 @@ export async function loader({ request }: LoaderFunctionArgs) {
   console.log(`[Watchlist] User ${user.id} settings: trakt=${traktUsername}, imdb=${imdbWatchlistIds.join(',') || 'none'}, forceRefresh=${forceRefresh}`);
   console.log(`[Watchlist] Token types - serverToken: ${serverToken?.substring(0, 8)}..., plexToken: ${plexToken?.substring(0, 8)}...`);
 
-  // Use serverToken for local library access
-  const client = new PlexClient({
-    serverUrl: env.PLEX_SERVER_URL,
-    token: serverToken,
-    clientId: env.PLEX_CLIENT_ID,
-  });
+  // OPTIMIZATION: Check cache FIRST before expensive library lookups
+  // If we have cached data, return it immediately for fast initial load
+  // User can manually refresh to get updated availability status
+  const cached = !forceRefresh ? await getWatchlistCache(plexToken) : null;
 
-  // Use plexToken for Discover API (watchlist) - this is the user's plex.tv token
-  const discoverClient = new PlexClient({
-    serverUrl: env.PLEX_SERVER_URL,
-    token: plexToken,
-    clientId: env.PLEX_CLIENT_ID,
-  });
+  // Trakt is enabled if client ID is configured AND user has set a username
+  const traktEnabled = isTraktAvailable() && !!traktUsername;
+  // IMDB is enabled if user has configured watchlist IDs
+  const imdbEnabled = imdbWatchlistIds.length > 0;
 
-  // Normalize title for matching (lowercase, remove special chars)
-  const normalizeTitle = (title: string) =>
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+  if (cached) {
+    // Fast path: return cached data immediately without library lookup
+    // Availability info may be stale but that's acceptable for fast initial load
+    const items = [...cached.items].sort((a, b) => {
+      const aTime = getEarliestAddedAt(a) || cached.cachedAt;
+      const bTime = getEarliestAddedAt(b) || cached.cachedAt;
+      return bTime - aTime;
+    });
 
-  // Build maps of local library items for quick lookup (always fresh for availability)
-  // Include watched status to determine if items can be removed from watchlist
-  interface LocalItemData {
-    ratingKey: string;
-    thumb?: string;
-    isWatched: boolean;
-    type: 'movie' | 'show';
-    audienceRating?: number; // Fallback rating from local Plex library
+    return json({
+      token: plexToken,
+      traktEnabled,
+      imdbEnabled,
+      watchlistData: {
+        items,
+        counts: cached.counts,
+        isStale: cached.isStale,
+        cachedAt: cached.cachedAt,
+      },
+    } satisfies LoaderData);
   }
-  const localItemsByGuid = new Map<string, LocalItemData>();
-  const localItemsByTitleYear = new Map<string, LocalItemData>();
 
-  const librariesResult = await client.getLibraries();
-  if (librariesResult.success) {
-    for (const library of librariesResult.data) {
-      if (library.type === 'movie' || library.type === 'show') {
-        const itemsResult = await client.getLibraryItems(library.key, { limit: 1000 });
-        if (itemsResult.success) {
-          for (const item of itemsResult.data) {
-            // Determine watched status:
-            // - Movies: viewCount > 0 means watched
-            // - Shows: viewedLeafCount >= leafCount means fully watched
-            const isMovieWatched = library.type === 'movie' && (item.viewCount ?? 0) > 0;
-            const isShowWatched =
-              library.type === 'show' &&
-              (item.leafCount ?? 0) > 0 &&
-              (item.viewedLeafCount ?? 0) >= (item.leafCount ?? 0);
+  // Slow path: No cache, need to fetch everything fresh
+  // Use defer() to return immediately and load data in background
+  const fetchWatchlistData = async (): Promise<WatchlistData> => {
+    // Use serverToken for local library access
+    const client = new PlexClient({
+      serverUrl: env.PLEX_SERVER_URL,
+      token: serverToken,
+      clientId: env.PLEX_CLIENT_ID,
+    });
 
-            const itemData: LocalItemData = {
-              ratingKey: item.ratingKey,
-              thumb: item.thumb,
-              isWatched: isMovieWatched || isShowWatched,
-              type: library.type as 'movie' | 'show',
-              audienceRating: item.audienceRating,
-            };
-            localItemsByGuid.set(item.guid, itemData);
-            if (item.title && item.year) {
-              const titleYearKey = `${normalizeTitle(item.title)}:${item.year}`;
-              localItemsByTitleYear.set(titleYearKey, itemData);
+    // Use plexToken for Discover API (watchlist) - this is the user's plex.tv token
+    const discoverClient = new PlexClient({
+      serverUrl: env.PLEX_SERVER_URL,
+      token: plexToken,
+      clientId: env.PLEX_CLIENT_ID,
+    });
+
+    // Normalize title for matching (lowercase, remove special chars)
+    const normalizeTitle = (title: string) =>
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // Build maps of local library items for quick lookup
+    // Include watched status to determine if items can be removed from watchlist
+    interface LocalItemData {
+      ratingKey: string;
+      thumb?: string;
+      isWatched: boolean;
+      type: 'movie' | 'show';
+      audienceRating?: number; // Fallback rating from local Plex library
+    }
+    const localItemsByGuid = new Map<string, LocalItemData>();
+    const localItemsByTitleYear = new Map<string, LocalItemData>();
+
+    const librariesResult = await client.getLibraries();
+    if (librariesResult.success) {
+      for (const library of librariesResult.data) {
+        if (library.type === 'movie' || library.type === 'show') {
+          const itemsResult = await client.getLibraryItems(library.key, { limit: 1000 });
+          if (itemsResult.success) {
+            for (const item of itemsResult.data) {
+              // Determine watched status:
+              // - Movies: viewCount > 0 means watched
+              // - Shows: viewedLeafCount >= leafCount means fully watched
+              const isMovieWatched = library.type === 'movie' && (item.viewCount ?? 0) > 0;
+              const isShowWatched =
+                library.type === 'show' &&
+                (item.leafCount ?? 0) > 0 &&
+                (item.viewedLeafCount ?? 0) >= (item.leafCount ?? 0);
+
+              const itemData: LocalItemData = {
+                ratingKey: item.ratingKey,
+                thumb: item.thumb,
+                isWatched: isMovieWatched || isShowWatched,
+                type: library.type as 'movie' | 'show',
+                audienceRating: item.audienceRating,
+              };
+              localItemsByGuid.set(item.guid, itemData);
+              if (item.title && item.year) {
+                const titleYearKey = `${normalizeTitle(item.title)}:${item.year}`;
+                localItemsByTitleYear.set(titleYearKey, itemData);
+              }
             }
           }
         }
       }
     }
-  }
 
-  let rawItems: UnifiedWatchlistItem[];
-  let counts: WatchlistCounts;
-  let isStale = false;
-  let cachedAt = Math.floor(Date.now() / 1000); // Default to now
-
-  // Try cache first (unless forcing refresh) - user-specific cache keyed by plexToken
-  const cached = !forceRefresh ? await getWatchlistCache(plexToken) : null;
-
-  if (cached) {
-    // Use cached data but refresh library availability and watched status
-    rawItems = cached.items.map((item) => {
-      const updated = { ...item };
-      // Re-check library availability and watched status
-      let localItem: LocalItemData | undefined;
-      if (item.plexGuid) {
-        localItem = localItemsByGuid.get(item.plexGuid);
-      }
-      if (!localItem && item.title && item.year) {
-        const titleYearKey = `${normalizeTitle(item.title)}:${item.year}`;
-        localItem = localItemsByTitleYear.get(titleYearKey);
-      }
-      if (localItem) {
-        updated.localRatingKey = localItem.ratingKey;
-        updated.isLocal = true;
-        updated.isWatched = localItem.isWatched;
-      } else {
-        updated.localRatingKey = undefined;
-        updated.isLocal = false;
-        updated.isWatched = false;
-      }
-      return updated;
-    });
-    counts = cached.counts;
-    isStale = cached.isStale;
-    cachedAt = cached.cachedAt;
-  } else {
     // Fetch fresh data from all sources
     const traktClient = createTraktClient();
     const tmdbClient = createTMDBClient();
@@ -239,7 +247,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       (thumb, t) => {
         // Local library items use the image proxy
         if (thumb?.startsWith('/library/')) {
-          return `/api/plex/image?path=${encodeURIComponent(thumb)}&width=300&height=450`;
+          return `/api/plex/image?path=${encodeURIComponent(thumb)}&width=400&height=600`;
         }
         // Remote Plex Discover items use the public API directly
         return buildPlexImageUrl(thumb, t);
@@ -248,68 +256,155 @@ export async function loader({ request }: LoaderFunctionArgs) {
       localItemsByTitleYear,
       { traktUsername, imdbWatchlistIds },
     );
-    rawItems = result.items;
-    counts = result.counts;
-    cachedAt = Math.floor(Date.now() / 1000);
+    const rawItems = result.items;
+    const counts = result.counts;
+    const cachedAt = Math.floor(Date.now() / 1000);
 
     // Cache the result (user-specific, keyed by plexToken)
     await setWatchlistCache(plexToken, rawItems, counts);
-  }
 
-  // Sort by addedAt descending by default
-  const items = [...rawItems].sort((a, b) => {
-    const aTime = getEarliestAddedAt(a) || cachedAt;
-    const bTime = getEarliestAddedAt(b) || cachedAt;
-    return bTime - aTime;
-  });
+    // Sort by addedAt descending by default
+    const items = [...rawItems].sort((a, b) => {
+      const aTime = getEarliestAddedAt(a) || cachedAt;
+      const bTime = getEarliestAddedAt(b) || cachedAt;
+      return bTime - aTime;
+    });
 
-  // Trakt is enabled if client ID is configured AND user has set a username
-  const traktEnabled = isTraktAvailable() && !!traktUsername;
-  // IMDB is enabled if user has configured watchlist IDs
-  const imdbEnabled = imdbWatchlistIds.length > 0;
+    return {
+      items,
+      counts,
+      isStale: false, // Fresh data is never stale
+      cachedAt,
+    };
+  };
 
-  return json<LoaderData>({
-    items,
-    counts,
-    token: plexToken, // plexToken for Discover API image URLs
+  // Return deferred response - page loads immediately, data streams in
+  return defer({
+    token: plexToken,
     traktEnabled,
     imdbEnabled,
-    isStale,
-    cachedAt,
+    watchlistData: fetchWatchlistData(),
   });
 }
 
-export default function WatchlistPage() {
-  const loaderData = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof loader>();
+/** Loading skeleton for watchlist */
+function WatchlistSkeleton() {
+  return (
+    <Container className="py-6">
+      {/* Header skeleton */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="h-8 w-32 animate-pulse rounded bg-background-elevated" />
+        <div className="h-6 w-48 animate-pulse rounded bg-background-elevated" />
+      </div>
+
+      {/* Filter bar skeleton */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
+        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
+        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
+        <div className="h-8 w-32 animate-pulse rounded bg-background-elevated" />
+      </div>
+
+      {/* Loading message */}
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <Loader2 className="mb-4 h-12 w-12 animate-spin text-accent-primary" />
+        <Typography variant="subtitle" className="mb-2">
+          Loading your watchlist...
+        </Typography>
+        <Typography variant="body" className="text-foreground-secondary">
+          Fetching from Plex, Trakt, and IMDB
+        </Typography>
+      </div>
+    </Container>
+  );
+}
+
+/** Main watchlist content - receives resolved data */
+function WatchlistContent({
+  watchlistData,
+  token: _token,
+  traktEnabled,
+  imdbEnabled,
+}: {
+  watchlistData: WatchlistData;
+  token: string;
+  traktEnabled: boolean;
+  imdbEnabled: boolean;
+}) {
+  const fetcher = useFetcher<LoaderData>();
   const navigate = useNavigate();
+
+  const { items, counts: _counts, isStale, cachedAt } = watchlistData;
 
   // Track refresh state from fetcher
   const isRefreshing = fetcher.state === 'loading';
 
-  // Use fetcher data if available AND has items, otherwise use loader data
+  // Use fetcher data if available AND has items, otherwise use props
   // This prevents visual emptying if refresh returns empty results temporarily
-  // Also preserve current data while refresh is in progress
-  const effectiveData = useMemo(() => {
+  const effectiveItems = useMemo(() => {
     // While refreshing, always show current data (don't flash empty)
     if (isRefreshing) {
-      return fetcher.data?.items?.length ? fetcher.data : loaderData;
+      return items;
     }
     // After refresh completes, prefer fetcher data if it has items
-    if (fetcher.data?.items?.length) {
-      return fetcher.data;
+    const fetcherData = fetcher.data?.watchlistData;
+    if (fetcherData && 'items' in fetcherData && fetcherData.items?.length) {
+      return fetcherData.items;
     }
-    // Fall back to loader data
-    return loaderData;
-  }, [fetcher.data, loaderData, isRefreshing]);
+    // Fall back to props data
+    return items;
+  }, [fetcher.data, items, isRefreshing]);
 
-  const { items, traktEnabled, imdbEnabled, isStale, cachedAt } = effectiveData;
+  const effectiveIsStale = useMemo(() => {
+    const fetcherData = fetcher.data?.watchlistData;
+    if (fetcherData && 'isStale' in fetcherData) {
+      return fetcherData.isStale;
+    }
+    return isStale;
+  }, [fetcher.data, isStale]);
+
+  const effectiveCachedAt = useMemo(() => {
+    const fetcherData = fetcher.data?.watchlistData;
+    if (fetcherData && 'cachedAt' in fetcherData) {
+      return fetcherData.cachedAt;
+    }
+    return cachedAt;
+  }, [fetcher.data, cachedAt]);
 
   // Client-side filters and sorting state (arrays for multi-select)
   const [sourceFilters, setSourceFilters] = useState<SourceFilterValue[]>(['all']);
   const [typeFilters, setTypeFilters] = useState<TypeFilterValue[]>(['all']);
   const [availabilityFilters, setAvailabilityFilters] = useState<AvailabilityFilterValue[]>(['all']);
   const [sortOption, setSortOption] = useState<SortOption>('addedAt:desc');
+
+  // Progressive loading - show limited items initially for faster render
+  const INITIAL_DISPLAY_COUNT = 24; // 4-6 rows depending on screen size
+  const LOAD_MORE_COUNT = 24;
+  const [displayedCount, setDisplayedCount] = useState(INITIAL_DISPLAY_COUNT);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  // Reset displayed count when filters change
+  useEffect(() => {
+    setDisplayedCount(INITIAL_DISPLAY_COUNT);
+  }, [sourceFilters, typeFilters, availabilityFilters, sortOption]);
+
+  // Infinite scroll - load more when sentinel is visible
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayedCount((prev) => prev + LOAD_MORE_COUNT);
+        }
+      },
+      { rootMargin: '200px' } // Start loading before user reaches the bottom
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   // Handle manual refresh - use fetcher to load in background without navigation
   const handleRefresh = useCallback(() => {
@@ -320,14 +415,14 @@ export default function WatchlistPage() {
   const getItemAddedAt = useCallback(
     (item: UnifiedWatchlistItem): number => {
       const earliest = getEarliestAddedAt(item);
-      return earliest || cachedAt;
+      return earliest || effectiveCachedAt;
     },
-    [cachedAt],
+    [effectiveCachedAt],
   );
 
   // Client-side filtering and sorting
   const filteredAndSortedItems = useMemo(() => {
-    let result = [...items];
+    let result = [...effectiveItems];
 
     // Filter by source (if not "all")
     if (!sourceFilters.includes('all')) {
@@ -374,7 +469,7 @@ export default function WatchlistPage() {
     });
 
     return result;
-  }, [items, sourceFilters, typeFilters, availabilityFilters, sortOption, getItemAddedAt]);
+  }, [effectiveItems, sourceFilters, typeFilters, availabilityFilters, sortOption, getItemAddedAt]);
 
   // Calculate dynamic counts for all filter groups based on current filter state
   // Each count shows how many items would match if that option were selected (given other filters)
@@ -386,7 +481,7 @@ export default function WatchlistPage() {
       overrideType?: TypeFilterValue[],
       overrideAvailability?: AvailabilityFilterValue[],
     ) => {
-      let result = [...items];
+      let result = [...effectiveItems];
 
       // Apply source filter
       const effectiveSources = skipFilter === 'source' ? (overrideSource ?? ['all']) : sourceFilters;
@@ -442,7 +537,7 @@ export default function WatchlistPage() {
     };
 
     return { source: sourceCounts, type: typeCounts, availability: availabilityCounts };
-  }, [items, sourceFilters, typeFilters, availabilityFilters]);
+  }, [effectiveItems, sourceFilters, typeFilters, availabilityFilters]);
 
   const handlePlay = (item: UnifiedWatchlistItem) => {
     if (!item.isLocal || !item.localRatingKey) {
@@ -597,7 +692,7 @@ export default function WatchlistPage() {
           />
 
           {/* Sort dropdown */}
-          {items.length > 0 && (
+          {effectiveItems.length > 0 && (
             <div className="flex items-center gap-1.5">
               <SortAsc className="h-4 w-4 text-foreground-secondary" />
               <select
@@ -620,10 +715,10 @@ export default function WatchlistPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <ListVideo className="mb-4 h-16 w-16 text-foreground-muted" />
           <Typography variant="subtitle" className="mb-2">
-            {items.length === 0 ? 'Your watchlist is empty' : 'No items match your filters'}
+            {effectiveItems.length === 0 ? 'Your watchlist is empty' : 'No items match your filters'}
           </Typography>
           <Typography variant="body" className="max-w-md text-foreground-secondary">
-            {items.length === 0
+            {effectiveItems.length === 0
               ? 'Click the + button on any movie or show to add it to your watchlist.'
               : 'Try adjusting your filters to see more items.'}
           </Typography>
@@ -634,9 +729,9 @@ export default function WatchlistPage() {
             <Typography variant="caption" className="text-foreground-muted">
               {filteredAndSortedItems.length}{' '}
               {filteredAndSortedItems.length === 1 ? 'item' : 'items'}
-              {hasActiveFilters && ` (filtered from ${items.length})`}
+              {hasActiveFilters && ` (filtered from ${effectiveItems.length})`}
             </Typography>
-            {isStale && !isRefreshing && (
+            {effectiveIsStale && !isRefreshing && (
               <button
                 onClick={handleRefresh}
                 className="flex items-center gap-1 rounded-full bg-mango/10 px-2 py-0.5 text-xs text-mango transition-colors hover:bg-mango/20"
@@ -647,7 +742,7 @@ export default function WatchlistPage() {
             )}
           </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {filteredAndSortedItems.map((item) => (
+            {filteredAndSortedItems.slice(0, displayedCount).map((item) => (
               <PosterCard
                 key={item.id}
                 ratingKey={item.localRatingKey}
@@ -665,9 +760,49 @@ export default function WatchlistPage() {
               />
             ))}
           </div>
+
+          {/* Infinite scroll sentinel - triggers loading more items */}
+          {displayedCount < filteredAndSortedItems.length && (
+            <div
+              ref={loadMoreRef}
+              className="mt-8 flex items-center justify-center py-4"
+            >
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
+              <span className="ml-3 text-sm text-foreground-muted">
+                Loading more ({filteredAndSortedItems.length - displayedCount} remaining)
+              </span>
+            </div>
+          )}
         </>
       )}
 
     </Container>
+  );
+}
+
+/** Main page component - handles deferred data with Suspense */
+export default function WatchlistPage() {
+  const data = useLoaderData<typeof loader>();
+  // Cast to the expected shape - loader returns either json or defer with same structure
+  const { token, traktEnabled, imdbEnabled, watchlistData } = data as unknown as {
+    token: string;
+    traktEnabled: boolean;
+    imdbEnabled: boolean;
+    watchlistData: WatchlistData | Promise<WatchlistData>;
+  };
+
+  return (
+    <Suspense fallback={<WatchlistSkeleton />}>
+      <Await resolve={watchlistData}>
+        {(resolvedData) => (
+          <WatchlistContent
+            watchlistData={resolvedData}
+            token={token}
+            traktEnabled={traktEnabled}
+            imdbEnabled={imdbEnabled}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }
