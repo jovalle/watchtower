@@ -50,7 +50,7 @@ export const env = {
    * Unique client identifier for Plex API headers
    */
   get PLEX_CLIENT_ID(): string {
-    return getEnvVarWithDefault("PLEX_CLIENT_ID", "flixor-001");
+    return getEnvVarWithDefault("PLEX_CLIENT_ID", "watchtower-001");
   },
 
   /**
@@ -113,7 +113,6 @@ export const env = {
     const value = process.env.TRAKT_CLIENT_ID;
     return value && value.trim() ? value.trim() : null;
   },
-
 } as const;
 
 export type Env = typeof env;
