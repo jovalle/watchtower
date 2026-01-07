@@ -34,6 +34,7 @@ tmp/
 # Local data cache (logos, metadata)
 .claude/
 .planning/
+.serena/
 data/
 
 # TypeScript
