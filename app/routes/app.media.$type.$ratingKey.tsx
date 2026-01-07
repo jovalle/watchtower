@@ -162,8 +162,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ];
 };
 
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+// Use shared image URL helpers with proper sizing
+import { buildPosterUrl, buildBackdropUrl, buildPlexImageUrl } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | null {
   if (!durationMs) return null;
@@ -604,7 +604,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (showResult.success) {
       showTitle = showResult.data.title;
       showRatingKey = metadata.parentRatingKey;
-      showPosterUrl = buildPlexImageUrl(showResult.data.thumb);
+      showPosterUrl = buildPosterUrl(showResult.data.thumb);
       breadcrumbs.push({
         label: showTitle,
         href: `/app/media/show/${showRatingKey}`,
@@ -631,7 +631,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           if (showResult.success) {
             showTitle = showResult.data.title;
             showRatingKey = seasonResult.data.parentRatingKey;
-            showPosterUrl = buildPlexImageUrl(showResult.data.thumb);
+            showPosterUrl = buildPosterUrl(showResult.data.thumb);
           }
         }
       }
@@ -642,7 +642,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       showTitle = metadata.grandparentTitle;
       showRatingKey = metadata.grandparentRatingKey;
       if (metadata.grandparentThumb) {
-        showPosterUrl = buildPlexImageUrl(metadata.grandparentThumb);
+        showPosterUrl = buildPosterUrl(metadata.grandparentThumb);
       }
     }
 
@@ -792,8 +792,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Build processed data for the view
   const loaderData: LoaderData = {
     metadata,
-    backdropUrl: buildPlexImageUrl(artPath),
-    posterUrl: buildPlexImageUrl(metadata.thumb),
+    backdropUrl: buildBackdropUrl(artPath),
+    posterUrl: buildPosterUrl(metadata.thumb),
     year: metadata.year?.toString() ?? null,
     duration: formatRuntime(metadata.duration),
     contentRating: metadata.contentRating ?? null,
@@ -862,7 +862,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         index: season.index ?? 0,
         leafCount: season.leafCount ?? 0,
         viewedLeafCount: season.viewedLeafCount ?? 0,
-        thumb: buildPlexImageUrl(season.thumb),
+        thumb: buildPosterUrl(season.thumb),
       }));
 
       // Get episodes for the first unwatched season, or latest if all watched
@@ -892,7 +892,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               index: episode.index ?? 0,
               seasonIndex: episode.parentIndex ?? targetSeason.index ?? 0,
               duration: formatRuntime(episode.duration),
-              thumb: buildPlexImageUrl(episode.thumb),
+              thumb: buildBackdropUrl(episode.thumb),
               summary: episode.summary,
               viewCount: episode.viewCount ?? 0,
               viewOffset: episode.viewOffset,
@@ -933,7 +933,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           index: episode.index ?? 0,
           seasonIndex: seasonIndex ?? 0,
           duration: formatRuntime(episode.duration),
-          thumb: buildPlexImageUrl(episode.thumb),
+          thumb: buildBackdropUrl(episode.thumb),
           summary: episode.summary,
           viewCount: episode.viewCount ?? 0,
           viewOffset: episode.viewOffset,
@@ -1102,7 +1102,7 @@ export default function MediaDetailPage() {
                 index: episode.index ?? 0,
                 seasonIndex: episode.parentIndex ?? seasonIndex,
                 duration: episode.duration ? formatRuntime(episode.duration) : null,
-                thumb: buildPlexImageUrl(episode.thumb),
+                thumb: buildBackdropUrl(episode.thumb),
                 summary: episode.summary,
                 viewCount: episode.viewCount ?? 0,
                 viewOffset: episode.viewOffset,

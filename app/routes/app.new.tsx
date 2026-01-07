@@ -75,8 +75,8 @@ const TABS: { id: TabId; label: string; icon: typeof Flame }[] = [
   { id: "worth", label: "Worth the Wait", icon: Star },
 ];
 
-// Use shared image URL helper
-import { buildPlexImageUrl } from "~/lib/plex/images";
+// Use shared image URL helpers with proper sizing
+import { buildPosterUrl, buildBackdropUrl, POSTER_DIMENSIONS, BACKDROP_DIMENSIONS } from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | undefined {
   if (!durationMs) return undefined;
@@ -185,15 +185,15 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
       ratingKey: item.ratingKey,
       title: isEpisode ? item.grandparentTitle || item.title : item.title,
       year: item.year?.toString(),
-      posterUrl: buildPlexImageUrl(item.thumb),
-      backdropUrl: buildPlexImageUrl(item.art || item.grandparentArt || item.thumb),
+      posterUrl: buildPosterUrl(item.thumb),
+      backdropUrl: buildBackdropUrl(item.art || item.grandparentArt || item.thumb),
       type,
       audienceRating: item.audienceRating,
       addedAt: item.addedAt,
       showTitle: isEpisode ? item.grandparentTitle : undefined,
       seasonEpisode: isEpisode ? `S${item.parentIndex}:E${item.index}` : undefined,
       details: {
-        backdropUrl: buildPlexImageUrl(item.art || item.grandparentArt),
+        backdropUrl: buildBackdropUrl(item.art || item.grandparentArt),
         runtime: type === "movie" ? formatRuntime(item.duration) : undefined,
         seasons: type === "show" ? item.childCount : undefined,
         episodes: type === "show" ? item.leafCount : undefined,
@@ -209,22 +209,30 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
   const transformWatchlistItem = (item: PlexWatchlistItem): MediaItemView => {
     // Watchlist items use Plex's discover API image format
     // Thumb paths look like "/library/metadata/xxx/thumb/yyy" and need the discover URL + token
-    const buildDiscoverImageUrl = (path: string | undefined): string => {
+    const buildDiscoverImageUrl = (path: string | undefined, dimensions?: { width?: number; height?: number }): string => {
       if (!path) return "";
+      // Build dimension params
+      const dimParams = dimensions
+        ? `&width=${dimensions.width || ""}&height=${dimensions.height || ""}`
+        : "";
       // Relative paths starting with / go to Plex Discover API
       if (path.startsWith("/")) {
-        return `${PLEX_DISCOVER_URL}${path}?X-Plex-Token=${token}`;
+        return `${PLEX_DISCOVER_URL}${path}?X-Plex-Token=${token}${dimParams}`;
       }
       // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
       if (path.startsWith('http://') || path.startsWith('https://')) {
-        return `/api/plex/image?path=${encodeURIComponent(path)}`;
+        const separator = path.includes("?") ? "&" : "?";
+        const pathWithDims = dimensions
+          ? `${path}${separator}width=${dimensions.width || ""}&height=${dimensions.height || ""}`
+          : path;
+        return `/api/plex/image?path=${encodeURIComponent(pathWithDims)}`;
       }
       // Fallback for any other format
       return path;
     };
 
-    const thumbUrl = buildDiscoverImageUrl(item.thumb);
-    const artUrl = buildDiscoverImageUrl(item.art);
+    const thumbUrl = buildDiscoverImageUrl(item.thumb, POSTER_DIMENSIONS);
+    const artUrl = buildDiscoverImageUrl(item.art, BACKDROP_DIMENSIONS);
 
     return {
       ratingKey: item.ratingKey,
