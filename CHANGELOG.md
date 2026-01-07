@@ -1,3 +1,13 @@
+## [1.5.0](https://github.com/jovalle/watchtower/compare/v1.4.0...v1.5.0) (2026-01-07)
+
+### 🚀 Features
+
+* **images:** add server-side resizing for poster and backdrop images ([49ad481](https://github.com/jovalle/watchtower/commit/49ad481ba08a6bb76d25019a62392eea387a64db))
+
+### ⚡ Performance
+
+* **watchlist:** implement deferred loading ([aa93937](https://github.com/jovalle/watchtower/commit/aa939379671c912a43572b7367fff7c7c06fdc40))
+
 ## [1.4.0](https://github.com/jovalle/watchtower/compare/v1.3.0...v1.4.0) (2026-01-06)
 
 ### 🚀 Features
