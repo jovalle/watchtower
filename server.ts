@@ -15,8 +15,8 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LOG_COLORS: Record<LogLevel, string> = {
   debug: "\x1b[90m", // gray
-  info: "\x1b[36m",  // cyan
-  warn: "\x1b[33m",  // yellow
+  info: "\x1b[36m", // cyan
+  warn: "\x1b[33m", // yellow
   error: "\x1b[31m", // red
 };
 const RESET = "\x1b[0m";
@@ -52,11 +52,12 @@ function requestLogger(req: Request, res: Response, next: NextFunction) {
     else if (status >= 400) level = "warn";
 
     // Demote high-frequency endpoints to DEBUG (preserving WARN/ERROR)
-    const isNoisy = req.path.includes("/api/plex/sessions") ||
-                    req.path.includes("/api/plex/timeline") ||
-                    // HLS segments and playlist refreshes (not initial start.m3u8)
-                    (req.path.includes("/api/plex/hls/") &&
-                     !req.path.endsWith("/start.m3u8"));
+    const isNoisy =
+      req.path.includes("/api/plex/sessions") ||
+      req.path.includes("/api/plex/timeline") ||
+      // HLS segments and playlist refreshes (not initial start.m3u8)
+      (req.path.includes("/api/plex/hls/") &&
+        !req.path.endsWith("/start.m3u8"));
     if (isNoisy && level === "info") level = "debug";
 
     const contentLength = res.get("Content-Length");
@@ -85,6 +86,9 @@ async function start() {
   // Request logging
   app.use(requestLogger);
 
+  // Silently reject Chrome DevTools well-known probes
+  app.use("/.well-known", (_req, res) => res.status(404).end());
+
   // Serve static files from public directory
   app.use(express.static("public", { maxAge: "1h" }));
 
@@ -93,7 +97,7 @@ async function start() {
     express.static("build/client", {
       maxAge: "1y",
       immutable: true,
-    })
+    }),
   );
 
   // Handle all other requests with Remix
@@ -103,11 +107,14 @@ async function start() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       build: build as any,
       mode: process.env.NODE_ENV,
-    })
+    }),
   );
 
   app.listen(PORT, () => {
-    log("info", `Server started`, { port: PORT, env: process.env.NODE_ENV || "development" });
+    log("info", `Server started`, {
+      port: PORT,
+      env: process.env.NODE_ENV || "development",
+    });
   });
 }
 
