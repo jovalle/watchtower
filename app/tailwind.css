@@ -33,6 +33,17 @@
   }
 }
 
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* CSS Custom Properties for Design Tokens */
 :root {
   /* Background tokens */
@@ -46,8 +57,8 @@
   --color-foreground-muted: #6b7280;
 
   /* Accent tokens */
-  --color-accent-primary: #CC7000;
-  --color-accent-hover: #E07C00;
+  --color-accent-primary: #cc7000;
+  --color-accent-hover: #e07c00;
 
   /* Border tokens */
   --color-border-subtle: #262626;
@@ -75,7 +86,9 @@
   body {
     margin: 0;
     padding: 0;
-    font-feature-settings: "kern" 1, "liga" 1;
+    font-feature-settings:
+      "kern" 1,
+      "liga" 1;
     background-color: var(--color-background-primary);
     color: var(--color-foreground-primary);
     /* Ensure body fills viewport and prevents overflow artifacts */

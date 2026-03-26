@@ -30,6 +30,7 @@ coverage/
 # Misc
 tmp/
 *.local
+local/
 
 # Local data cache (logos, metadata)
 .claude/
