@@ -1,3 +1,9 @@
+## [1.6.0](https://github.com/jovalle/watchtower/compare/v1.5.0...v1.6.0) (2026-03-26)
+
+### 🚀 Features
+
+* **vote:** implement private cinema (movie night ranked choice voting) dashboard ([36676f0](https://github.com/jovalle/watchtower/commit/36676f00df93758b0db2700bcc82daad735de182))
+
 ## [1.5.0](https://github.com/jovalle/watchtower/compare/v1.4.0...v1.5.0) (2026-01-07)
 
 ### 🚀 Features
