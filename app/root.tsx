@@ -7,7 +7,11 @@ import {
   ScrollRestoration,
   useRouteError,
 } from "@remix-run/react";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 
 import "./tailwind.css";
@@ -15,6 +19,13 @@ import { Shell } from "~/components/layout";
 import { InstallPrompt } from "~/components/pwa";
 import { getPlexToken } from "~/lib/auth/session.server";
 import { runStartupChecks } from "~/lib/startup.server";
+
+export const meta: MetaFunction = () => {
+  return [
+    { title: "Watchtower" },
+    { name: "description", content: "Your personal streaming experience" },
+  ];
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // Run startup checks on first request

@@ -10,7 +10,7 @@
  * - Shareable link
  */
 
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
   useLoaderData,
@@ -34,6 +34,21 @@ import { MovieSelector } from "~/components/vote/MovieSelector";
 import { RankedChoiceVoter } from "~/components/vote/RankedChoiceVoter";
 import { GuestIdentity } from "~/components/vote/GuestIdentity";
 import type { VoteContext } from "~/routes/private";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  const showingName = data?.showing?.name?.trim();
+  const title = showingName
+    ? `${showingName} - Private Cinema | Watchtower`
+    : "Private Cinema - Watchtower";
+
+  return [
+    { title },
+    {
+      name: "description",
+      content: "Join and manage your Private Cinema showing",
+    },
+  ];
+};
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const showingId = params.showingId;

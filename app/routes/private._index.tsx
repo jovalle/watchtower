@@ -5,7 +5,7 @@
  * Movie posters scroll horizontally in a carousel.
  */
 
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
   Link,
@@ -24,6 +24,13 @@ import {
   SHOWING_STATUS_SORT_ORDER,
 } from "~/lib/vote/types";
 import type { VoteContext } from "~/routes/private";
+
+export const meta: MetaFunction = () => {
+  return [
+    { title: "Private Cinema - Watchtower" },
+    { name: "description", content: "Your Private Cinema dashboard" },
+  ];
+};
 
 function relativeTime(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -269,7 +276,7 @@ export default function VoteDashboard() {
           Got a link to a showing? <br /> Open it directly to join and vote.
         </p>
         <Link
-          to="/auth/redirect"
+          to="/auth/redirect?redirectTo=/private"
           className="mt-6 inline-flex items-center gap-2 rounded-md bg-amber-500 px-5 py-2.5 text-sm font-bold text-black hover:bg-amber-400 transition-colors uppercase tracking-wide"
         >
           Sign in
