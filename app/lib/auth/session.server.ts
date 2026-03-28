@@ -11,6 +11,7 @@ type SessionData = {
   serverToken: string;    // Server-specific token for Plex server API calls
   isOwner: boolean;       // Whether the user owns this Plex server
   pendingPinId: number;
+  pendingRedirectTo: string;
 };
 
 type SessionFlashData = {
@@ -58,6 +59,19 @@ export async function getPlexToken(request: Request): Promise<string | null> {
   const session = await getSession(request);
   const token = session.get("plexToken");
   return token ?? null;
+}
+
+/**
+ * Keep redirects on-site after auth and block open redirects.
+ */
+export function sanitizeRedirectTo(
+  redirectTo: string | null | undefined
+): string | null {
+  if (!redirectTo || !redirectTo.startsWith("/") || redirectTo.startsWith("//")) {
+    return null;
+  }
+
+  return redirectTo;
 }
 
 /**
@@ -114,11 +128,16 @@ export async function isServerOwner(request: Request): Promise<boolean> {
 /**
  * Create a new user session with the Plex token and redirect.
  */
-export async function createUserSession(plexToken: string, redirectTo: string) {
-  const session = await sessionStorage.getSession();
+export async function createUserSession(
+  plexToken: string,
+  redirectTo: string,
+  existingSession?: Awaited<ReturnType<typeof getSession>>
+) {
+  const session = existingSession ?? await sessionStorage.getSession();
   session.set("plexToken", plexToken);
   // Clear any pending auth state
   session.unset("pendingPinId");
+  session.unset("pendingRedirectTo");
 
   return redirect(redirectTo, {
     headers: {

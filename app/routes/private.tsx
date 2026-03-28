@@ -5,7 +5,7 @@
  * redirect unauthenticated visitors. Guests can view showings and vote.
  */
 
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
   Link,
@@ -17,6 +17,13 @@ import {
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getPlexToken, getSession } from "~/lib/auth/session.server";
 import { getPlexUser, type PlexUser } from "~/lib/auth/plex.server";
+
+export const meta: MetaFunction = () => {
+  return [
+    { title: "Private Cinema - Watchtower" },
+    { name: "description", content: "Browse and host private movie nights" },
+  ];
+};
 
 interface VoteContext {
   user: PlexUser | null;
@@ -92,6 +99,9 @@ export default function VoteLayout() {
   const location = useLocation();
   const isOnDashboard =
     location.pathname === "/private" || location.pathname === "/private/";
+  const loginHref = `/auth/redirect?redirectTo=${encodeURIComponent(
+    `${location.pathname}${location.search}`
+  )}`;
 
   // Surface server errors from the fetcher
   useEffect(() => {
@@ -144,11 +154,12 @@ export default function VoteLayout() {
             ) : guestName ? (
               <GuestUserMenu
                 guestName={guestName}
+                loginHref={loginHref}
                 onLogout={clearGuestIdentity}
               />
             ) : (
               <Link
-                to="/auth/redirect"
+                to={loginHref}
                 className="text-sm text-accent-primary hover:underline"
               >
                 Sign in
@@ -390,9 +401,11 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
  */
 function GuestUserMenu({
   guestName,
+  loginHref,
   onLogout,
 }: {
   guestName: string;
+  loginHref: string;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -442,7 +455,7 @@ function GuestUserMenu({
       {open && (
         <div className="absolute right-0 mt-1 w-44 rounded-lg border border-white/10 bg-background-primary py-1 shadow-xl">
           <Link
-            to="/auth/redirect"
+            to={loginHref}
             className="flex items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
             onClick={() => setOpen(false)}
           >
