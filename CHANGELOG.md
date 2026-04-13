@@ -1,3 +1,9 @@
+## [1.7.0](https://github.com/jovalle/watchtower/compare/v1.6.0...v1.7.0) (2026-04-13)
+
+### 🚀 Features
+
+* **auth:** enhance session management with redirect sanitization and meta tags ([bab3876](https://github.com/jovalle/watchtower/commit/bab3876f191e4440d404f734c2f26ea493d92bee))
+
 ## [1.6.0](https://github.com/jovalle/watchtower/compare/v1.5.0...v1.6.0) (2026-03-26)
 
 ### 🚀 Features
