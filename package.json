@@ -29,8 +29,8 @@
     "lru-cache": "^11.2.4",
     "lucide-react": "^0.562.0",
     "plex-oauth": "^2.1.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "tsx": "^4.19.2"
   },
   "devDependencies": {
@@ -42,7 +42,7 @@
     "@testing-library/react": "^16.3.1",
     "@types/express": "^5.0.6",
     "@types/react": "^19.2.7",
-    "@types/react-dom": "^18.3.1",
+    "@types/react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^8.50.1",
     "@typescript-eslint/parser": "^8.50.1",
     "@vite-pwa/remix": "^0.2.0",
@@ -55,7 +55,7 @@
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react": "^7.37.2",
-    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
     "husky": "^9.1.7",
     "jsdom": "^27.4.0",
     "lint-staged": "^16.2.7",
