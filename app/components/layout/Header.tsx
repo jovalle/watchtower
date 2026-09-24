@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Link } from '@remix-run/react';
+import { NavLink, Link, useNavigate } from '@remix-run/react';
 import { Menu, Search } from 'lucide-react';
 import { UserMenu } from '~/components/UserMenu';
 import { StreamingDashboard } from '~/components/StreamingDashboard';
@@ -86,6 +86,18 @@ export function Header({ user }: HeaderProps) {
   const toggleMobileMenu = () => setIsMobileMenuOpen((prev) => !prev);
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
 
+  const navigate = useNavigate();
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        navigate('/app/search');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
+
   return (
     <>
       <header
@@ -114,13 +126,14 @@ export function Header({ user }: HeaderProps) {
 
             {/* Right section: Actions + User Menu */}
             <div className="flex items-center gap-4">
-              {/* Search icon (future Phase 4) */}
-              <button
-                className="hidden rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary sm:block"
+              <Link
+                to="/app/search"
+                className="rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary"
                 aria-label="Search"
+                title="Search (⌘K)"
               >
                 <Search className="h-5 w-5" />
-              </button>
+              </Link>
 
               {/* Streaming Dashboard */}
               <StreamingDashboard />
