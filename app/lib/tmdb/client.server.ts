@@ -194,6 +194,27 @@ export class TMDBClient {
   }
 
   /**
+   * Search movies and TV shows together, dropping people.
+   */
+  async searchMulti(query: string): Promise<TMDBResult<TMDBRecommendation[]>> {
+    const params = new URLSearchParams({ query, include_adult: "false" });
+    const result = await this.request<
+      TMDBPaginatedResponse<(TMDBMovie & { media_type: "movie" }) | (TMDBShow & { media_type: "tv" }) | { media_type: "person" }>
+    >(`/search/multi?${params.toString()}`);
+
+    if (!result.success) {
+      return result;
+    }
+
+    const data: TMDBRecommendation[] = [];
+    for (const item of result.data.results) {
+      if (item.media_type === "movie") data.push(this.movieToRecommendation(item));
+      else if (item.media_type === "tv") data.push(this.showToRecommendation(item));
+    }
+    return { success: true, data };
+  }
+
+  /**
    * Find a movie or TV show by IMDB ID.
    * Uses TMDB's find endpoint to look up by external ID.
    */

@@ -355,6 +355,28 @@ export class PlexClient {
   }
 
   /**
+   * Search movies and shows across all libraries.
+   */
+  async search(query: string, limit: number = 30): Promise<PlexResult<PlexMediaItem[]>> {
+    const params = new URLSearchParams({ query, limit: limit.toString() });
+    const result = await this.request<{
+      MediaContainer: { Hub?: Array<{ type: string; Metadata?: PlexMediaItem[] }> };
+    }>(`/hubs/search?${params.toString()}`);
+
+    if (!result.success) {
+      return result;
+    }
+
+    const hubs = result.data.MediaContainer.Hub || [];
+    return {
+      success: true,
+      data: hubs
+        .filter((hub) => hub.type === "movie" || hub.type === "show")
+        .flatMap((hub) => hub.Metadata || []),
+    };
+  }
+
+  /**
    * Get every episode of a show in airing order.
    */
   async getAllLeaves(showRatingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
