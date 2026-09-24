@@ -29,6 +29,19 @@ import type {
 } from "./types";
 import { QUALITY_PROFILES } from "./types";
 
+/** Keeps the most recently viewed item per GUID, preserving first-seen order. */
+export function dedupeByGuid(items: PlexMediaItem[]): PlexMediaItem[] {
+  const byKey = new Map<string, PlexMediaItem>();
+  for (const item of items) {
+    const key = item.guid || item.ratingKey;
+    const existing = byKey.get(key);
+    if (!existing || (item.lastViewedAt || 0) > (existing.lastViewedAt || 0)) {
+      byKey.set(key, item);
+    }
+  }
+  return [...byKey.values()];
+}
+
 /**
  * Plex API client for communicating with a Plex Media Server.
  */
@@ -359,15 +372,21 @@ export class PlexClient {
   }
 
   /**
-   * Get items currently "on deck" (continue watching).
+   * Get Continue Watching items from the hub the official Plex apps use,
+   * falling back to /library/onDeck on older servers. Duplicate versions are collapsed by GUID.
    */
-  async getOnDeck(limit: number = 20): Promise<PlexResult<PlexMediaItem[]>> {
+  async getContinueWatching(limit: number = 20): Promise<PlexResult<PlexMediaItem[]>> {
     const params = new URLSearchParams();
     params.set("X-Plex-Container-Size", limit.toString());
 
-    const result = await this.request<PlexLibraryItemsResponse>(
-      `/library/onDeck?${params.toString()}`
+    let result = await this.request<PlexLibraryItemsResponse>(
+      `/hubs/continueWatching/items?${params.toString()}`
     );
+    if (!result.success) {
+      result = await this.request<PlexLibraryItemsResponse>(
+        `/library/onDeck?${params.toString()}`
+      );
+    }
 
     if (!result.success) {
       return result;
@@ -375,7 +394,7 @@ export class PlexClient {
 
     return {
       success: true,
-      data: result.data.MediaContainer.Metadata || [],
+      data: dedupeByGuid(result.data.MediaContainer.Metadata || []),
     };
   }
 
