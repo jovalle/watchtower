@@ -12,7 +12,9 @@ import {
   getDefaultSettings,
   getValidationCache,
   getDefaultValidationCache,
+  DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
+import type { UserPreferences, UserSettings } from "~/lib/settings/types";
 
 /**
  * GET /api/settings
@@ -52,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: "Request body must be an object" }, { status: 400 });
   }
 
-  const { traktUsername, imdbWatchlistIds } = body as Record<string, unknown>;
+  const { traktUsername, imdbWatchlistIds, preferences } = body as Record<string, unknown>;
 
   // Validate traktUsername - must be string or null
   if (traktUsername !== undefined && traktUsername !== null && typeof traktUsername !== "string") {
@@ -70,12 +72,27 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
   }
 
   // Build update object with only provided fields
-  const updates: { traktUsername?: string | null; imdbWatchlistIds?: string[] } = {};
+  const updates: Partial<Pick<UserSettings, "traktUsername" | "imdbWatchlistIds" | "preferences">> = {};
   if (traktUsername !== undefined) {
     updates.traktUsername = traktUsername as string | null;
   }
   if (imdbWatchlistIds !== undefined) {
     updates.imdbWatchlistIds = imdbWatchlistIds as string[];
+  }
+
+  if (preferences !== undefined) {
+    if (typeof preferences !== "object" || preferences === null) {
+      return json({ error: "preferences must be an object" }, { status: 400 });
+    }
+    const current = (await getUserSettings(user.id))?.preferences ?? DEFAULT_PREFERENCES;
+    const next: UserPreferences = { ...current };
+    for (const [key, value] of Object.entries(preferences)) {
+      if (!(key in DEFAULT_PREFERENCES) || typeof value !== "boolean") {
+        return json({ error: `Invalid preference: ${key}` }, { status: 400 });
+      }
+      next[key as keyof UserPreferences] = value;
+    }
+    updates.preferences = next;
   }
 
   await setUserSettings(user.id, updates);

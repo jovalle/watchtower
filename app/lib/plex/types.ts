@@ -133,6 +133,17 @@ export interface PlexTag {
 }
 
 /**
+ * Intro/credits marker; offsets are in milliseconds.
+ */
+export interface PlexMarker {
+  id?: number;
+  type: "intro" | "credits" | (string & {});
+  startTimeOffset: number;
+  endTimeOffset: number;
+  final?: boolean;
+}
+
+/**
  * Role/actor reference with optional character info.
  */
 export interface PlexRole {
@@ -156,6 +167,8 @@ export interface PlexMetadata extends PlexMediaItem {
   Similar?: Array<{ id?: number; tag: string; ratingKey?: string }>;
   // External IDs (IMDb, TMDB, TVDB, etc.)
   Guid?: Array<{ id: string }>;
+  // Intro/credits markers (only present with includeMarkers=1)
+  Marker?: PlexMarker[];
   // Media/stream info
   Media?: Array<{
     id: number;
