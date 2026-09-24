@@ -13,9 +13,10 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Link, useNavigate } from "@remix-run/react";
-import { Play, Plus, Check, Star, Clock, Calendar, ExternalLink, ChevronRight, HardDrive, Volume2, Subtitles, RotateCcw } from "lucide-react";
+import { Play, Plus, Check, Star, Clock, Calendar, ExternalLink, ChevronRight, HardDrive, Volume2, Subtitles, RotateCcw, Film } from "lucide-react";
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
+import { TrailerModal } from "~/components/media/TrailerModal";
 import { Typography, Button } from "~/components/ui";
 import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
@@ -91,6 +92,7 @@ interface LoaderData {
     type: string;
   }>;
   recommendations: TMDBRecommendation[];
+  trailerKey?: string; // YouTube video key from TMDB
   serverUrl: string;
   token: string;
   type: "movie" | "show" | "season" | "episode";
@@ -962,13 +964,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (tmdbClient && metadata.title) {
       try {
         const year = metadata.year;
-        const recsResult =
+        const [recsResult, trailerKey] = await Promise.all([
           type === "movie"
-            ? await tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
-            : await tmdbClient.getTVRecommendationsByTitle(metadata.title, year);
+            ? tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
+            : tmdbClient.getTVRecommendationsByTitle(metadata.title, year),
+          tmdbId ? tmdbClient.getTrailerKey(type, tmdbId) : null,
+        ]);
 
         if (recsResult.success) {
           loaderData.recommendations = recsResult.data;
+        }
+        if (trailerKey) {
+          loaderData.trailerKey = trailerKey;
         }
       } catch (error) {
         // Silently fail - recommendations are optional
@@ -1027,6 +1034,7 @@ export default function MediaDetailPage() {
     cast,
     similar,
     recommendations,
+    trailerKey,
     serverUrl,
     token,
     type,
@@ -1162,6 +1170,15 @@ export default function MediaDetailPage() {
 
   const [isInList, setIsInList] = useState(initialIsInWatchlist);
   const [isAddingToList, setIsAddingToList] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
+  const closeTrailer = useCallback(() => setShowTrailer(false), []);
+
+  const trailerButton = trailerKey ? (
+    <Button variant="secondary" size="lg" onClick={() => setShowTrailer(true)} className="w-full sm:w-auto">
+      <Film className="mr-2 h-5 w-5" />
+      Trailer
+    </Button>
+  ) : null;
 
   const handleAddToList = useCallback(async () => {
     if (isAddingToList) return;
@@ -1204,6 +1221,9 @@ export default function MediaDetailPage() {
 
   return (
     <div className="min-h-screen pb-16">
+      {showTrailer && trailerKey && (
+        <TrailerModal youtubeKey={trailerKey} title={metadata.title} onClose={closeTrailer} />
+      )}
       {usePlexLayout ? (
         /* ===== PLEX-STYLE LAYOUT FOR TV SHOWS AND SEASONS ===== */
         <>
@@ -1316,6 +1336,7 @@ export default function MediaDetailPage() {
                         )}
                       </Button>
                     )}
+                    {trailerButton}
                     {/* External Links - hidden on very small screens */}
                     <div className="hidden gap-2 sm:flex">
                       {tmdbId && (
@@ -1684,6 +1705,7 @@ export default function MediaDetailPage() {
                           )}
                         </Button>
                       )}
+                      {trailerButton}
                     </div>
                   </div>
                 </div>
