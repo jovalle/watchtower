@@ -17,6 +17,9 @@ import { env } from "~/lib/env.server";
 import { QUALITY_PROFILES } from "~/lib/plex/types";
 import type { QualityProfile, PlaybackMethod, PlexStream } from "~/lib/plex/types";
 import { getPlaybackPref } from "~/lib/playback-prefs";
+import { toPlaybackMarkers, findNextEpisode, type PlaybackMarker } from "~/lib/plex/markers";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
 
 interface AudioTrack {
   id: number;
@@ -75,6 +78,16 @@ interface LoaderData {
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
   episodes?: EpisodeInfo[];
+  markers: PlaybackMarker[];
+  nextEpisode: NextEpisodeInfo | null;
+  autoSkipIntro: boolean;
+}
+
+interface NextEpisodeInfo {
+  ratingKey: string;
+  title: string;
+  label: string;
+  thumbUrl?: string;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -121,11 +134,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
 
   // Fetch metadata
-  const metadataResult = await client.getMetadata(ratingKey);
+  const [metadataResult, user] = await Promise.all([
+    client.getMetadata(ratingKey, { includeMarkers: true }),
+    getCurrentUser(request),
+  ]);
   if (!metadataResult.success) {
     throw new Response("Media not found", { status: 404 });
   }
   const metadata = metadataResult.data;
+  const preferences = user
+    ? (await getUserSettings(user.id))?.preferences ?? DEFAULT_PREFERENCES
+    : DEFAULT_PREFERENCES;
 
   // Detect mobile device for automatic transcoding
   const userAgent = request.headers.get("User-Agent") || "";
@@ -235,6 +254,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
+  let nextEpisode: NextEpisodeInfo | null = null;
+  if (metadata.type === "episode") {
+    let next = episodes ? findNextEpisode(episodes, ratingKey) : null;
+    let nextSeason = metadata.parentIndex;
+    if (!next && metadata.grandparentRatingKey) {
+      const leaves = await client.getAllLeaves(metadata.grandparentRatingKey);
+      const leaf = leaves.success ? findNextEpisode(leaves.data, ratingKey) : null;
+      if (leaf) {
+        next = { ratingKey: leaf.ratingKey, title: leaf.title, index: leaf.index || 0, thumb: leaf.thumb };
+        nextSeason = leaf.parentIndex;
+      }
+    }
+    if (next) {
+      nextEpisode = {
+        ratingKey: next.ratingKey,
+        title: next.title,
+        label: nextSeason !== undefined ? `S${nextSeason}:E${next.index}` : `Episode ${next.index}`,
+        thumbUrl: next.thumb ? buildBackdropUrl(next.thumb) : undefined,
+      };
+    }
+  }
+
   // Build proxy URL - extract query params from Plex URL and use our HLS proxy
   const plexUrl = new URL(playbackInfo.streamUrl);
   const proxyStreamUrl = `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
@@ -266,6 +307,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     audioTracks,
     subtitleTracks,
     episodes,
+    markers: toPlaybackMarkers(metadata.Marker),
+    nextEpisode,
+    autoSkipIntro: preferences.autoSkipIntro,
   });
 }
 
@@ -291,6 +335,9 @@ export default function WatchPage() {
     audioTracks,
     subtitleTracks,
     episodes,
+    markers,
+    nextEpisode,
+    autoSkipIntro,
   } = useLoaderData<typeof loader>();
 
   // Build title/subtitle for episodes
@@ -323,6 +370,9 @@ export default function WatchPage() {
         seasonTitle={parentTitle}
         seasonNumber={parentIndex}
         episodeNumber={index}
+        markers={markers}
+        nextEpisode={nextEpisode}
+        autoSkipIntro={autoSkipIntro}
       />
     </div>
   );

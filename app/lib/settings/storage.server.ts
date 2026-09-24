@@ -7,10 +7,14 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { env } from "~/lib/env.server";
-import type { UserSettings, ValidationCache, TraktValidationCache, IMDBValidationCache } from "./types";
+import type { UserSettings, UserPreferences, ValidationCache, TraktValidationCache, IMDBValidationCache } from "./types";
 
 // Storage configuration
 const SETTINGS_DIR = "settings";
+
+export const DEFAULT_PREFERENCES: UserPreferences = {
+  autoSkipIntro: false,
+};
 
 /**
  * Get the settings directory path.
@@ -41,6 +45,7 @@ export function getDefaultSettings(): UserSettings {
     version: 1,
     traktUsername: null,
     imdbWatchlistIds: [],
+    preferences: { ...DEFAULT_PREFERENCES },
     updatedAt: Date.now(),
   };
 }
@@ -60,7 +65,12 @@ export async function getUserSettings(userId: number): Promise<UserSettings | nu
     }
 
     console.log(`[UserSettings] Loaded settings for user ${userId}`);
-    return settings;
+    // Older files predate preferences; fill any missing keys with defaults.
+    return {
+      ...getDefaultSettings(),
+      ...settings,
+      preferences: { ...DEFAULT_PREFERENCES, ...settings.preferences },
+    };
   } catch {
     // File doesn't exist or is invalid
     return null;

@@ -2,10 +2,15 @@
  * User settings types for per-user configuration storage.
  */
 
+export interface UserPreferences {
+  autoSkipIntro: boolean;
+}
+
 export interface UserSettings {
   version: 1;
   traktUsername: string | null;
   imdbWatchlistIds: string[]; // Format: ur12345678 or ls12345678
+  preferences: UserPreferences;
   updatedAt: number; // Unix timestamp
 }
 
