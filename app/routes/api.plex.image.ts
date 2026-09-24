@@ -13,6 +13,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { getServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
 import { getCachedImage, setCachedImage } from "~/lib/cache/image-cache.server";
+import { resolveImageUrl } from "~/lib/plex/image-proxy.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
@@ -20,7 +21,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Use the user's server token if available, otherwise fall back to the
   // admin PLEX_TOKEN for unauthenticated image requests (e.g. guest users
-  // viewing movie posters on the vote page). Images are non-sensitive.
+  // viewing movie posters on the vote page). resolveImageUrl limits this to image paths.
   let token = await getServerToken(request);
   if (!token) {
     token = env.PLEX_TOKEN;
@@ -31,9 +32,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return new Response("Missing path parameter", { status: 400 });
   }
 
+  const imageUrl = resolveImageUrl(path, token, env.PLEX_SERVER_URL);
+  if (!imageUrl) {
+    return new Response("Image path not allowed", { status: 400 });
+  }
+  const isAbsoluteUrl = !imageUrl.startsWith(env.PLEX_SERVER_URL);
+
   // Check cache first (includes width/height in cache key via full path)
   const cached = await getCachedImage(path);
-  if (cached) {
+  if (cached && cached.contentType.startsWith("image/")) {
     return new Response(new Uint8Array(cached.data), {
       status: 200,
       headers: {
@@ -44,18 +51,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     });
   }
-
-  // Build the direct image URL
-  // Plex image paths can be:
-  // 1. Relative paths: /library/metadata/12345/thumb/1234567890
-  // 2. Absolute URLs: https://metadata-static.plex.tv/... (for external metadata)
-  // Some paths may already have query params (e.g., ?width=400&height=600)
-  const isAbsoluteUrl =
-    path.startsWith("http://") || path.startsWith("https://");
-  const separator = path.includes("?") ? "&" : "?";
-  const imageUrl = isAbsoluteUrl
-    ? `${path}${separator}X-Plex-Token=${token}`
-    : `${env.PLEX_SERVER_URL}${path}${separator}X-Plex-Token=${token}`;
 
   try {
     const plexResponse = await fetch(imageUrl, {
@@ -129,9 +124,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
     }
 
-    // Success - cache and return the image
-    const contentType =
-      plexResponse.headers.get("Content-Type") || "image/jpeg";
+    const contentType = plexResponse.headers.get("Content-Type") || "";
+    if (!contentType.startsWith("image/")) {
+      console.error(`[Image Proxy] Rejected non-image response (${contentType || "none"}) for ${path}`);
+      return new Response("Upstream response is not an image", { status: 502 });
+    }
     const imageBuffer = Buffer.from(await plexResponse.arrayBuffer());
 
     // Store in cache (async, don't block response)
