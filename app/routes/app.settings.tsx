@@ -14,13 +14,88 @@ import { Container } from "~/components/layout";
 import { Typography } from "~/components/ui";
 import { requireUser } from "~/lib/auth/user.server";
 import { isServerOwner } from "~/lib/auth/session.server";
+import { getServerConfig } from "~/lib/config/server-config.server";
 import {
   getUserSettings,
   getDefaultSettings,
   getValidationCache,
   getDefaultValidationCache,
 } from "~/lib/settings/storage.server";
-import type { UserSettings, ValidationCache } from "~/lib/settings/types";
+import type { UserSettings, UserPreferences, ValidationCache } from "~/lib/settings/types";
+
+const PREFERENCE_GROUPS: Array<{
+  title: string;
+  items: Array<{ key: keyof UserPreferences; label: string; description: string }>;
+}> = [
+  {
+    title: "Playback",
+    items: [
+      {
+        key: "autoSkipIntro",
+        label: "Auto-skip intros",
+        description: "Jump past intros automatically when Plex has detected them.",
+      },
+    ],
+  },
+];
+
+function PreferencesSection({ initial }: { initial: UserPreferences }) {
+  const [prefs, setPrefs] = useState(initial);
+  const [error, setError] = useState("");
+
+  const toggle = async (key: keyof UserPreferences) => {
+    const previous = prefs;
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    setError("");
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: { [key]: next[key] } }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || "Failed to save");
+    } catch (err) {
+      setPrefs(previous);
+      setError(err instanceof Error ? err.message : "Failed to save");
+    }
+  };
+
+  return (
+    <>
+      {PREFERENCE_GROUPS.map((group) => (
+        <section key={group.title} className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6">
+          <Typography variant="subtitle" as="h2" className="mb-4">
+            {group.title}
+          </Typography>
+          <div className="space-y-4">
+            {group.items.map((item) => (
+              <div key={item.key} className="flex items-start justify-between gap-4">
+                <label htmlFor={`pref-${item.key}`} className="cursor-pointer">
+                  <span className="block text-sm font-medium text-foreground-primary">{item.label}</span>
+                  <span className="block text-sm text-foreground-muted">{item.description}</span>
+                </label>
+                <input
+                  id={`pref-${item.key}`}
+                  type="checkbox"
+                  checked={prefs[item.key]}
+                  onChange={() => toggle(item.key)}
+                  className="mt-1 h-5 w-5 flex-shrink-0 cursor-pointer accent-accent-primary"
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      {error && (
+        <div className="mt-3 flex items-center gap-2 text-red-500">
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-sm">{error}</span>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Validation state type
 type ValidationStatus = "idle" | "validating" | "valid" | "invalid";
@@ -49,6 +124,7 @@ interface LoaderData {
   settings: UserSettings;
   validationCache: ValidationCache;
   isOwner: boolean;
+  plexServer: { name: string; url: string } | null;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -56,11 +132,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const settings = await getUserSettings(user.id);
   const validationCache = await getValidationCache(user.id);
   const ownerStatus = await isServerOwner(request);
+  const config = getServerConfig();
 
   return json<LoaderData>({
     settings: settings ?? getDefaultSettings(),
     validationCache: validationCache ?? getDefaultValidationCache(),
     isOwner: ownerStatus,
+    plexServer: config?.adminUserId === user.id ? { name: config.serverName, url: config.serverUrl } : null,
   });
 }
 
@@ -69,7 +147,7 @@ type SaveStatus = "idle" | "saving" | "success" | "error";
 type ClearCacheStatus = "idle" | "confirming" | "clearing" | "success" | "error";
 
 export default function SettingsPage() {
-  const { settings, validationCache, isOwner } = useLoaderData<typeof loader>();
+  const { settings, validationCache, isOwner, plexServer } = useLoaderData<typeof loader>();
 
   // Track the "saved" values to detect changes
   const savedTraktUsername = settings.traktUsername ?? "";
@@ -532,6 +610,8 @@ export default function SettingsPage() {
         </form>
       </section>
 
+      <PreferencesSection initial={settings.preferences} />
+
       {/* Server Administration Section - Only for server owner */}
       {isOwner && (
         <section className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6">
@@ -543,6 +623,25 @@ export default function SettingsPage() {
               Server-level settings. These options affect all users.
             </Typography>
           </div>
+
+          {plexServer && (
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <Typography variant="body" className="font-medium text-foreground-primary">
+                  Plex Server
+                </Typography>
+                <Typography variant="caption" className="text-foreground-muted">
+                  {plexServer.name} at {plexServer.url}
+                </Typography>
+              </div>
+              <a
+                href="/setup"
+                className="rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated"
+              >
+                Change
+              </a>
+            </div>
+          )}
 
           {/* Clear Cache */}
           <div>

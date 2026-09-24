@@ -23,9 +23,12 @@ import {
   ListVideo,
   X,
   ChevronRight,
+  PictureInPicture2,
 } from "lucide-react";
 import type { QualityProfile, PlaybackMethod } from "~/lib/plex/types";
 import { setClientPlaybackPref } from "~/lib/playback-prefs";
+import { findActiveMarker, type PlaybackMarker } from "~/lib/plex/markers";
+import { NextEpisodeCard, type NextEpisode } from "./NextEpisodeCard";
 
 interface AudioTrack {
   id: number;
@@ -100,6 +103,9 @@ export interface VideoPlayerProps {
   seasonTitle?: string;
   seasonNumber?: number;
   episodeNumber?: number;
+  markers?: PlaybackMarker[];
+  nextEpisode?: NextEpisode | null;
+  autoSkipIntro?: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -132,6 +138,9 @@ export function VideoPlayer({
   episodes = [],
   seasonTitle,
   seasonNumber,
+  markers = [],
+  nextEpisode = null,
+  autoSkipIntro = false,
 }: VideoPlayerProps) {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,6 +183,23 @@ export function VideoPlayer({
   const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<number | null>(
     subtitleTracks.find((t) => t.selected)?.id || null
   );
+
+  // Markers / next episode / PiP state
+  const [hasEnded, setHasEnded] = useState(false);
+  const [nextUpDismissed, setNextUpDismissed] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+  const [isPip, setIsPip] = useState(false);
+  const autoSkippedRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    setHasEnded(false);
+    setNextUpDismissed(false);
+    autoSkippedRef.current.clear();
+  }, [ratingKey]);
+
+  useEffect(() => {
+    setPipSupported(typeof document !== "undefined" && document.pictureInPictureEnabled === true);
+  }, []);
 
   // Refs for values that shouldn't trigger re-renders
   const hasScrobbledRef = useRef(false);
@@ -729,6 +755,7 @@ export function VideoPlayer({
     const onEnded = () => {
       setIsPlaying(false);
       setWantsToPlay(false);
+      setHasEnded(true);
       reportProgress("stopped");
       markWatched();
       setShowControls(true);
@@ -737,9 +764,13 @@ export function VideoPlayer({
     const onWaiting = () => setIsLoading(true);
     const onPlaying = () => {
       setIsLoading(false);
+      setHasEnded(false);
       // Sync intent with actual state when video starts playing
       setWantsToPlay(true);
     };
+
+    const onEnterPip = () => setIsPip(true);
+    const onLeavePip = () => setIsPip(false);
 
     const onError = () => {
       const err = video.error;
@@ -780,6 +811,8 @@ export function VideoPlayer({
     video.addEventListener("error", onError);
     video.addEventListener("seeking", onSeeking);
     video.addEventListener("seeked", onSeeked);
+    video.addEventListener("enterpictureinpicture", onEnterPip);
+    video.addEventListener("leavepictureinpicture", onLeavePip);
 
     return () => {
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
@@ -793,6 +826,8 @@ export function VideoPlayer({
       video.removeEventListener("error", onError);
       video.removeEventListener("seeking", onSeeking);
       video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("enterpictureinpicture", onEnterPip);
+      video.removeEventListener("leavepictureinpicture", onLeavePip);
     };
     }, [isSeeking, checkScrobble, reportProgress, markWatched, ratingKey, resumePositionSeconds, playbackMethod, hasTriedTranscode, retryWithTranscode, wantsToPlay, isTimeBuffered, reloadStreamAtPosition]);
 
@@ -1014,6 +1049,39 @@ export function VideoPlayer({
     },
     [navigate]
   );
+
+  const activeMarker = findActiveMarker(markers, currentTime);
+  const showNextUp =
+    !!nextEpisode && !nextUpDismissed && (activeMarker?.type === "credits" || hasEnded);
+
+  useEffect(() => {
+    if (!autoSkipIntro || isLoading || isSeeking || activeMarker?.type !== "intro") return;
+    // Skip each intro once so seeking back into it is respected.
+    if (autoSkippedRef.current.has(activeMarker.start)) return;
+    autoSkippedRef.current.add(activeMarker.start);
+    seekToPosition(activeMarker.end, true);
+  }, [autoSkipIntro, isLoading, isSeeking, activeMarker, seekToPosition]);
+
+  const playNextEpisode = useCallback(() => {
+    if (nextEpisode) handleEpisodeSelect(nextEpisode.ratingKey);
+  }, [nextEpisode, handleEpisodeSelect]);
+
+  const cancelNextEpisode = useCallback(() => setNextUpDismissed(true), []);
+
+  const togglePip = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        await video.requestPictureInPicture();
+      }
+    } catch (e) {
+      console.error("[VideoPlayer] Picture-in-Picture failed:", e);
+    }
+  }, []);
 
   /**
    * Build thumbnail URL for episodes
@@ -1465,6 +1533,17 @@ export function VideoPlayer({
                 </button>
               )}
 
+              {/* Picture-in-Picture */}
+              {pipSupported && (
+                <button
+                  onClick={togglePip}
+                  className={`rounded p-2 transition-colors hover:bg-white/10 ${isPip ? "text-mango" : "text-white"}`}
+                  aria-label={isPip ? "Exit picture-in-picture" : "Picture-in-picture"}
+                >
+                  <PictureInPicture2 className="h-5 w-5" />
+                </button>
+              )}
+
               <button
                 onClick={toggleFullscreen}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
@@ -1476,6 +1555,26 @@ export function VideoPlayer({
           </div>
         </div>
       </div>
+
+      {/* Skip intro */}
+      {activeMarker?.type === "intro" && !isLoading && !error && !showSettingsPanel && (
+        <button
+          onClick={() => seekToPosition(activeMarker.end, true)}
+          className="absolute bottom-28 right-4 z-40 rounded border border-white/40 bg-black/70 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-white hover:text-black"
+        >
+          Skip Intro
+        </button>
+      )}
+
+      {/* Next episode countdown during credits or after the episode ends */}
+      {showNextUp && nextEpisode && !error && !showSettingsPanel && (
+        <NextEpisodeCard
+          key={nextEpisode.ratingKey}
+          episode={nextEpisode}
+          onPlay={playNextEpisode}
+          onCancel={cancelNextEpisode}
+        />
+      )}
 
       {/* Settings Panel - Audio, Subtitles, Quality */}
       {showSettingsPanel && (

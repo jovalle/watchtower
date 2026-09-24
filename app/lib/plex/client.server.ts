@@ -305,9 +305,13 @@ export class PlexClient {
   /**
    * Get full metadata for a specific item.
    */
-  async getMetadata(ratingKey: string): Promise<PlexResult<PlexMetadata>> {
+  async getMetadata(
+    ratingKey: string,
+    options: { includeMarkers?: boolean } = {}
+  ): Promise<PlexResult<PlexMetadata>> {
+    const query = options.includeMarkers ? "?includeMarkers=1" : "";
     const result = await this.request<PlexMetadataResponse>(
-      `/library/metadata/${ratingKey}`
+      `/library/metadata/${ratingKey}${query}`
     );
 
     if (!result.success) {
@@ -338,6 +342,24 @@ export class PlexClient {
   async getChildren(ratingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
     const result = await this.request<PlexLibraryItemsResponse>(
       `/library/metadata/${ratingKey}/children`
+    );
+
+    if (!result.success) {
+      return result;
+    }
+
+    return {
+      success: true,
+      data: result.data.MediaContainer.Metadata || [],
+    };
+  }
+
+  /**
+   * Get every episode of a show in airing order.
+   */
+  async getAllLeaves(showRatingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
+    const result = await this.request<PlexLibraryItemsResponse>(
+      `/library/metadata/${showRatingKey}/allLeaves`
     );
 
     if (!result.success) {
