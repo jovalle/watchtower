@@ -19,6 +19,26 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 const TMDB_REQUEST_TIMEOUT = 10000; // 10 seconds
 
+export interface TMDBVideo {
+  key: string;
+  site: string;
+  type: string;
+  official?: boolean;
+}
+
+const VIDEO_TYPE_RANK = ["Trailer", "Teaser", "Clip"];
+
+export function pickTrailerKey(videos: TMDBVideo[]): string | null {
+  const candidates = videos
+    .filter((v) => v.site === "YouTube" && /^[\w-]{6,20}$/.test(v.key) && VIDEO_TYPE_RANK.includes(v.type))
+    .sort(
+      (a, b) =>
+        VIDEO_TYPE_RANK.indexOf(a.type) - VIDEO_TYPE_RANK.indexOf(b.type) ||
+        Number(b.official === true) - Number(a.official === true)
+    );
+  return candidates[0]?.key ?? null;
+}
+
 /**
  * TMDB API client for fetching recommendations.
  */
@@ -191,6 +211,17 @@ export class TMDBClient {
       success: true,
       data: result.data.results,
     };
+  }
+
+  /**
+   * Get the best YouTube trailer key for a title: official trailers first, then trailers, teasers, clips.
+   */
+  async getTrailerKey(type: "movie" | "show", tmdbId: number): Promise<string | null> {
+    const result = await this.request<{ results: TMDBVideo[] }>(
+      `/${type === "movie" ? "movie" : "tv"}/${tmdbId}/videos`
+    );
+    if (!result.success) return null;
+    return pickTrailerKey(result.data.results);
   }
 
   /**
