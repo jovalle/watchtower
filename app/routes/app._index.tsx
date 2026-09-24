@@ -153,7 +153,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch data in parallel
   const [onDeckResult, recentlyAddedResult, watchlistResult] = await Promise.all([
-    client.getOnDeck(10),
+    client.getContinueWatching(10),
     client.getRecentlyAdded(undefined, 20),
     client.getWatchlist(),
   ]);
