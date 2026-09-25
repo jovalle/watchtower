@@ -33,8 +33,6 @@ interface ListCardData {
 interface LoaderData {
   playlists: ListCardData[];
   collections: ListCardData[];
-  serverUrl: string;
-  token: string;
 }
 
 function buildImageUrl(
@@ -94,8 +92,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json<LoaderData>({
     playlists,
     collections,
-    serverUrl: env.PLEX_SERVER_URL,
-    token,
   });
 }
 

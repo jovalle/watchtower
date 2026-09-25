@@ -14,6 +14,8 @@ import type { UnifiedWatchlistItem, WatchlistCounts } from "./types";
 const CACHE_DIR = "watchlist";
 const CACHE_FRESH_TTL_MS = 5 * 60 * 1000; // 5 minutes - considered fresh
 const CACHE_STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours - serve stale but trigger refresh
+// Version 1 image URLs embedded the plex.tv token.
+const CACHE_VERSION = 2;
 
 interface WatchlistCacheData {
   version: number;
@@ -83,7 +85,7 @@ export async function getWatchlistCache(token: string): Promise<WatchlistCacheRe
     const data = await fs.readFile(getCachePath(token), "utf-8");
     const cache = JSON.parse(data) as WatchlistCacheData;
 
-    if (cache.version !== 1) {
+    if (cache.version !== CACHE_VERSION) {
       console.log("[WatchlistCache] Cache version mismatch, will refresh");
       return null;
     }
@@ -125,7 +127,7 @@ export async function setWatchlistCache(
     await ensureCacheDir();
 
     const cache: WatchlistCacheData = {
-      version: 1,
+      version: CACHE_VERSION,
       fetchedAt: Date.now(),
       items,
       counts,

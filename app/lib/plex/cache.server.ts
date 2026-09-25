@@ -143,7 +143,7 @@ export function getUserCacheKey(baseKey: string, token: string): string {
  * Useful when user data changes (e.g., after scrobble, timeline update).
  */
 export async function invalidateUserCaches(token: string): Promise<void> {
-  const userKeys = ["home", "new-popular"];
+  const userKeys = ["home", "new-popular-v2"];
   await Promise.all(
     userKeys.map((key) => invalidateCache(getUserCacheKey(key, token)))
   );
