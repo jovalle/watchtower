@@ -3,7 +3,13 @@
  * The .server.ts suffix ensures this is never bundled for the client.
  */
 
-import { PLEX_HEADERS, PLEX_REQUEST_TIMEOUT, PLEX_DISCOVER_URL } from "./constants";
+import { randomUUID } from "node:crypto";
+import { registerPlaybackSession } from "./playback-session.server";
+import {
+  PLEX_HEADERS,
+  PLEX_REQUEST_TIMEOUT,
+  PLEX_DISCOVER_URL,
+} from "./constants";
 import type {
   PlexServerIdentity,
   PlexIdentityResponse,
@@ -592,6 +598,12 @@ export class PlexClient {
 
     // HLS streaming
     params.set("protocol", "hls");
+    // Plex must not reuse a stale session when retrying, seeking, or opening another player.
+    const session = randomUUID();
+    registerPlaybackSession(session, ratingKey, this.serverUrl, this.token, `${this.clientId}-${session}`);
+    params.set("session", session);
+    params.set("hasMDE", "1");
+    params.set("X-Plex-Client-Profile-Name", "Chrome");
     params.set("copyts", "1");
     params.set("mediaIndex", "0");
     params.set("partIndex", "0");
@@ -600,7 +612,8 @@ export class PlexClient {
 
     if (useDirectPlay) {
       // Direct play/stream mode
-      params.set("directPlay", "1");
+      // HLS needs a remux/transcode session; native files use the separate range proxy.
+      params.set("directPlay", "0");
       params.set("directStream", "1");
       params.set("directStreamAudio", "1");
     } else {
@@ -636,7 +649,7 @@ export class PlexClient {
 
     // Client identification
     params.set("X-Plex-Token", this.token);
-    params.set("X-Plex-Client-Identifier", this.clientId);
+    params.set("X-Plex-Client-Identifier", `${this.clientId}-${session}`);
     params.set("X-Plex-Product", PLEX_HEADERS["X-Plex-Product"]);
     params.set("X-Plex-Version", PLEX_HEADERS["X-Plex-Version"]);
     params.set("X-Plex-Platform", PLEX_HEADERS["X-Plex-Platform"]);
@@ -654,11 +667,11 @@ export class PlexClient {
     return {
       streamUrl,
       protocol: "hls",
-      directPlay: useDirectPlay,
+      directPlay: false,
       directStream: useDirectPlay,
       quality: selectedQuality,
       availableQualities: QUALITY_PROFILES,
-      method: useDirectPlay ? "direct_play" : "transcode",
+      method: useDirectPlay ? "direct_stream" : "transcode",
     };
   }
 

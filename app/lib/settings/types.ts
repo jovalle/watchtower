@@ -4,6 +4,7 @@
 
 export interface UserPreferences {
   autoSkipIntro: boolean;
+  autoPlayNextEpisode: boolean;
   showContinueWatching: boolean;
   showRecentlyAdded: boolean;
   showTrending: boolean;

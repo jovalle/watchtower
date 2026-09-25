@@ -13,19 +13,26 @@ import { env } from "~/lib/env.server";
 import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { scrobbleTimeline } from "~/lib/trakt/scrobble.server";
+import { ownedPlaybackSession, activatePlaybackSession } from "~/lib/plex/playback-session.server";
 
 interface TimelineRequest {
   ratingKey: string;
   state: "playing" | "paused" | "stopped";
   time: number;
   duration: number;
+  session?: string | null;
+  sequence?: number;
 }
 
-function isValidState(state: unknown): state is "playing" | "paused" | "stopped" {
+function isValidState(
+  state: unknown
+): state is "playing" | "paused" | "stopped" {
   return state === "playing" || state === "paused" || state === "stopped";
 }
 
-export async function action({ request }: ActionFunctionArgs): Promise<Response> {
+export async function action({
+  request,
+}: ActionFunctionArgs): Promise<Response> {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
@@ -39,54 +46,94 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { ratingKey, state, time, duration } = body as TimelineRequest;
+  if (!body || typeof body !== "object") {
+    return json({ error: "Invalid timeline body" }, { status: 400 });
+  }
+  const { ratingKey, state, time, duration, session, sequence } = body as TimelineRequest;
+  if (sequence !== undefined && (!Number.isSafeInteger(sequence) || sequence < 0)) return json({ error: "Invalid timeline sequence" }, { status: 400 });
+  if (
+    session != null &&
+    (typeof session !== "string" || !/^[a-f0-9-]{36}$/.test(session))
+  ) {
+    return json({ error: "Invalid playback session" }, { status: 400 });
+  }
 
   // Validate required fields
   if (!ratingKey || typeof ratingKey !== "string") {
     return json({ error: "ratingKey is required" }, { status: 400 });
   }
+  const owner = session ? ownedPlaybackSession(session, ratingKey, env.PLEX_SERVER_URL, token) : null;
+  if (session && !owner) return json({ error: "Playback session expired or unavailable" }, { status: 403 });
 
   if (!isValidState(state)) {
-    return json({ error: "state must be 'playing', 'paused', or 'stopped'" }, { status: 400 });
+    return json(
+      { error: "state must be 'playing', 'paused', or 'stopped'" },
+      { status: 400 }
+    );
   }
 
-  if (typeof time !== "number" || time < 0) {
-    return json({ error: "time must be a non-negative number" }, { status: 400 });
+  if (typeof time !== "number" || !Number.isFinite(time) || time < 0) {
+    return json(
+      { error: "time must be a non-negative number" },
+      { status: 400 }
+    );
   }
 
-  if (typeof duration !== "number" || duration <= 0) {
-    return json({ error: "duration must be a positive number" }, { status: 400 });
+  if (
+    typeof duration !== "number" ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  ) {
+    return json(
+      { error: "duration must be a positive number" },
+      { status: 400 }
+    );
   }
 
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,
     token,
-    clientId: env.PLEX_CLIENT_ID,
+    clientId: owner?.clientId ?? env.PLEX_CLIENT_ID,
   });
 
-  const result = await client.reportTimeline({
-    ratingKey,
-    state,
-    time,
-    duration,
-  });
-
-  if (!result.success) {
-    const status = result.error.status || 500;
-    return json({ error: result.error.message }, { status });
+  let release: (() => void) | undefined;
+  if (owner) {
+    const previous = owner.queue.pending;
+    owner.queue.pending = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
   }
+  try {
+    if (owner && (!activatePlaybackSession(owner) || (sequence !== undefined && sequence <= owner.sequence))) return json({ success: true, ignored: true });
+    const result = await client.reportTimeline({
+      ratingKey,
+      state,
+      time,
+      duration,
+    });
 
-  // Invalidate user's home cache when playback stops so Continue Watching updates immediately
-  if (state === "stopped") {
-    await invalidateCache(getUserCacheKey("home", token));
-  }
+    if (!result.success) {
+      const status = result.error.status || 500;
+      return json({ error: result.error.message }, { status });
+    }
+    if (owner && sequence !== undefined) owner.sequence = sequence;
 
-  const user = await getCurrentUser(request);
-  if (user) {
-    scrobbleTimeline({ userId: user.id, client, ratingKey, state, time, duration }).catch((error) =>
-      console.error("[Trakt] Scrobble failed:", error)
-    );
-  }
+    // Invalidate user's home cache when playback stops so Continue Watching updates immediately
+    if (state !== "playing") {
+      await invalidateCache(getUserCacheKey("home", token));
+    }
 
-  return json({ success: true });
+    const user = await getCurrentUser(request);
+    if (user) {
+      scrobbleTimeline({
+        userId: user.id,
+        client,
+        ratingKey,
+        state,
+        time,
+        duration,
+      }).catch((error) => console.error("[Trakt] Scrobble failed:", error));
+    }
+
+    return json({ success: true });
+  } finally { release?.(); }
 }

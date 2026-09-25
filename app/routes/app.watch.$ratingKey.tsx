@@ -9,19 +9,30 @@
 
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useOutletContext } from "@remix-run/react";
 import { VideoPlayer } from "~/components/player";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { QUALITY_PROFILES } from "~/lib/plex/types";
-import type { QualityProfile, PlaybackMethod, PlexStream } from "~/lib/plex/types";
+import type {
+  QualityProfile,
+  PlaybackMethod,
+  PlexStream,
+} from "~/lib/plex/types";
 import { getPlaybackPref } from "~/lib/playback-prefs";
 import { parsePlaybackCaps, canDirectPlay } from "~/lib/playback-caps";
-import { toPlaybackMarkers, findNextEpisode, type PlaybackMarker } from "~/lib/plex/markers";
 import { canSidecar, selectedTrackNeeds } from "~/lib/plex/tracks";
+import {
+  toPlaybackMarkers,
+  findNextEpisode,
+  type PlaybackMarker,
+} from "~/lib/plex/markers";
 import { getCurrentUser } from "~/lib/auth/user.server";
-import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
+import {
+  getUserSettings,
+  DEFAULT_PREFERENCES,
+} from "~/lib/settings/storage.server";
 
 interface AudioTrack {
   id: number;
@@ -67,8 +78,6 @@ interface LoaderData {
   parentRatingKey?: string;
   parentIndex?: number;
   index?: number;
-  serverUrl: string;
-  token: string;
   quality: QualityProfile;
   availableQualities: QualityProfile[];
   playbackMethod: PlaybackMethod;
@@ -86,6 +95,7 @@ interface LoaderData {
   markers: PlaybackMarker[];
   nextEpisode: NextEpisodeInfo | null;
   autoSkipIntro: boolean;
+  autoPlayNextEpisode: boolean;
 }
 
 interface NextEpisodeInfo {
@@ -157,7 +167,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Parse URL parameters
   const url = new URL(request.url);
-  const queryTimeMs = parseInt(url.searchParams.get("t") || "0", 10);
+  const queryTime = url.searchParams.get("t");
+  const queryTimeMs = queryTime !== null && /^\d+$/.test(queryTime)
+    ? Number(queryTime)
+    : NaN;
   const qualityId = url.searchParams.get("quality") || "original";
   const forceTranscodeParam = url.searchParams.get("transcode") === "1";
 
@@ -166,7 +179,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let resumeMs = 0;
   let resumeSource = "none";
 
-  if (!isNaN(queryTimeMs) && queryTimeMs > 0) {
+  if (Number.isSafeInteger(queryTimeMs) && queryTimeMs >= 0) {
     resumeMs = queryTimeMs;
     resumeSource = "query";
   } else if (metadata.viewOffset && metadata.viewOffset > 0) {
@@ -180,7 +193,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Check stored playback preference
   const cookieHeader = request.headers.get("Cookie");
   const storedPref = getPlaybackPref(cookieHeader, ratingKey);
-  const useStoredTranscode = storedPref === "transcode" && !forceTranscodeParam && qualityId === "original";
+  const useStoredTranscode =
+    storedPref === "transcode" &&
+    !forceTranscodeParam &&
+    qualityId === "original";
 
   // Play the file as-is when the browser reported it can decode the container and codecs
   const media = metadata.Media?.[0];
@@ -200,11 +216,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Force transcoding for mobile devices to ensure compatible H.264/AAC format
   // Mobile browsers (especially iOS Safari) have limited codec support
-  const forceTranscode = forceTranscodeParam || useStoredTranscode || (isMobile && !directFile);
+  const forceTranscode =
+    forceTranscodeParam || useStoredTranscode || (isMobile && !directFile);
 
   // Select quality profile - use 1080p transcoding for mobile or stored preference
-  const effectiveQualityId = (useStoredTranscode || (isMobile && !directFile && qualityId === "original")) ? "1080p-20" : qualityId;
-  const selectedQuality = QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) || QUALITY_PROFILES[0];
+  const effectiveQualityId =
+    useStoredTranscode || (isMobile && !directFile && qualityId === "original")
+      ? "1080p-20"
+      : qualityId;
+  const selectedQuality =
+    QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) ||
+    QUALITY_PROFILES[0];
 
   // Get stream URL - offset is in SECONDS
   const playbackInfo = client.getPlaybackInfo(ratingKey, {
@@ -215,8 +237,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
 
   // Logging
-  console.log(`[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`);
-  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${directFile ? "direct_file" : playbackInfo.method}, Mobile: ${isMobile}`);
+  console.log(
+    `[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`
+  );
+  console.log(
+    `[Watch] Quality: ${selectedQuality.id}, Method: ${
+      directFile ? "direct_file" : playbackInfo.method
+    }, Mobile: ${isMobile}`
+  );
 
   // Build display title
   let displayTitle = metadata.title;
@@ -282,9 +310,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     let nextSeason = metadata.parentIndex;
     if (!next && metadata.grandparentRatingKey) {
       const leaves = await client.getAllLeaves(metadata.grandparentRatingKey);
-      const leaf = leaves.success ? findNextEpisode(leaves.data, ratingKey) : null;
+      const leaf = leaves.success
+        ? findNextEpisode(leaves.data, ratingKey)
+        : null;
       if (leaf) {
-        next = { ratingKey: leaf.ratingKey, title: leaf.title, index: leaf.index || 0, thumb: leaf.thumb };
+        next = {
+          ratingKey: leaf.ratingKey,
+          title: leaf.title,
+          index: leaf.index || 0,
+          thumb: leaf.thumb,
+        };
         nextSeason = leaf.parentIndex;
       }
     }
@@ -292,7 +327,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nextEpisode = {
         ratingKey: next.ratingKey,
         title: next.title,
-        label: nextSeason !== undefined ? `S${nextSeason}:E${next.index}` : `Episode ${next.index}`,
+        label:
+          nextSeason !== undefined
+            ? `S${nextSeason}:E${next.index}`
+            : `Episode ${next.index}`,
         thumbUrl: next.thumb ? buildBackdropUrl(next.thumb) : undefined,
       };
     }
@@ -300,8 +338,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Direct files go through the range-request proxy; everything else through the HLS proxy
   const plexUrl = new URL(playbackInfo.streamUrl);
+  plexUrl.searchParams.delete("X-Plex-Token");
   const proxyStreamUrl = directFile
-    ? `/api/plex/stream/${ratingKey}`
+    ? `/api/plex/stream/${ratingKey}?session=${plexUrl.searchParams.get("session")}`
     : `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
 
   return json<LoaderData>({
@@ -317,11 +356,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     parentRatingKey: metadata.parentRatingKey,
     parentIndex: metadata.parentIndex,
     index: metadata.index,
-    serverUrl: env.PLEX_SERVER_URL,
-    token,
     quality: playbackInfo.quality,
     availableQualities: playbackInfo.availableQualities,
-    playbackMethod: playbackInfo.method,
+    playbackMethod: directFile ? "direct_play" : playbackInfo.method,
     mediaInfo: {
       videoCodec: media?.videoCodec,
       audioCodec: media?.audioCodec,
@@ -336,10 +373,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     markers: toPlaybackMarkers(metadata.Marker),
     nextEpisode,
     autoSkipIntro: preferences.autoSkipIntro,
+    autoPlayNextEpisode: preferences.autoPlayNextEpisode,
   });
 }
 
 export default function WatchPage() {
+  const { playbackBackTo } = useOutletContext<{ playbackBackTo: string }>();
   const {
     streamUrl,
     title,
@@ -352,8 +391,6 @@ export default function WatchPage() {
     parentTitle,
     parentIndex,
     index,
-    serverUrl,
-    token,
     quality,
     availableQualities,
     playbackMethod,
@@ -366,6 +403,7 @@ export default function WatchPage() {
     markers,
     nextEpisode,
     autoSkipIntro,
+    autoPlayNextEpisode,
   } = useLoaderData<typeof loader>();
 
   // Build title/subtitle for episodes
@@ -379,6 +417,8 @@ export default function WatchPage() {
   return (
     <div className="fixed inset-0 z-50 bg-black">
       <VideoPlayer
+        key={streamUrl}
+        backTo={playbackBackTo}
         src={streamUrl}
         title={mainTitle}
         subtitle={subtitle}
@@ -386,8 +426,6 @@ export default function WatchPage() {
         durationMs={durationMs}
         resumePositionSeconds={resumePositionSeconds}
         ratingKey={ratingKey}
-        serverUrl={serverUrl}
-        token={token}
         quality={quality}
         availableQualities={availableQualities}
         playbackMethod={playbackMethod}
@@ -403,6 +441,7 @@ export default function WatchPage() {
         markers={markers}
         nextEpisode={nextEpisode}
         autoSkipIntro={autoSkipIntro}
+        autoPlayNextEpisode={autoPlayNextEpisode}
       />
     </div>
   );

@@ -31,7 +31,10 @@ export async function action({ request }: ActionFunctionArgs) {
     (hasSubtitle && !isId(subtitleStreamID, 0))
   ) {
     return json(
-      { error: "Send a partId and exactly one audioStreamID or subtitleStreamID" },
+      {
+        error:
+          "Send a partId and exactly one audioStreamID or subtitleStreamID",
+      },
       { status: 400 }
     );
   }
