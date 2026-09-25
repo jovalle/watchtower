@@ -97,14 +97,6 @@ export const env = {
     return getDataPath();
   },
 
-  /**
-   * Trakt API client ID (required for Trakt integration)
-   * Get a client ID at: https://trakt.tv/oauth/applications
-   */
-  get TRAKT_CLIENT_ID(): string | null {
-    const value = process.env.TRAKT_CLIENT_ID;
-    return value && value.trim() ? value.trim() : null;
-  },
 } as const;
 
 export type Env = typeof env;

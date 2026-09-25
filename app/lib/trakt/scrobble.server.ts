@@ -5,7 +5,12 @@
 import { LRUCache } from "lru-cache";
 import type { PlexClient } from "~/lib/plex/client.server";
 import type { PlexMetadata } from "~/lib/plex/types";
-import { getTraktAccount, getTraktAccessToken, getTraktApp, traktFetch } from "./oauth.server";
+import {
+  getTraktAccount,
+  getTraktAccessToken,
+  getTraktApp,
+  traktFetch,
+} from "./oauth.server";
 
 type PlaybackState = "playing" | "paused" | "stopped";
 type ScrobbleAction = "start" | "pause" | "stop";
@@ -14,10 +19,19 @@ type TraktIds = { imdb?: string; tmdb?: number; tvdb?: number };
 export type ScrobbleTarget =
   | { movie: { title: string; year?: number; ids: TraktIds } }
   | { episode: { ids: TraktIds } }
-  | { show: { title?: string; ids: TraktIds }; episode: { season: number; number: number } };
+  | {
+      show: { title?: string; ids: TraktIds };
+      episode: { season: number; number: number };
+    };
 
-const lastState = new LRUCache<string, PlaybackState>({ max: 5000, ttl: 6 * 60 * 60 * 1000 });
-const targets = new LRUCache<string, ScrobbleTarget | false>({ max: 5000, ttl: 24 * 60 * 60 * 1000 });
+const lastState = new LRUCache<string, PlaybackState>({
+  max: 5000,
+  ttl: 6 * 60 * 60 * 1000,
+});
+const targets = new LRUCache<string, ScrobbleTarget | false>({
+  max: 5000,
+  ttl: 24 * 60 * 60 * 1000,
+});
 
 function externalIds(guids: PlexMetadata["Guid"]): TraktIds | null {
   const ids: TraktIds = {};
@@ -30,7 +44,10 @@ function externalIds(guids: PlexMetadata["Guid"]): TraktIds | null {
   return ids.imdb || ids.tmdb || ids.tvdb ? ids : null;
 }
 
-type ScrobbleSource = Pick<PlexMetadata, "type" | "Guid" | "title" | "year" | "parentIndex" | "index">;
+type ScrobbleSource = Pick<
+  PlexMetadata,
+  "type" | "Guid" | "title" | "year" | "parentIndex" | "index"
+>;
 
 /**
  * Builds the Trakt item from Plex external GUIDs, or null if Trakt can't identify it.
@@ -38,14 +55,21 @@ type ScrobbleSource = Pick<PlexMetadata, "type" | "Guid" | "title" | "year" | "p
  */
 export function toScrobbleTarget(
   metadata: ScrobbleSource,
-  show?: Pick<PlexMetadata, "Guid" | "title">,
+  show?: Pick<PlexMetadata, "Guid" | "title">
 ): ScrobbleTarget | null {
   const ids = externalIds(metadata.Guid);
-  if (metadata.type === "movie") return ids && { movie: { title: metadata.title, year: metadata.year, ids } };
+  if (metadata.type === "movie")
+    return (
+      ids && { movie: { title: metadata.title, year: metadata.year, ids } }
+    );
   if (metadata.type !== "episode") return null;
   if (ids?.tvdb) return { episode: { ids } };
   const showIds = show && externalIds(show.Guid);
-  if (showIds && metadata.parentIndex !== undefined && metadata.index !== undefined) {
+  if (
+    showIds &&
+    metadata.parentIndex !== undefined &&
+    metadata.index !== undefined
+  ) {
     return {
       show: { title: show.title, ids: showIds },
       episode: { season: metadata.parentIndex, number: metadata.index },
@@ -55,7 +79,10 @@ export function toScrobbleTarget(
 }
 
 /** Only state changes produce a scrobble; repeated progress reports are ignored. */
-export function nextScrobbleAction(previous: PlaybackState | undefined, state: PlaybackState): ScrobbleAction | null {
+export function nextScrobbleAction(
+  previous: PlaybackState | undefined,
+  state: PlaybackState
+): ScrobbleAction | null {
   if (state === previous) return null;
   if (state === "playing") return "start";
   if (state === "paused") return previous === "playing" ? "pause" : null;
@@ -83,10 +110,23 @@ export async function scrobbleTimeline(params: {
   let target = targets.get(ratingKey);
   if (target === undefined) {
     const metadata = await client.getMetadata(ratingKey);
-    const episode = metadata.success && metadata.data.type === "episode" ? metadata.data : null;
-    const needsShow = episode && !episode.Guid?.some(({ id }) => id.startsWith("tvdb://"));
-    const show = needsShow && episode.grandparentRatingKey ? await client.getMetadata(episode.grandparentRatingKey) : null;
-    target = (metadata.success && toScrobbleTarget(metadata.data, show?.success ? show.data : undefined)) || false;
+    const episode =
+      metadata.success && metadata.data.type === "episode"
+        ? metadata.data
+        : null;
+    const needsShow =
+      episode && !episode.Guid?.some(({ id }) => id.startsWith("tvdb://"));
+    const show =
+      needsShow && episode.grandparentRatingKey
+        ? await client.getMetadata(episode.grandparentRatingKey)
+        : null;
+    target =
+      (metadata.success &&
+        toScrobbleTarget(
+          metadata.data,
+          show?.success ? show.data : undefined
+        )) ||
+      false;
     targets.set(ratingKey, target);
   }
   if (!target) return;
@@ -101,6 +141,8 @@ export async function scrobbleTimeline(params: {
   });
   // 409: Trakt already recorded this watch recently. 422: stopped under 1% progress, which Trakt ignores.
   if (!response.ok && response.status !== 409 && response.status !== 422) {
-    console.error(`[Trakt] scrobble/${action} failed for ${ratingKey}: HTTP ${response.status}`);
+    console.error(
+      `[Trakt] scrobble/${action} failed for ${ratingKey}: HTTP ${response.status}`
+    );
   }
 }

@@ -4,8 +4,7 @@
  */
 
 import type { TraktResult, TraktWatchlistItem } from "./types";
-import { env } from "~/lib/env.server";
-import { getIntegrations } from "~/lib/integrations/storage.server";
+import { getTraktApp } from "./oauth.server";
 
 const TRAKT_BASE_URL = "https://api.trakt.tv";
 const TRAKT_REQUEST_TIMEOUT = 10000; // 10 seconds
@@ -125,10 +124,9 @@ export class TraktClient {
   }
 }
 
-/** The Integrations setting takes precedence over the legacy TRAKT_CLIENT_ID env var. */
+/** Use the same saved integration as Trakt sign-in and scrobbling. */
 async function getTraktClientId(): Promise<string | null> {
-  const { trakt } = await getIntegrations();
-  return trakt?.clientId || env.TRAKT_CLIENT_ID;
+  return (await getTraktApp())?.clientId ?? null;
 }
 
 /**
