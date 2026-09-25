@@ -37,6 +37,25 @@ const PREFERENCE_GROUPS: Array<{
       },
     ],
   },
+  {
+    title: "Home",
+    items: [
+      { key: "showContinueWatching", label: "Continue Watching", description: "Titles you've started." },
+      { key: "showRecentlyAdded", label: "Recently Added", description: "The newest movies and shows in the library." },
+      { key: "showTrending", label: "Trending Now", description: "This week's trending titles from TMDB, linked to the library when available." },
+      { key: "showCollections", label: "Promoted collections", description: "Collections the server owner promoted to Home in Plex." },
+    ],
+  },
+  {
+    title: "Discovery",
+    items: [
+      {
+        key: "discoveryDisabled",
+        label: "Library only",
+        description: "Hide titles that aren't in the library: TMDB trending, search results, and recommendations.",
+      },
+    ],
+  },
 ];
 
 function PreferencesSection({ initial }: { initial: UserPreferences }) {

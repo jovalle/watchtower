@@ -225,6 +225,26 @@ export class TMDBClient {
   }
 
   /**
+   * This week's trending movies and TV shows.
+   */
+  async getTrending(): Promise<TMDBResult<TMDBRecommendation[]>> {
+    const result = await this.request<
+      TMDBPaginatedResponse<(TMDBMovie & { media_type: "movie" }) | (TMDBShow & { media_type: "tv" }) | { media_type: "person" }>
+    >("/trending/all/week");
+
+    if (!result.success) {
+      return result;
+    }
+
+    const data: TMDBRecommendation[] = [];
+    for (const item of result.data.results) {
+      if (item.media_type === "movie") data.push(this.movieToRecommendation(item));
+      else if (item.media_type === "tv") data.push(this.showToRecommendation(item));
+    }
+    return { success: true, data };
+  }
+
+  /**
    * Search movies and TV shows together, dropping people.
    */
   async searchMulti(query: string): Promise<TMDBResult<TMDBRecommendation[]>> {

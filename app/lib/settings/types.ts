@@ -4,6 +4,12 @@
 
 export interface UserPreferences {
   autoSkipIntro: boolean;
+  showContinueWatching: boolean;
+  showRecentlyAdded: boolean;
+  showTrending: boolean;
+  showCollections: boolean;
+  /** Hides everything sourced from outside the library: TMDB trending, search results, and recommendations. */
+  discoveryDisabled: boolean;
 }
 
 export interface UserSettings {
