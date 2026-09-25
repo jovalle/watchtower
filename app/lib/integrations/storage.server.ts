@@ -22,7 +22,9 @@ function getConfigPath(): string {
 export async function getIntegrations(): Promise<IntegrationsConfig> {
   if (cached) return cached;
   try {
-    const parsed = JSON.parse(await fs.readFile(getConfigPath(), "utf-8")) as IntegrationsConfig;
+    const parsed = JSON.parse(
+      await fs.readFile(getConfigPath(), "utf-8")
+    ) as IntegrationsConfig;
     cached = parsed.version === 1 ? parsed : { version: 1 };
   } catch {
     cached = { version: 1 };
@@ -30,23 +32,38 @@ export async function getIntegrations(): Promise<IntegrationsConfig> {
   return cached;
 }
 
-export async function saveIntegrations(update: Partial<Omit<IntegrationsConfig, "version">>): Promise<IntegrationsConfig> {
-  const next: IntegrationsConfig = { ...(await getIntegrations()), ...update, version: 1 };
+export async function saveIntegrations(
+  update: Partial<Omit<IntegrationsConfig, "version">>
+): Promise<IntegrationsConfig> {
+  const next: IntegrationsConfig = {
+    ...(await getIntegrations()),
+    ...update,
+    version: 1,
+  };
   for (const key of ["seerr", "trakt"] as const) {
     if (next[key] === undefined) delete next[key];
   }
   await fs.mkdir(env.DATA_PATH, { recursive: true });
-  await fs.writeFile(getConfigPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  await fs.writeFile(getConfigPath(), JSON.stringify(next, null, 2), {
+    mode: 0o600,
+  });
   await fs.chmod(getConfigPath(), 0o600);
   cached = next;
   return next;
 }
 
-export function toPublicIntegrations(config: IntegrationsConfig): PublicIntegrationsConfig {
+export function toPublicIntegrations(
+  config: IntegrationsConfig
+): PublicIntegrationsConfig {
   return {
-    seerr: config.seerr ? { url: config.seerr.url, hasApiKey: Boolean(config.seerr.apiKey) } : null,
+    seerr: config.seerr
+      ? { url: config.seerr.url, hasApiKey: Boolean(config.seerr.apiKey) }
+      : null,
     trakt: config.trakt
-      ? { clientId: config.trakt.clientId, hasClientSecret: Boolean(config.trakt.clientSecret) }
+      ? {
+          clientId: config.trakt.clientId,
+          hasClientSecret: Boolean(config.trakt.clientSecret),
+        }
       : null,
   };
 }
