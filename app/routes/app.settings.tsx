@@ -56,6 +56,11 @@ const PREFERENCE_GROUPS: Array<{
     title: "Playback",
     items: [
       {
+        key: "autoPlayNextEpisode",
+        label: "Autoplay next episode",
+        description: "Start the next episode after the countdown. You can cancel it in the player.",
+      },
+      {
         key: "autoSkipIntro",
         label: "Auto-skip intros",
         description:
