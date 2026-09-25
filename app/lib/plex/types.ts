@@ -338,6 +338,8 @@ export interface PlexStream {
   // Audio-specific
   channels?: number;
   samplingRate?: number;
+  // Dolby Vision (video streams)
+  DOVIProfile?: number;
 }
 
 // ============================================================================

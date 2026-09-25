@@ -17,6 +17,7 @@ import { env } from "~/lib/env.server";
 import { QUALITY_PROFILES } from "~/lib/plex/types";
 import type { QualityProfile, PlaybackMethod, PlexStream } from "~/lib/plex/types";
 import { getPlaybackPref } from "~/lib/playback-prefs";
+import { parsePlaybackCaps, canDirectPlay } from "~/lib/playback-caps";
 import { toPlaybackMarkers, findNextEpisode, type PlaybackMarker } from "~/lib/plex/markers";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
@@ -177,12 +178,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const storedPref = getPlaybackPref(cookieHeader, ratingKey);
   const useStoredTranscode = storedPref === "transcode" && !forceTranscodeParam && qualityId === "original";
 
+  // Play the file as-is when the browser reported it can decode the container and codecs
+  const media = metadata.Media?.[0];
+  const caps = parsePlaybackCaps(cookieHeader);
+  const videoStream = media?.Part?.[0]?.Stream?.find((s) => s.streamType === 1);
+  const directFile =
+    !!caps &&
+    !!media &&
+    qualityId === "original" &&
+    !forceTranscodeParam &&
+    !useStoredTranscode &&
+    canDirectPlay(media, caps, videoStream?.DOVIProfile);
+
   // Force transcoding for mobile devices to ensure compatible H.264/AAC format
   // Mobile browsers (especially iOS Safari) have limited codec support
-  const forceTranscode = forceTranscodeParam || useStoredTranscode || isMobile;
+  const forceTranscode = forceTranscodeParam || useStoredTranscode || (isMobile && !directFile);
 
   // Select quality profile - use 1080p transcoding for mobile or stored preference
-  const effectiveQualityId = (useStoredTranscode || (isMobile && qualityId === "original")) ? "1080p-20" : qualityId;
+  const effectiveQualityId = (useStoredTranscode || (isMobile && !directFile && qualityId === "original")) ? "1080p-20" : qualityId;
   const selectedQuality = QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) || QUALITY_PROFILES[0];
 
   // Get stream URL - offset is in SECONDS
@@ -194,7 +207,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Logging
   console.log(`[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`);
-  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${playbackInfo.method}, Mobile: ${isMobile}`);
+  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${directFile ? "direct_file" : playbackInfo.method}, Mobile: ${isMobile}`);
 
   // Build display title
   let displayTitle = metadata.title;
@@ -207,7 +220,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Extract media info
-  const media = metadata.Media?.[0];
   const part = media?.Part?.[0];
   const streams = part?.Stream || [];
 
@@ -276,9 +288,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // Build proxy URL - extract query params from Plex URL and use our HLS proxy
+  // Direct files go through the range-request proxy; everything else through the HLS proxy
   const plexUrl = new URL(playbackInfo.streamUrl);
-  const proxyStreamUrl = `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
+  const proxyStreamUrl = directFile
+    ? `/api/plex/stream/${ratingKey}`
+    : `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
 
   return json<LoaderData>({
     streamUrl: proxyStreamUrl,
