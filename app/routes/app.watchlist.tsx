@@ -136,7 +136,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cached = !forceRefresh ? await getWatchlistCache(plexToken) : null;
 
   // Trakt is enabled if client ID is configured AND user has set a username
-  const traktEnabled = isTraktAvailable() && !!traktUsername;
+  const traktEnabled = (await isTraktAvailable()) && !!traktUsername;
   // IMDB is enabled if user has configured watchlist IDs
   const imdbEnabled = imdbWatchlistIds.length > 0;
 
@@ -234,7 +234,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // Fetch fresh data from all sources
-    const traktClient = createTraktClient();
+    const traktClient = await createTraktClient();
     const tmdbClient = createTMDBClient();
 
     // Use discoverClient (with plexToken) for Discover API, client (with serverToken) for local library

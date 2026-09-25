@@ -25,7 +25,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const username = url.searchParams.get("username");
 
   // Check if Trakt is configured
-  if (!isTraktAvailable()) {
+  if (!(await isTraktAvailable())) {
     return json<ValidationResult>(
       { valid: false, error: "Trakt integration not configured on server" },
       { status: 503 }
@@ -42,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const client = createTraktClient();
+  const client = await createTraktClient();
   if (!client) {
     return json<ValidationResult>(
       { valid: false, error: "Trakt client initialization failed" },
