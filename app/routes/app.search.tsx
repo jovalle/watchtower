@@ -10,7 +10,9 @@ import { useLoaderData, useNavigate, useNavigation, useSearchParams } from "@rem
 import { Loader2, Search } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
+import { RequestModal, type RequestableItem } from "~/components/media/RequestModal";
 import { Typography } from "~/components/ui";
+import { createSeerrClient } from "~/lib/integrations/seerr.server";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { buildPosterUrl } from "~/lib/plex/images";
@@ -34,8 +36,9 @@ interface LibraryResult {
 export async function loader({ request }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
   const q = (new URL(request.url).searchParams.get("q") || "").trim().slice(0, 100);
+  const seerrEnabled = Boolean(await createSeerrClient());
   if (!q) {
-    return json({ q, library: [] as LibraryResult[], discover: [] as TMDBRecommendation[] });
+    return json({ q, library: [] as LibraryResult[], discover: [] as TMDBRecommendation[], seerrEnabled });
   }
 
   const client = new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token, clientId: env.PLEX_CLIENT_ID });
@@ -59,11 +62,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? excludeLibraryMatches(tmdbResult.data, plexItems).slice(0, 24)
     : [];
 
-  return json({ q, library, discover });
+  return json({ q, library, discover, seerrEnabled });
 }
 
 export default function SearchPage() {
-  const { q, library, discover } = useLoaderData<typeof loader>();
+  const { q, library, discover, seerrEnabled } = useLoaderData<typeof loader>();
+  const [requestItem, setRequestItem] = useState<RequestableItem | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -153,12 +157,25 @@ export default function SearchPage() {
                 title={item.title}
                 year={item.releaseDate?.slice(0, 4)}
                 hideHoverPlay
-                onClick={() => window.open(item.tmdbUrl, "_blank", "noopener,noreferrer")}
+                onClick={() =>
+                  seerrEnabled
+                    ? setRequestItem({
+                        tmdbId: item.id,
+                        type: item.type,
+                        title: item.title,
+                        year: item.releaseDate?.slice(0, 4),
+                        posterUrl: item.posterUrl,
+                        tmdbUrl: item.tmdbUrl,
+                      })
+                    : window.open(item.tmdbUrl, "_blank", "noopener,noreferrer")
+                }
               />
             ))}
           </div>
         </section>
       )}
+
+      {requestItem && <RequestModal item={requestItem} onClose={() => setRequestItem(null)} />}
     </Container>
   );
 }
