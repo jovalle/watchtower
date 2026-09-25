@@ -13,6 +13,7 @@ import { StreamingDashboard } from '~/components/StreamingDashboard';
 import { Container } from './Container';
 import { MobileMenu } from './MobileMenu';
 import type { PlexUser } from '~/lib/auth/plex.server';
+import { saveClientPlaybackCaps } from '~/lib/playback-caps';
 
 interface HeaderProps {
   user: PlexUser;
@@ -87,6 +88,9 @@ export function Header({ user }: HeaderProps) {
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
 
   const navigate = useNavigate();
+  // Header is on every app page, so this runs before the first playback loader.
+  useEffect(() => saveClientPlaybackCaps(), []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
