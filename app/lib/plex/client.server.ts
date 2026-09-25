@@ -18,7 +18,6 @@ import type {
   LibraryQueryOptions,
   PlexPlaybackInfo,
   PlexWatchlistItem,
-  PlexWatchlistResponse,
   QualityProfile,
   PlexPlaylist,
   PlexPlaylistsResponse,
@@ -49,6 +48,7 @@ export class PlexClient {
   private readonly serverUrl: string;
   private readonly token: string;
   private readonly clientId: string;
+  private readonly providerLibraries = new Map<string, Promise<PlexResult<PlexMetadata[]>>>();
 
   constructor(config: PlexServerConfig) {
     // Ensure no trailing slash on server URL
@@ -183,6 +183,29 @@ export class PlexClient {
     };
   }
 
+  /** Shared pagination for library indexes and the Plex watchlist. */
+  private async getPages<T extends { ratingKey: string }>(path: string, params: URLSearchParams, pageSize: number, limit = Infinity): Promise<PlexResult<T[]>> {
+    const items = new Map<string, T>();
+    let offset = Number(params.get("X-Plex-Container-Start") || 0);
+    while (items.size < limit) {
+      const size = Math.min(pageSize, limit - items.size);
+      params.set("X-Plex-Container-Start", String(offset));
+      params.set("X-Plex-Container-Size", String(size));
+      const result = await this.request<{ MediaContainer: { Metadata?: T[]; totalSize?: number; offset?: number } }>(`${path}?${params}`);
+      if (!result.success) return result;
+      const page = result.data.MediaContainer;
+      const entries = page.Metadata ?? [];
+      const before = items.size;
+      for (const item of entries) items.set(item.ratingKey, item);
+      if ((page.offset !== undefined && page.offset !== offset) || (entries.length > 0 && items.size === before) || (!entries.length && page.totalSize !== undefined && offset < page.totalSize)) {
+        return { success: false, error: { code: -1, message: "Plex pagination did not advance. Refresh to try again." } };
+      }
+      offset += entries.length;
+      if (!entries.length || (page.totalSize !== undefined ? offset >= page.totalSize : entries.length < size)) break;
+    }
+    return { success: true, data: [...items.values()].slice(0, limit) };
+  }
+
   /**
    * Get items from a library section.
    */
@@ -191,6 +214,7 @@ export class PlexClient {
     options: LibraryQueryOptions = {}
   ): Promise<PlexResult<PlexMediaItem[]>> {
     const params = new URLSearchParams();
+    if (options.includeGuids) params.set("includeGuids", "1");
 
     if (options.sort) {
       params.set("sort", options.sort);
@@ -212,9 +236,14 @@ export class PlexClient {
     let queryString = params.toString();
     if (options.filter) {
       // Append filter directly (e.g., "unwatched=1" or "inProgress=1")
-      queryString = queryString ? `${queryString}&${options.filter}` : options.filter;
+      queryString = queryString
+        ? `${queryString}&${options.filter}`
+        : options.filter;
     }
-    const path = `/library/sections/${sectionKey}/all${queryString ? `?${queryString}` : ""}`;
+    if (options.all) return this.getPages<PlexMediaItem>(`/library/sections/${sectionKey}/all`, new URLSearchParams(queryString), 1000);
+    const path = `/library/sections/${sectionKey}/all${
+      queryString ? `?${queryString}` : ""
+    }`;
 
     const result = await this.request<PlexLibraryItemsResponse>(path);
 
@@ -228,14 +257,33 @@ export class PlexClient {
     };
   }
 
+  /** Merge accessible sections before sorting so additional libraries are not omitted. */
+  async getLibraryItemsForSections(keys: string[], options: LibraryQueryOptions): Promise<PlexResult<PlexMediaItem[]>> {
+    const results = await Promise.all(keys.map((key) => this.getLibraryItems(key, { ...options, all: true })));
+    for (const result of results) if (!result.success) return result;
+    const items = results.flatMap((result) => result.success ? result.data : []);
+    const [field = "titleSort", direction] = (options.sort ?? "titleSort").split(":");
+    const value = (item: PlexMediaItem) => field === "titleSort" ? item.titleSort || item.title : item[field as keyof PlexMediaItem];
+    items.sort((a, b) => {
+      const left = value(a), right = value(b);
+      if (left == null) return right == null ? 0 : 1;
+      if (right == null) return -1;
+      const comparison = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true });
+      return direction === "desc" ? -comparison : comparison;
+    });
+    return { success: true, data: items };
+  }
+
   /**
    * Get available filter values for a library (genres, years, etc.)
    */
-  async getLibraryFilters(sectionKey: string): Promise<PlexResult<{
-    genres: string[];
-    years: number[];
-    contentRatings: string[];
-  }>> {
+  async getLibraryFilters(sectionKey: string): Promise<
+    PlexResult<{
+      genres: string[];
+      years: number[];
+      contentRatings: string[];
+    }>
+  > {
     // Fetch all items with minimal fields to extract filter values
     const result = await this.request<PlexLibraryItemsResponse>(
       `/library/sections/${sectionKey}/all?X-Plex-Container-Size=5000`
@@ -357,10 +405,15 @@ export class PlexClient {
   /**
    * Search movies and shows across all libraries.
    */
-  async search(query: string, limit: number = 30): Promise<PlexResult<PlexMediaItem[]>> {
-    const params = new URLSearchParams({ query, limit: limit.toString() });
+  async search(
+    query: string,
+    limit: number = 30
+  ): Promise<PlexResult<PlexMediaItem[]>> {
+    const params = new URLSearchParams({ query, limit: limit.toString(), includeGuids: "1" });
     const result = await this.request<{
-      MediaContainer: { Hub?: Array<{ type: string; Metadata?: PlexMediaItem[] }> };
+      MediaContainer: {
+        Hub?: Array<{ type: string; Metadata?: PlexMediaItem[] }>;
+      };
     }>(`/hubs/search?${params.toString()}`);
 
     if (!result.success) {
@@ -376,13 +429,45 @@ export class PlexClient {
     };
   }
 
+  /** Resolve external identity using only media type and provider GUID, never title similarity. */
+  async findByTmdbId(type: "movie" | "show", id: number): Promise<PlexResult<PlexMetadata[]>> {
+    return this.findByGuid(type, `tmdb://${id}`);
+  }
+
+  async findByImdbId(type: "movie" | "show", id: string): Promise<PlexResult<PlexMetadata[]>> {
+    return this.findByGuid(type, `imdb://${id}`);
+  }
+
+  private async findByGuid(type: "movie" | "show", guid: string): Promise<PlexResult<PlexMetadata[]>> {
+    // Plex's guid filter matches primary Plex GUIDs, not the external Guid array.
+    // ponytail: scan once per type/client; add a scoped index if measured library size warrants it.
+    let library = this.providerLibraries.get(type);
+    if (!library) {
+      library = this.getPages<PlexMetadata>("/library/all", new URLSearchParams({ type: type === "movie" ? "1" : "2", includeGuids: "1" }), 1000);
+      this.providerLibraries.set(type, library);
+    }
+    const result = await library;
+    if (!result.success) this.providerLibraries.delete(type);
+    if (!result.success) return result;
+    return { success: true, data: result.data.filter((item) =>
+      item.type === type && (item.guid === guid || item.Guid?.some((entry) => entry.id === guid))
+    ).sort((a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0) || a.ratingKey.localeCompare(b.ratingKey, undefined, { numeric: true })) };
+  }
+
   /**
    * Get collections the server owner promoted to Home in Plex (Manage Recommendations).
    */
-  async getPromotedCollections(): Promise<PlexResult<Array<{ title: string; items: PlexMediaItem[] }>>> {
+  async getPromotedCollections(): Promise<
+    PlexResult<Array<{ title: string; items: PlexMediaItem[] }>>
+  > {
     const result = await this.request<{
       MediaContainer: {
-        Hub?: Array<{ title: string; hubIdentifier?: string; promoted?: boolean; Metadata?: PlexMediaItem[] }>;
+        Hub?: Array<{
+          title: string;
+          hubIdentifier?: string;
+          promoted?: boolean;
+          Metadata?: PlexMediaItem[];
+        }>;
       };
     }>("/hubs?count=20");
 
@@ -393,7 +478,11 @@ export class PlexClient {
     return {
       success: true,
       data: (result.data.MediaContainer.Hub || [])
-        .filter((hub) => hub.hubIdentifier?.startsWith("custom.collection") && hub.Metadata?.length)
+        .filter(
+          (hub) =>
+            hub.hubIdentifier?.startsWith("custom.collection") &&
+            hub.Metadata?.length
+        )
         .map((hub) => ({ title: hub.title, items: hub.Metadata || [] })),
     };
   }
@@ -401,7 +490,9 @@ export class PlexClient {
   /**
    * Get every episode of a show in airing order.
    */
-  async getAllLeaves(showRatingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
+  async getAllLeaves(
+    showRatingKey: string
+  ): Promise<PlexResult<PlexMediaItem[]>> {
     const result = await this.request<PlexLibraryItemsResponse>(
       `/library/metadata/${showRatingKey}/allLeaves`
     );
@@ -441,7 +532,9 @@ export class PlexClient {
    * Get Continue Watching items from the hub the official Plex apps use,
    * falling back to /library/onDeck on older servers. Duplicate versions are collapsed by GUID.
    */
-  async getContinueWatching(limit: number = 20): Promise<PlexResult<PlexMediaItem[]>> {
+  async getContinueWatching(
+    limit: number = 20
+  ): Promise<PlexResult<PlexMediaItem[]>> {
     const params = new URLSearchParams();
     params.set("X-Plex-Container-Size", limit.toString());
 
@@ -489,7 +582,8 @@ export class PlexClient {
       subtitles = "none",
     } = options;
     const selectedQuality = quality || QUALITY_PROFILES[0];
-    const useDirectPlay = Boolean(selectedQuality.isOriginal) && !forceTranscode;
+    const useDirectPlay =
+      Boolean(selectedQuality.isOriginal) && !forceTranscode;
 
     const params = new URLSearchParams();
 
@@ -527,7 +621,10 @@ export class PlexClient {
         "720p": "1280x720",
         "480p": "854x480",
       };
-      if (selectedQuality.resolution && resolutions[selectedQuality.resolution]) {
+      if (
+        selectedQuality.resolution &&
+        resolutions[selectedQuality.resolution]
+      ) {
         params.set("videoResolution", resolutions[selectedQuality.resolution]);
       }
     }
@@ -543,11 +640,16 @@ export class PlexClient {
     params.set("X-Plex-Product", PLEX_HEADERS["X-Plex-Product"]);
     params.set("X-Plex-Version", PLEX_HEADERS["X-Plex-Version"]);
     params.set("X-Plex-Platform", PLEX_HEADERS["X-Plex-Platform"]);
-    params.set("X-Plex-Platform-Version", PLEX_HEADERS["X-Plex-Platform-Version"]);
+    params.set(
+      "X-Plex-Platform-Version",
+      PLEX_HEADERS["X-Plex-Platform-Version"]
+    );
     params.set("X-Plex-Device", PLEX_HEADERS["X-Plex-Device"]);
     params.set("X-Plex-Device-Name", PLEX_HEADERS["X-Plex-Device-Name"]);
 
-    const streamUrl = `${this.serverUrl}/video/:/transcode/universal/start.m3u8?${params.toString()}`;
+    const streamUrl = `${
+      this.serverUrl
+    }/video/:/transcode/universal/start.m3u8?${params.toString()}`;
 
     return {
       streamUrl,
@@ -595,7 +697,8 @@ export class PlexClient {
         success: false,
         error: {
           code: -1,
-          message: error instanceof Error ? error.message : "Unknown error occurred",
+          message:
+            error instanceof Error ? error.message : "Unknown error occurred",
         },
       };
     }
@@ -659,7 +762,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -718,7 +822,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -777,7 +882,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -839,7 +945,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -863,21 +970,20 @@ export class PlexClient {
    * @param options.type - Filter by "movie" or "show"
    * @param options.sort - Sort field (watchlistedAt, titleSort, originallyAvailableAt, rating)
    * @param options.sortDir - Sort direction ("asc" or "desc")
-   * @param options.limit - Maximum number of items to return (default: 500)
+   * @param options.limit - Maximum total items to return (default: all pages)
    */
-  async getWatchlist(options: {
-    type?: "movie" | "show";
-    sort?: "watchlistedAt" | "titleSort" | "originallyAvailableAt" | "rating";
-    sortDir?: "asc" | "desc";
-    limit?: number;
-  } = {}): Promise<PlexResult<PlexWatchlistItem[]>> {
+  async getWatchlist(
+    options: {
+      type?: "movie" | "show";
+      sort?: "watchlistedAt" | "titleSort" | "originallyAvailableAt" | "rating";
+      sortDir?: "asc" | "desc";
+      limit?: number;
+    } = {}
+  ): Promise<PlexResult<PlexWatchlistItem[]>> {
     const params = new URLSearchParams();
     params.set("includeCollections", "1");
     params.set("includeExternalMedia", "1");
 
-    // Set container size (Plex Discover API max is ~50)
-    params.set("X-Plex-Container-Size", (options.limit || 50).toString());
-    params.set("X-Plex-Container-Start", "0");
 
     if (options.type) {
       params.set("type", options.type === "movie" ? "1" : "2");
@@ -890,64 +996,11 @@ export class PlexClient {
     // Discover API requires token as query parameter
     params.set("X-Plex-Token", this.token);
 
-    const url = `${PLEX_DISCOVER_URL}/library/sections/watchlist/all?${params.toString()}`;
-    console.log("[Watchlist API] Fetching from URL:", url.replace(/X-Plex-Token=[^&]+/, "X-Plex-Token=***"));
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(
-        () => controller.abort(),
-        PLEX_REQUEST_TIMEOUT
-      );
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: this.getHeaders(),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log("[Watchlist API] Response status:", response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("[Watchlist API] Error response:", errorText.substring(0, 500));
-        return {
-          success: false,
-          error: {
-            code: response.status,
-            message: `HTTP ${response.status}: ${response.statusText}`,
-            status: response.status,
-          },
-        };
-      }
-
-      const data = (await response.json()) as PlexWatchlistResponse;
-      console.log("[Watchlist API] Got MediaContainer with size:", data.MediaContainer?.size, "totalSize:", data.MediaContainer?.totalSize);
-      console.log("[Watchlist API] Metadata items:", data.MediaContainer?.Metadata?.length ?? 0);
-      return {
-        success: true,
-        data: data.MediaContainer.Metadata || [],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        return {
-          success: false,
-          error: {
-            code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
-          },
-        };
-      }
-      return {
-        success: false,
-        error: {
-          code: -1,
-          message: "Unknown error occurred",
-        },
-      };
+    if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
+      return { success: false, error: { code: -1, message: "Invalid watchlist limit" } };
     }
+    const discover = new PlexClient({ serverUrl: PLEX_DISCOVER_URL, token: this.token, clientId: this.clientId });
+    return discover.getPages<PlexWatchlistItem>("/library/sections/watchlist/all", params, 50, options.limit);
   }
 
   /**
@@ -963,7 +1016,9 @@ export class PlexClient {
    * Search local library for an item matching the given GUID.
    * Returns the local ratingKey if found.
    */
-  async findLocalItemByGuid(guid: string): Promise<PlexResult<PlexMediaItem | null>> {
+  async findLocalItemByGuid(
+    guid: string
+  ): Promise<PlexResult<PlexMediaItem | null>> {
     // Search using the hub search endpoint with the GUID
     const searchParams = new URLSearchParams();
     searchParams.set("query", guid);
@@ -999,7 +1054,9 @@ export class PlexClient {
    * Search all libraries for items matching a discover GUID.
    * The discover GUID format is "plex://movie/xxx" or "plex://show/xxx".
    */
-  async findLocalItemByDiscoverGuid(discoverGuid: string): Promise<PlexResult<PlexMediaItem | null>> {
+  async findLocalItemByDiscoverGuid(
+    discoverGuid: string
+  ): Promise<PlexResult<PlexMediaItem | null>> {
     // Get all libraries
     const librariesResult = await this.getLibraries();
     if (!librariesResult.success) {
@@ -1018,7 +1075,9 @@ export class PlexClient {
       }
 
       // Get items from this library and check GUIDs
-      const itemsResult = await this.getLibraryItems(library.key, { limit: 500 });
+      const itemsResult = await this.getLibraryItems(library.key, {
+        limit: 500,
+      });
       if (!itemsResult.success) {
         continue;
       }
@@ -1075,7 +1134,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -1131,7 +1191,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -1173,7 +1234,9 @@ export class PlexClient {
   /**
    * Get items in a playlist.
    */
-  async getPlaylistItems(ratingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
+  async getPlaylistItems(
+    ratingKey: string
+  ): Promise<PlexResult<PlexMediaItem[]>> {
     const result = await this.request<PlexLibraryItemsResponse>(
       `/playlists/${ratingKey}/items`
     );
@@ -1194,7 +1257,10 @@ export class PlexClient {
    * @param playlistRatingKey - The rating key of the playlist
    * @param itemRatingKey - The rating key of the item to add
    */
-  async addToPlaylist(playlistRatingKey: string, itemRatingKey: string): Promise<PlexResult<void>> {
+  async addToPlaylist(
+    playlistRatingKey: string,
+    itemRatingKey: string
+  ): Promise<PlexResult<void>> {
     // Get server identity for machine identifier
     const identityResult = await this.getServerIdentity();
     if (!identityResult.success) {
@@ -1203,7 +1269,9 @@ export class PlexClient {
 
     const machineIdentifier = identityResult.data.machineIdentifier;
     const uri = `server://${machineIdentifier}/com.plexapp.plugins.library/library/metadata/${itemRatingKey}`;
-    const path = `/playlists/${playlistRatingKey}/items?uri=${encodeURIComponent(uri)}`;
+    const path = `/playlists/${playlistRatingKey}/items?uri=${encodeURIComponent(
+      uri
+    )}`;
 
     try {
       const controller = new AbortController();
@@ -1238,7 +1306,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -1258,7 +1327,10 @@ export class PlexClient {
    * @param playlistRatingKey - The rating key of the playlist
    * @param playlistItemId - The playlist item ID (from the item in the playlist, not the media's ratingKey)
    */
-  async removeFromPlaylist(playlistRatingKey: string, playlistItemId: string): Promise<PlexResult<void>> {
+  async removeFromPlaylist(
+    playlistRatingKey: string,
+    playlistItemId: string
+  ): Promise<PlexResult<void>> {
     const path = `/playlists/${playlistRatingKey}/items/${playlistItemId}`;
 
     try {
@@ -1294,7 +1366,8 @@ export class PlexClient {
           success: false,
           error: {
             code: -1,
-            message: error.name === "AbortError" ? "Request timed out" : error.message,
+            message:
+              error.name === "AbortError" ? "Request timed out" : error.message,
           },
         };
       }
@@ -1315,7 +1388,10 @@ export class PlexClient {
    * @param itemRatingKey - The rating key of the item to check
    * @returns The playlist item ID if found, null otherwise
    */
-  async getPlaylistItemId(playlistRatingKey: string, itemRatingKey: string): Promise<PlexResult<string | null>> {
+  async getPlaylistItemId(
+    playlistRatingKey: string,
+    itemRatingKey: string
+  ): Promise<PlexResult<string | null>> {
     const itemsResult = await this.getPlaylistItems(playlistRatingKey);
     if (!itemsResult.success) {
       return itemsResult;
@@ -1336,7 +1412,9 @@ export class PlexClient {
   /**
    * Get all collections from a library section.
    */
-  async getCollections(sectionKey: string): Promise<PlexResult<PlexCollection[]>> {
+  async getCollections(
+    sectionKey: string
+  ): Promise<PlexResult<PlexCollection[]>> {
     const result = await this.request<PlexCollectionsResponse>(
       `/library/sections/${sectionKey}/collections`
     );
@@ -1354,7 +1432,9 @@ export class PlexClient {
   /**
    * Get items in a collection.
    */
-  async getCollectionItems(ratingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
+  async getCollectionItems(
+    ratingKey: string
+  ): Promise<PlexResult<PlexMediaItem[]>> {
     const result = await this.request<PlexLibraryItemsResponse>(
       `/library/collections/${ratingKey}/children`
     );
@@ -1397,7 +1477,9 @@ export class PlexClient {
    * @param options.limit - Maximum number of items to return (default 10, max 50)
    * @param options.offset - Number of items to skip for pagination (default 0)
    */
-  async getRecentlyViewed(options: { limit?: number; offset?: number } = {}): Promise<PlexResult<{ items: PlexMediaItem[]; hasMore: boolean }>> {
+  async getRecentlyViewed(
+    options: { limit?: number; offset?: number } = {}
+  ): Promise<PlexResult<{ items: PlexMediaItem[]; hasMore: boolean }>> {
     const { limit = 10, offset = 0 } = options;
     const clampedLimit = Math.min(Math.max(1, limit), 50);
 
@@ -1435,7 +1517,7 @@ export class PlexClient {
 
     // Sort combined results by lastViewedAt descending
     const sorted = allItems
-      .filter(item => item.lastViewedAt)
+      .filter((item) => item.lastViewedAt)
       .sort((a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0));
 
     // Apply offset and limit for pagination
@@ -1448,4 +1530,3 @@ export class PlexClient {
     };
   }
 }
-
