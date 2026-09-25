@@ -92,10 +92,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Run all tests in parallel
   const [test1, test2, test3, test4] = await Promise.all([
-    testEndpoint(metadataUrl, baseHeaders, "metadata.provider (old) - token in URL"),
-    testEndpoint(discoverUrl, baseHeaders, "discover.provider - token in URL only"),
-    testEndpoint(discoverUrl, headersWithToken, "discover.provider - token in URL + header"),
-    testEndpoint(discoverFullUrl, headersWithToken, "discover.provider - full params"),
+    testEndpoint(
+      metadataUrl,
+      baseHeaders,
+      "metadata.provider (old) - token in URL"
+    ),
+    testEndpoint(
+      discoverUrl,
+      baseHeaders,
+      "discover.provider - token in URL only"
+    ),
+    testEndpoint(
+      discoverUrl,
+      headersWithToken,
+      "discover.provider - token in URL + header"
+    ),
+    testEndpoint(
+      discoverFullUrl,
+      headersWithToken,
+      "discover.provider - full params"
+    ),
   ]);
 
   // Also test if token is valid by checking plex.tv user info
@@ -105,7 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       headers: {
         ...baseHeaders,
         "X-Plex-Token": token,
-        "Accept": "application/json",
+        Accept: "application/json",
       },
     });
     if (userResponse.ok) {
@@ -119,7 +135,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userInfo = { error: `${userResponse.status} ${userResponse.statusText}` };
     }
   } catch (error) {
-    userInfo = { error: error instanceof Error ? error.message : "Unknown error" };
+    userInfo = {
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 
   return json({

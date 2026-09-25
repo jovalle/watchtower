@@ -67,14 +67,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       console.error(`[Image Proxy] FAILED ${status} ${statusText}`);
       console.error(`[Image Proxy]   Path: ${path}`);
       console.error(
-        `[Image Proxy]   URL: ${isAbsoluteUrl ? path : `${env.PLEX_SERVER_URL}${path}`}`,
+        `[Image Proxy]   URL: ${
+          isAbsoluteUrl ? path : `${env.PLEX_SERVER_URL}${path}`
+        }`
       );
 
       // Check for rate limiting
       if (status === 429) {
         const retryAfter = plexResponse.headers.get("Retry-After");
         console.error(
-          `[Image Proxy]   Rate limited${retryAfter ? ` (retry after ${retryAfter}s)` : ""}`,
+          `[Image Proxy]   Rate limited${
+            retryAfter ? ` (retry after ${retryAfter}s)` : ""
+          }`
         );
         return new Response(
           JSON.stringify({
@@ -89,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               "Content-Type": "application/json",
               ...(retryAfter && { "Retry-After": retryAfter }),
             },
-          },
+          }
         );
       }
 
@@ -105,7 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           {
             status: 404,
             headers: { "Content-Type": "application/json" },
-          },
+          }
         );
       }
 
@@ -120,13 +124,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         {
           status,
           headers: { "Content-Type": "application/json" },
-        },
+        }
       );
     }
 
     const contentType = plexResponse.headers.get("Content-Type") || "";
     if (!contentType.startsWith("image/")) {
-      console.error(`[Image Proxy] Rejected non-image response (${contentType || "none"}) for ${path}`);
+      console.error(
+        `[Image Proxy] Rejected non-image response (${
+          contentType || "none"
+        }) for ${path}`
+      );
       return new Response("Upstream response is not an image", { status: 502 });
     }
     const imageBuffer = Buffer.from(await plexResponse.arrayBuffer());
@@ -159,7 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       {
         status: 502,
         headers: { "Content-Type": "application/json" },
-      },
+      }
     );
   }
 }
