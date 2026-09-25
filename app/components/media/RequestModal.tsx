@@ -10,7 +10,13 @@ export interface RequestableItem {
   tmdbUrl: string;
 }
 
-type Status = "unknown" | "pending" | "processing" | "partially_available" | "available";
+type Status =
+  | "unknown"
+  | "pending"
+  | "processing"
+  | "partially_available"
+  | "available"
+  | "blocklisted";
 
 const STATUS_LABEL: Record<Status, string> = {
   unknown: "Not requested",
@@ -18,6 +24,7 @@ const STATUS_LABEL: Record<Status, string> = {
   processing: "Requested",
   partially_available: "Partially available",
   available: "Available",
+  blocklisted: "Blocked from requests on Seerr",
 };
 
 interface RequestModalProps {
@@ -72,10 +79,25 @@ export function RequestModal({ item, onClose }: RequestModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={`Request ${item.title}`}>
-      <button className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close" />
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Request ${item.title}`}
+    >
+      <button
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        aria-label="Close"
+      />
       <div className="relative flex w-full max-w-md gap-4 rounded-lg bg-background-elevated p-5 shadow-2xl ring-1 ring-white/10">
-        {item.posterUrl && <img src={item.posterUrl} alt="" className="w-24 flex-shrink-0 self-start rounded" />}
+        {item.posterUrl && (
+          <img
+            src={item.posterUrl}
+            alt=""
+            className="w-24 flex-shrink-0 self-start rounded"
+          />
+        )}
         <div className="min-w-0 flex-1">
           <button
             onClick={onClose}
@@ -84,8 +106,12 @@ export function RequestModal({ item, onClose }: RequestModalProps) {
           >
             <X className="h-5 w-5" />
           </button>
-          <h2 className="pr-6 text-lg font-semibold text-foreground-primary">{item.title}</h2>
-          {item.year && <p className="text-sm text-foreground-muted">{item.year}</p>}
+          <h2 className="pr-6 text-lg font-semibold text-foreground-primary">
+            {item.title}
+          </h2>
+          {item.year && (
+            <p className="text-sm text-foreground-muted">{item.year}</p>
+          )}
           <p className="mt-3 text-sm text-foreground-secondary">
             {status ? STATUS_LABEL[status] : error ? "" : "Checking Seerr…"}
           </p>
