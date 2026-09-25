@@ -1,5 +1,5 @@
 /**
- * Search page - searches the Plex library and, when TMDB is configured, titles not in the library.
+ * Search page - searches the Plex library and, unless the user chose library-only, TMDB titles not in the library.
  * GET /app/search?q=<query>
  */
 
@@ -17,6 +17,8 @@ import { buildPosterUrl } from "~/lib/plex/images";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import { excludeLibraryMatches } from "~/lib/search";
 import { env } from "~/lib/env.server";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { getUserSettings } from "~/lib/settings/storage.server";
 import type { TMDBRecommendation } from "~/lib/tmdb/types";
 
 export const meta: MetaFunction = () => [{ title: "Search | Watchtower" }];
@@ -37,7 +39,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const client = new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token, clientId: env.PLEX_CLIENT_ID });
-  const tmdb = createTMDBClient();
+  const user = await getCurrentUser(request);
+  const discoveryDisabled = user ? (await getUserSettings(user.id))?.preferences.discoveryDisabled : false;
+  const tmdb = discoveryDisabled ? null : createTMDBClient();
   const [plexResult, tmdbResult] = await Promise.all([
     client.search(q),
     tmdb ? tmdb.searchMulti(q) : null,

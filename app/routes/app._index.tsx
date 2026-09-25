@@ -17,6 +17,9 @@ import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import type { PlexMediaItem } from "~/lib/plex/types";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
+import { findLibraryMatch } from "~/lib/search";
 
 export const meta: MetaFunction = () => {
   return [
@@ -65,6 +68,21 @@ interface LoaderData {
   billboardCandidates: BillboardData[];
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
+  extraRows: ExtraRow[];
+}
+
+interface RowItem {
+  key: string;
+  title: string;
+  year?: string;
+  imageUrl: string;
+  href: string;
+  ratingKey?: string; // Set when the title is in the library
+}
+
+interface ExtraRow {
+  title: string;
+  items: RowItem[];
 }
 
 // Use shared image URL helpers with proper sizing
@@ -124,8 +142,85 @@ interface CachedHomeData {
   recentlyAdded: MediaItemView[];
 }
 
+function libraryRowItem(item: PlexMediaItem): RowItem {
+  return {
+    key: item.ratingKey,
+    title: item.title,
+    year: item.year?.toString(),
+    imageUrl: buildBackdropUrl(item.art || item.thumb),
+    href: `/app/media/${item.type}/${item.ratingKey}`,
+    ratingKey: item.ratingKey,
+  };
+}
+
+/** TMDB trending titles, linked to the library when a matching title exists. */
+async function getTrendingRow(client: PlexClient, token: string): Promise<RowItem[]> {
+  const cacheKey = getUserCacheKey("home-trending", token);
+  const cached = await getCache<RowItem[]>(cacheKey);
+  if (cached) return cached.data;
+
+  const tmdb = createTMDBClient();
+  const trending = tmdb ? await tmdb.getTrending() : null;
+  if (!trending?.success) return [];
+
+  const items = await Promise.all(
+    trending.data.slice(0, 20).map(async (rec): Promise<RowItem> => {
+      const search = await client.search(rec.title, 10);
+      const match = search.success ? findLibraryMatch(rec, search.data) : undefined;
+      if (match) return libraryRowItem(match);
+      return {
+        key: `tmdb-${rec.type}-${rec.id}`,
+        title: rec.title,
+        year: rec.releaseDate?.slice(0, 4),
+        imageUrl: rec.backdropUrl || "",
+        href: rec.tmdbUrl,
+      };
+    })
+  );
+  if (items.length > 0) await setCache(cacheKey, items);
+  return items;
+}
+
+async function getCollectionRows(client: PlexClient, token: string): Promise<ExtraRow[]> {
+  const cacheKey = getUserCacheKey("home-collections", token);
+  const cached = await getCache<ExtraRow[]>(cacheKey);
+  if (cached) return cached.data;
+
+  const result = await client.getPromotedCollections();
+  if (!result.success) return [];
+  const rows = result.data.map((hub) => ({ title: hub.title, items: hub.items.map(libraryRowItem) }));
+  await setCache(cacheKey, rows);
+  return rows;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
+  const user = await getCurrentUser(request);
+  const prefs = user
+    ? (await getUserSettings(user.id))?.preferences ?? DEFAULT_PREFERENCES
+    : DEFAULT_PREFERENCES;
+  const extrasClient = new PlexClient({
+    serverUrl: env.PLEX_SERVER_URL,
+    token,
+    clientId: env.PLEX_CLIENT_ID,
+  });
+
+  const respond = async (data: CachedHomeData) => {
+    const [trending, collections] = await Promise.all([
+      prefs.showTrending && !prefs.discoveryDisabled ? getTrendingRow(extrasClient, token) : [],
+      prefs.showCollections ? getCollectionRows(extrasClient, token) : [],
+    ]);
+    const extraRows: ExtraRow[] = [
+      ...(trending.length > 0 ? [{ title: "Trending Now", items: trending }] : []),
+      ...collections,
+    ];
+    return json<LoaderData>({
+      billboardCandidates: data.billboardCandidates,
+      continueWatching: prefs.showContinueWatching ? data.continueWatching : [],
+      recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded : [],
+      extraRows,
+    });
+  };
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
@@ -135,7 +230,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (cached && !cached.isStale) {
     // Fresh cache - return immediately
-    return json<LoaderData>(cached.data);
+    return respond(cached.data);
   }
 
   const client = new PlexClient({
@@ -148,7 +243,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // For now, we'll just return stale data and let the next request get fresh
   if (cached) {
     // Return stale data - background refresh will happen on next navigation
-    return json<LoaderData>(cached.data);
+    return respond(cached.data);
   }
 
   // Fetch data in parallel
@@ -273,7 +368,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-  return json<LoaderData>({
+  return respond({
     billboardCandidates: limitedCandidates,
     continueWatching,
     recentlyAdded,
@@ -288,7 +383,7 @@ interface ContextMenuState {
 }
 
 export default function AppIndex() {
-  const { billboardCandidates, continueWatching, recentlyAdded } =
+  const { billboardCandidates, continueWatching, recentlyAdded, extraRows } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
@@ -569,6 +664,26 @@ export default function AppIndex() {
             ))}
           </MediaRow>
         )}
+
+        {extraRows.map((row) => (
+          <MediaRow key={row.title} title={row.title}>
+            {row.items.map(({ ratingKey, ...item }) => (
+              <MediaCard
+                key={item.key}
+                imageUrl={item.imageUrl}
+                title={item.title}
+                year={item.year}
+                badge={ratingKey ? undefined : "Not in library"}
+                onClick={() =>
+                  ratingKey
+                    ? navigate(item.href)
+                    : window.open(item.href, "_blank", "noopener,noreferrer")
+                }
+                onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
+              />
+            ))}
+          </MediaRow>
+        ))}
       </Container>
 
       {/* Context Menu */}

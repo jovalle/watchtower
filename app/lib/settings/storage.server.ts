@@ -14,6 +14,11 @@ const SETTINGS_DIR = "settings";
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   autoSkipIntro: false,
+  showContinueWatching: true,
+  showRecentlyAdded: true,
+  showTrending: true,
+  showCollections: true,
+  discoveryDisabled: false,
 };
 
 /**

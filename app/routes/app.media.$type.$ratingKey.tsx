@@ -23,6 +23,8 @@ import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import { createOMDbClient } from "~/lib/omdb/client.server";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { getUserSettings } from "~/lib/settings/storage.server";
 import type { PlexMediaItem, PlexMetadata, PlexRole } from "~/lib/plex/types";
 import type { TMDBRecommendation } from "~/lib/tmdb/types";
 
@@ -964,14 +966,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (tmdbClient && metadata.title) {
       try {
         const year = metadata.year;
+        const user = await getCurrentUser(request);
+        const discoveryDisabled = user ? (await getUserSettings(user.id))?.preferences.discoveryDisabled : false;
         const [recsResult, trailerKey] = await Promise.all([
-          type === "movie"
-            ? tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
-            : tmdbClient.getTVRecommendationsByTitle(metadata.title, year),
+          discoveryDisabled
+            ? null
+            : type === "movie"
+              ? tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
+              : tmdbClient.getTVRecommendationsByTitle(metadata.title, year),
           tmdbId ? tmdbClient.getTrailerKey(type, tmdbId) : null,
         ]);
 
-        if (recsResult.success) {
+        if (recsResult?.success) {
           loaderData.recommendations = recsResult.data;
         }
         if (trailerKey) {
