@@ -47,8 +47,6 @@ interface LoaderData {
   itemCount: number;
   items: ListItem[];
   listType: "playlist" | "collection";
-  serverUrl: string;
-  token: string;
 }
 
 function buildImageUrl(
@@ -203,8 +201,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     itemCount: listItems.length,
     items: listItems,
     listType: type,
-    serverUrl: env.PLEX_SERVER_URL,
-    token,
   });
 }
 

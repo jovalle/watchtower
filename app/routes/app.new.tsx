@@ -14,7 +14,6 @@ import { Typography } from "~/components/ui";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
-import { PLEX_DISCOVER_URL } from "~/lib/plex/constants";
 import type { PlexMediaItem, PlexWatchlistItem } from "~/lib/plex/types";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import { env } from "~/lib/env.server";
@@ -95,7 +94,8 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
   // Try cache first for instant loading (user-specific cache key)
-  const cacheKey = getUserCacheKey("new-popular", token);
+  // v2: cached image URLs no longer embed the Plex token.
+  const cacheKey = getUserCacheKey("new-popular-v2", token);
   const cached = !forceRefresh ? await getCache<CachedNewPopularData>(cacheKey) : null;
 
   if (cached && !cached.isStale) {
@@ -208,16 +208,15 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
   // Transform watchlist item (from Plex Discover API)
   const transformWatchlistItem = (item: PlexWatchlistItem): MediaItemView => {
     // Watchlist items use Plex's discover API image format
-    // Thumb paths look like "/library/metadata/xxx/thumb/yyy" and need the discover URL + token
+    // Thumb paths look like "/library/metadata/xxx/thumb/yyy" and go through the Discover image proxy
     const buildDiscoverImageUrl = (path: string | undefined, dimensions?: { width?: number; height?: number }): string => {
       if (!path) return "";
       // Build dimension params
       const dimParams = dimensions
         ? `&width=${dimensions.width || ""}&height=${dimensions.height || ""}`
         : "";
-      // Relative paths starting with / go to Plex Discover API
       if (path.startsWith("/")) {
-        return `${PLEX_DISCOVER_URL}${path}?X-Plex-Token=${token}${dimParams}`;
+        return `/api/plex/discover-image?path=${encodeURIComponent(path)}${dimParams}`;
       }
       // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
       if (path.startsWith('http://') || path.startsWith('https://')) {
