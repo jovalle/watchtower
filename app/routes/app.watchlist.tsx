@@ -31,7 +31,6 @@ import { getUnifiedWatchlist } from '~/lib/watchlist/service.server';
 import { getWatchlistCache, setWatchlistCache } from '~/lib/watchlist/cache.server';
 import { getUserSettings } from '~/lib/settings/storage.server';
 import { env } from '~/lib/env.server';
-import { PLEX_DISCOVER_URL } from '~/lib/plex/constants';
 import type { WatchlistSource, WatchlistCounts, UnifiedWatchlistItem } from '~/lib/watchlist/types';
 
 export const meta: MetaFunction = () => {
@@ -51,7 +50,6 @@ interface WatchlistData {
 
 /** Combined loader data - watchlistData may be a promise on first visit */
 type LoaderData = {
-  token: string;
   traktEnabled: boolean;
   imdbEnabled: boolean;
   watchlistData: WatchlistData;
@@ -79,18 +77,17 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 /**
  * Build image URL for Plex items with proper sizing for crisp display.
- * For relative paths, uses Plex Discover API directly.
+ * For relative paths, uses the server-side Plex Discover image proxy.
  * For absolute URLs (including HTTP with IP addresses), uses the local proxy
  * to avoid mixed content issues when serving over HTTPS.
  */
-function buildPlexImageUrl(thumb: string | undefined, token: string): string {
+function buildPlexImageUrl(thumb: string | undefined): string {
   if (!thumb) return '';
   // Standard poster dimensions (400x600 for 2:3 aspect ratio)
   const width = 400;
   const height = 600;
-  // Relative paths starting with / go to Plex Discover API
   if (thumb.startsWith('/')) {
-    return `${PLEX_DISCOVER_URL}${thumb}?X-Plex-Token=${token}&width=${width}&height=${height}`;
+    return `/api/plex/discover-image?path=${encodeURIComponent(thumb)}&width=${width}&height=${height}`;
   }
   // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
   if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
@@ -128,7 +125,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const imdbWatchlistIds = userSettings?.imdbWatchlistIds || [];
 
   console.log(`[Watchlist] User ${user.id} settings: trakt=${traktUsername}, imdb=${imdbWatchlistIds.join(',') || 'none'}, forceRefresh=${forceRefresh}`);
-  console.log(`[Watchlist] Token types - serverToken: ${serverToken?.substring(0, 8)}..., plexToken: ${plexToken?.substring(0, 8)}...`);
 
   // OPTIMIZATION: Check cache FIRST before expensive library lookups
   // If we have cached data, return it immediately for fast initial load
@@ -150,7 +146,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return json({
-      token: plexToken,
       traktEnabled,
       imdbEnabled,
       watchlistData: {
@@ -244,13 +239,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       traktClient,
       tmdbClient,
       'all',
-      (thumb, t) => {
+      (thumb) => {
         // Local library items use the image proxy
         if (thumb?.startsWith('/library/')) {
           return `/api/plex/image?path=${encodeURIComponent(thumb)}&width=400&height=600`;
         }
-        // Remote Plex Discover items use the public API directly
-        return buildPlexImageUrl(thumb, t);
+        return buildPlexImageUrl(thumb);
       },
       localItemsByGuid,
       localItemsByTitleYear,
@@ -280,7 +274,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Return deferred response - page loads immediately, data streams in
   return defer({
-    token: plexToken,
     traktEnabled,
     imdbEnabled,
     watchlistData: fetchWatchlistData(),
@@ -322,12 +315,10 @@ function WatchlistSkeleton() {
 /** Main watchlist content - receives resolved data */
 function WatchlistContent({
   watchlistData,
-  token: _token,
   traktEnabled,
   imdbEnabled,
 }: {
   watchlistData: WatchlistData;
-  token: string;
   traktEnabled: boolean;
   imdbEnabled: boolean;
 }) {
@@ -784,8 +775,7 @@ function WatchlistContent({
 export default function WatchlistPage() {
   const data = useLoaderData<typeof loader>();
   // Cast to the expected shape - loader returns either json or defer with same structure
-  const { token, traktEnabled, imdbEnabled, watchlistData } = data as unknown as {
-    token: string;
+  const { traktEnabled, imdbEnabled, watchlistData } = data as unknown as {
     traktEnabled: boolean;
     imdbEnabled: boolean;
     watchlistData: WatchlistData | Promise<WatchlistData>;
@@ -797,7 +787,6 @@ export default function WatchlistPage() {
         {(resolvedData) => (
           <WatchlistContent
             watchlistData={resolvedData}
-            token={token}
             traktEnabled={traktEnabled}
             imdbEnabled={imdbEnabled}
           />
