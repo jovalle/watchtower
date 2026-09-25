@@ -30,6 +30,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return json({ error: "Invalid scrobble body" }, { status: 400 });
+  }
   const { ratingKey } = body as ScrobbleRequest;
 
   // Validate required fields

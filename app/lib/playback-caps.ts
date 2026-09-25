@@ -20,7 +20,10 @@ const CONTAINER_PROBES: Record<string, string> = {
 };
 const VIDEO_PROBES: Record<string, string[]> = {
   h264: ['video/mp4; codecs="avc1.640028"'],
-  hevc: ['video/mp4; codecs="hvc1.1.6.L120.90"', 'video/mp4; codecs="hev1.1.6.L120.90"'],
+  hevc: [
+    'video/mp4; codecs="hvc1.1.6.L120.90"',
+    'video/mp4; codecs="hev1.1.6.L120.90"',
+  ],
   av1: ['video/mp4; codecs="av01.0.08M.08"'],
   vp9: ['video/webm; codecs="vp9"', 'video/mp4; codecs="vp09.00.10.08"'],
 };
@@ -51,7 +54,9 @@ export function detectPlaybackCaps(): PlaybackCaps {
 }
 
 export function serializePlaybackCaps(caps: PlaybackCaps): string {
-  return [caps.containers, caps.video, caps.audio].map((list) => list.join(",")).join("|");
+  return [caps.containers, caps.video, caps.audio]
+    .map((list) => list.join(","))
+    .join("|");
 }
 
 /** Detects capabilities and stores them in a cookie for loaders (client-side). */
@@ -61,14 +66,21 @@ export function saveClientPlaybackCaps(): void {
   document.cookie = `${COOKIE_NAME}=${value}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`;
 }
 
-export function parsePlaybackCaps(cookieHeader: string | null): PlaybackCaps | null {
+export function parsePlaybackCaps(
+  cookieHeader: string | null
+): PlaybackCaps | null {
   const raw = cookieHeader
     ?.split(";")
     .map((c) => c.trim())
     .find((c) => c.startsWith(`${COOKIE_NAME}=`))
     ?.slice(COOKIE_NAME.length + 1);
   if (!raw) return null;
-  const parts = decodeURIComponent(raw).split("|");
+  let parts: string[];
+  try {
+    parts = decodeURIComponent(raw).split("|");
+  } catch {
+    return null;
+  }
   if (parts.length !== 3) return null;
   const [containers, video, audio] = parts.map((p) => (p ? p.split(",") : []));
   return { containers, video, audio };
@@ -81,7 +93,7 @@ export function parsePlaybackCaps(cookieHeader: string | null): PlaybackCaps | n
 export function canDirectPlay(
   media: { container?: string; videoCodec?: string; audioCodec?: string },
   caps: PlaybackCaps,
-  doviProfile?: number,
+  doviProfile?: number
 ): boolean {
   if (doviProfile === 5) return false;
   const container = media.container === "m4v" ? "mp4" : media.container;

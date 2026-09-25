@@ -15,11 +15,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
+import { ownedPlaybackSession } from "~/lib/plex/playback-session.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
   const { ratingKey } = params;
   const splat = params["*"] || "start.m3u8";
+  if (!/^[a-zA-Z0-9._/-]+$/.test(splat) || splat.split("/").some((part) => part === "." || part === "..")) return new Response("Invalid playback resource", { status: 400 });
 
   if (!ratingKey) {
     return new Response("Missing rating key", { status: 400 });
@@ -27,6 +29,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Build the Plex URL
   const url = new URL(request.url);
+  const pathSession = /^session\/([^/]+)\//.exec(splat)?.[1];
+  const session = pathSession || url.searchParams.get("session");
+  const owner = session ? ownedPlaybackSession(session, ratingKey, env.PLEX_SERVER_URL, token) : null;
+  if (!owner) return new Response("Playback session expired or unavailable. Reload the player.", { status: 403 });
+  if (pathSession && url.searchParams.has("session") && url.searchParams.get("session") !== pathSession) return new Response("Invalid playback session", { status: 400 });
+  if (!pathSession && !["start.m3u8", "ping", "stop"].includes(splat)) return new Response("Invalid playback resource", { status: 400 });
   const queryString = url.search;
 
   // Determine the path on the Plex server
@@ -36,28 +44,48 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const plexUrl = `${env.PLEX_SERVER_URL}${plexPath}${queryString}`;
 
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  const signal = AbortSignal.any([request.signal, controller.signal]);
   try {
-    // Add Plex token if not in query string
+    // Use the authenticated user's token for every request, including child playlists.
     const fetchUrl = new URL(plexUrl);
-    if (!fetchUrl.searchParams.has("X-Plex-Token")) {
-      fetchUrl.searchParams.set("X-Plex-Token", token);
+    fetchUrl.searchParams.set("X-Plex-Token", token);
+    fetchUrl.searchParams.set("X-Plex-Client-Identifier", owner.clientId);
+
+    if (splat === "start.m3u8") {
+      fetchUrl.searchParams.set("path", `/library/metadata/${ratingKey}`);
+      // Plex caches the media decision by client identity. Negotiate this stream
+      // before starting it, rather than inheriting another player's codec/quality.
+      const decisionUrl = new URL(fetchUrl);
+      decisionUrl.pathname = "/video/:/transcode/universal/decision";
+      const decision = await fetch(decisionUrl, {
+        headers: { Accept: "application/json" },
+        signal,
+      });
+      if (!decision.ok) {
+        return new Response("Plex playback negotiation failed", { status: decision.status });
+      }
+      const { MediaContainer } = await decision.json();
+      if (MediaContainer?.generalDecisionCode >= 2000) {
+        return new Response("Plex cannot play this item with the requested settings", { status: 422 });
+      }
     }
 
     const response = await fetch(fetchUrl.toString(), {
+      signal,
       headers: {
         Accept: "*/*",
+        ...(request.headers.has("Range") ? { Range: request.headers.get("Range")! } : {}),
       },
     });
 
     if (!response.ok) {
-      // Try to get error details from response body
-      const errorBody = await response.text().catch(() => "");
-      console.error(`[HLS Proxy] Plex error: ${response.status} for ${plexPath}`);
-      if (errorBody) {
-        console.error(`[HLS Proxy] Error body: ${errorBody.slice(0, 500)}`);
-      }
-      return new Response(`Plex error: ${response.statusText}`, {
+      return new Response(`Plex error: ${response.status}`, {
         status: response.status,
+        headers: response.headers.has("Content-Range")
+          ? { "Content-Range": response.headers.get("Content-Range")! }
+          : {},
       });
     }
 
@@ -66,14 +94,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // If it's a playlist, we need to rewrite URLs
     if (contentType.includes("mpegurl") || splat.endsWith(".m3u8")) {
       const text = await response.text();
-      const rewritten = rewritePlaylistUrls(text, ratingKey, url.origin);
+      const rewritten = rewritePlaylistUrls(text, ratingKey, url.origin, response.url || fetchUrl.toString());
 
       return new Response(rewritten, {
         status: 200,
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "private, no-store",
         },
       });
     }
@@ -85,118 +113,45 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (segmentContentType) headers.set("Content-Type", segmentContentType);
     if (contentLength) headers.set("Content-Length", contentLength);
+    for (const name of ["Content-Range", "Accept-Ranges"]) {
+      const value = response.headers.get(name);
+      if (value) headers.set(name, value);
+    }
     headers.set("Access-Control-Allow-Origin", "*");
-    headers.set("Cache-Control", "max-age=3600");
+    headers.set("Cache-Control", "private, no-store");
 
     return new Response(response.body, {
       status: response.status,
       headers,
     });
-  } catch (error) {
-    console.error("[HLS Proxy] Error:", error);
-    return new Response("Failed to fetch from Plex", { status: 500 });
+  } catch {
+    return new Response("Failed to fetch from Plex", { status: controller.signal.aborted ? 504 : 502 });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-/**
- * Rewrite URLs in HLS playlists to point to our proxy
- *
- * Key insight: We only rewrite absolute URLs and root-relative URLs.
- * Pure relative URLs (like "00000.ts") should remain relative so the browser
- * resolves them correctly based on the current playlist location.
- */
+/** Resolve every URI against the actual upstream playlist, including redirects. */
 function rewritePlaylistUrls(
   content: string,
   ratingKey: string,
-  origin: string
+  origin: string,
+  upstreamUrl: string
 ): string {
-  const proxyBase = `${origin}/api/plex/hls/${ratingKey}`;
-
-  // Process line by line to handle various URL formats
-  const lines = content.split("\n");
-  const rewrittenLines = lines.map((line) => {
+  const rewrite = (uri: string) => {
+    const url = new URL(uri, upstreamUrl);
+    url.searchParams.delete("X-Plex-Token");
+    const prefix = /^\/video\/:?\/transcode\/universal\//;
+    // Plex also uses /video:/ on some servers.
+    const path = url.pathname.replace(prefix, "").replace(/^\/video:\/transcode\/universal\//, "");
+    if (path.startsWith("/")) throw new Error("Unsupported playlist resource");
+    return `${origin}/api/plex/hls/${encodeURIComponent(ratingKey)}/${path}${url.search}`;
+  };
+  return content.split("\n").map((line) => {
     const trimmed = line.trim();
-
-    // Skip empty lines
-    if (trimmed === "") {
-      return line;
-    }
-
-    // Handle comments/tags - check for URI attributes
-    if (trimmed.startsWith("#")) {
-      if (trimmed.includes('URI="')) {
-        return rewriteUriAttribute(line, ratingKey, origin);
-      }
-      return line;
-    }
-
-    // Handle absolute URLs (http:// or https://) - must rewrite
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-      const url = new URL(trimmed);
-      const path = url.pathname + url.search;
-      return rewritePath(path, proxyBase);
-    }
-
-    // Handle root-relative URLs (start with /) - must rewrite
-    if (trimmed.startsWith("/")) {
-      return rewritePath(trimmed, proxyBase);
-    }
-
-    // Pure relative URLs (like "00000.ts" or "session/abc/file.ts")
-    // Keep them relative - browser will resolve based on current playlist URL
-    return line;
-  });
-
-  return rewrittenLines.join("\n");
-}
-
-/**
- * Rewrite a path to use the proxy
- */
-function rewritePath(path: string, proxyBase: string): string {
-  // /video/:/transcode/universal/... -> /api/plex/hls/:ratingKey/...
-  if (path.startsWith("/video/:/transcode/universal/")) {
-    const subPath = path.slice("/video/:/transcode/universal/".length);
-    return `${proxyBase}/${subPath}`;
-  }
-
-  // Handle paths that start with /video:/ (alternate format)
-  if (path.startsWith("/video:/transcode/universal/")) {
-    const subPath = path.slice("/video:/transcode/universal/".length);
-    return `${proxyBase}/${subPath}`;
-  }
-
-  // Fallback: append path to proxy base (for relative URLs)
-  if (path.startsWith("/")) {
-    return `${proxyBase}${path}`;
-  }
-  return `${proxyBase}/${path}`;
-}
-
-/**
- * Rewrite URI attributes in HLS tags (e.g., #EXT-X-MAP:URI="...")
- * Only rewrites absolute and root-relative URIs; keeps relative URIs as-is.
- */
-function rewriteUriAttribute(
-  line: string,
-  ratingKey: string,
-  origin: string
-): string {
-  const proxyBase = `${origin}/api/plex/hls/${ratingKey}`;
-
-  return line.replace(/URI="([^"]+)"/g, (match, uri) => {
-    // Absolute URL - rewrite
-    if (uri.startsWith("http://") || uri.startsWith("https://")) {
-      const url = new URL(uri);
-      const rewritten = rewritePath(url.pathname + url.search, proxyBase);
-      return `URI="${rewritten}"`;
-    }
-    // Root-relative URL - rewrite
-    if (uri.startsWith("/")) {
-      const rewritten = rewritePath(uri, proxyBase);
-      return `URI="${rewritten}"`;
-    }
-    // Relative URL - keep as-is for browser to resolve
-    return match;
-  });
+    if (!trimmed) return line;
+    return trimmed.startsWith("#")
+      ? line.replace(/URI="([^"]+)"/g, (_, uri: string) => `URI="${rewrite(uri)}"`)
+      : rewrite(trimmed);
+  }).join("\n");
 }
