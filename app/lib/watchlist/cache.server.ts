@@ -35,7 +35,7 @@ function getCacheDir(): string {
  * Create a short hash from a token for use in cache keys.
  */
 function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+  return crypto.createHash("sha256").update(`${env.PLEX_SERVER_URL}:${token}`).digest("hex").slice(0, 12);
 }
 
 /**

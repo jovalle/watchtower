@@ -65,21 +65,16 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 ### Docker (Recommended)
 
 ```bash
-# Clone and configure
+# Clone and launch
 git clone https://github.com/jovalle/watchtower.git
 cd watchtower
-cp .env.example .env
-
-# Edit .env with your Plex credentials
-# SESSION_SECRET=<openssl rand -base64 32>
-# PLEX_SERVER_URL=http://your-plex-server:32400
-# PLEX_TOKEN=<your-plex-token>
-
-# Launch
 docker compose up -d
+
+# Get the one-time setup code
+docker compose logs watchtower | grep -A2 'setup code'
 ```
 
-Open `http://localhost:9001` and sign in with Plex.
+Open `http://localhost:9001`, sign in with the Plex account that owns your server, enter the setup code, and pick a server connection. Watchtower saves the server and its token under `./data/config`, so setup survives restarts. Other users see a "not set up yet" notice until you finish. You can change the server later from **Settings → Server Administration**.
 
 ### Local Development
 
@@ -93,15 +88,18 @@ Open `http://localhost:9001`
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/26a1/512.gif" height="24"> Environment Variables
 
-| Variable          | Required | Description                                                                                   |
-| ----------------- | :------: | --------------------------------------------------------------------------------------------- |
-| `SESSION_SECRET`  |    ✓     | Secret for session cookies (`openssl rand -base64 32`)                                        |
-| `PLEX_SERVER_URL` |    ✓     | Your Plex server URL (e.g., `http://192.168.1.100:32400`)                                     |
-| `PLEX_TOKEN`      |    ✓     | Your Plex authentication token ([how to find](https://support.plex.tv/articles/204059436))    |
-| `PLEX_CLIENT_ID`  |          | Client identifier (default: `watchtower-001`)                                                 |
-| `PORT`            |          | Server port (default: `9001`)                                                                 |
-| `TMDB_API_KEY`    |          | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
-| `TRAKT_CLIENT_ID` |          | Trakt API key to enable Trakt integration (users set their own username in Settings)          |
+All optional. The Plex server and token are configured at `/setup`, not through the environment.
+
+| Variable          | Description                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `SESSION_SECRET`  | Secret for session cookies. Default: generated and saved to `DATA_PATH/config/session-secret` |
+| `DATA_PATH`       | Data directory for config and caches (default: `/data` in production, `./data` otherwise)     |
+| `PLEX_CLIENT_ID`  | Client identifier (default: `watchtower-001`)                                                 |
+| `PORT`            | Server port (default: `9001`)                                                                 |
+| `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
+| `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
+
+Trakt is enabled only by a saved client ID and secret in Settings → Integrations. A legacy `TRAKT_CLIENT_ID` environment value no longer enables requests; move existing credentials into Integrations to keep using Trakt. Users also need a watchlist username for list imports.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f6a8/512.gif" height="24"> Security Note
 
@@ -122,10 +120,7 @@ Open `http://localhost:9001`
 ```bash
 # Build and run manually
 docker build -t watchtower .
-docker run -d -p 9001:9001 \
-  -e SESSION_SECRET="your-secret" \
-  -e PLEX_SERVER_URL="http://your-plex:32400" \
-  -e PLEX_TOKEN="your-token" \
+docker run -d -p 9001:9001 -v "$PWD/data:/data" \
   --name watchtower watchtower
 
 # Or use Docker Compose

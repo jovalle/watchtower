@@ -6,7 +6,12 @@
 import { PlexOauth, type IPlexClientDetails } from "plex-oauth";
 import { createHash } from "crypto";
 import { env } from "~/lib/env.server";
-import { PLEX_HEADERS, PLEX_TV_URL, PLEX_REQUEST_TIMEOUT } from "~/lib/plex/constants";
+import { getServerConfig } from "~/lib/config/server-config.server";
+import {
+  PLEX_HEADERS,
+  PLEX_TV_URL,
+  PLEX_REQUEST_TIMEOUT,
+} from "~/lib/plex/constants";
 
 /**
  * Generate a stable client ID from SESSION_SECRET.
@@ -43,7 +48,9 @@ function createPlexOauth(forwardUrl?: string): PlexOauth {
  * Initiate Plex OAuth login flow.
  * Returns the hosted UI URL and PIN ID for tracking.
  */
-export async function initiateLogin(forwardUrl: string): Promise<{ hostedUrl: string; pinId: number }> {
+export async function initiateLogin(
+  forwardUrl: string
+): Promise<{ hostedUrl: string; pinId: number }> {
   const plexOauth = createPlexOauth(forwardUrl);
 
   const [hostedUrl, pinId] = await plexOauth.requestHostedLoginURL();
@@ -132,38 +139,58 @@ export interface ServerAccessResult {
 }
 
 /**
- * Get the machine identifier of the configured Plex server.
- * This is needed to verify user access via plex.tv resources.
+ * A Plex server the user owns, as advertised by plex.tv.
  */
-async function getServerMachineId(): Promise<string | null> {
-  const serverUrl = env.PLEX_SERVER_URL.replace(/\/$/, "");
+export interface OwnedServer {
+  machineIdentifier: string;
+  name: string;
+  accessToken: string;
+  connections: ServerConnection[];
+}
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), PLEX_REQUEST_TIMEOUT);
+type ServerConnection = { uri: string; local: boolean; relay: boolean };
 
-    // Use the admin token to get server identity
-    const response = await fetch(`${serverUrl}/`, {
+/**
+ * List servers owned by the user, with connection candidates ordered local, remote, relay.
+ */
+export async function listOwnedServers(token: string): Promise<OwnedServer[]> {
+  const response = await fetch(
+    `${PLEX_TV_URL}/api/v2/resources?includeHttps=1&includeRelay=1`,
+    {
       headers: {
         Accept: "application/json",
-        "X-Plex-Token": env.PLEX_TOKEN,
+        "X-Plex-Token": token,
+        "X-Plex-Client-Identifier": getClientId(),
       },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      console.error(`[Server Access] Failed to get server identity: ${response.status}`);
-      return null;
+      signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT),
     }
-
-    const data = await response.json();
-    return data.MediaContainer?.machineIdentifier || null;
-  } catch (error) {
-    console.error(`[Server Access] Error getting server identity:`, error);
-    return null;
+  );
+  if (!response.ok) {
+    throw new Error(`plex.tv resources request failed: ${response.status}`);
   }
+
+  const resources = await response.json();
+  const rank = (c: ServerConnection) => (c.relay ? 2 : c.local ? 0 : 1);
+
+  return (Array.isArray(resources) ? resources : [])
+    .filter(
+      (r) =>
+        r.owned &&
+        String(r.provides).split(",").includes("server") &&
+        r.accessToken
+    )
+    .map((r) => ({
+      machineIdentifier: r.clientIdentifier,
+      name: r.name,
+      accessToken: r.accessToken,
+      connections: (r.connections ?? [])
+        .map((c: ServerConnection) => ({
+          uri: c.uri,
+          local: Boolean(c.local),
+          relay: Boolean(c.relay),
+        }))
+        .sort((a: ServerConnection, b: ServerConnection) => rank(a) - rank(b)),
+    }));
 }
 
 /**
@@ -181,25 +208,36 @@ interface UserServerAccessResult {
  * This works for both server owners and shared users.
  * Returns the server-specific access token which is needed for API calls.
  */
-async function checkUserServerAccess(token: string, targetMachineId: string): Promise<UserServerAccessResult> {
+async function checkUserServerAccess(
+  token: string,
+  targetMachineId: string
+): Promise<UserServerAccessResult> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), PLEX_REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      PLEX_REQUEST_TIMEOUT
+    );
 
     // Query plex.tv for user's available resources (servers)
-    const response = await fetch(`${PLEX_TV_URL}/api/v2/resources?includeHttps=1&includeRelay=1`, {
-      headers: {
-        Accept: "application/json",
-        "X-Plex-Token": token,
-        "X-Plex-Client-Identifier": getClientId(),
-      },
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      `${PLEX_TV_URL}/api/v2/resources?includeHttps=1&includeRelay=1`,
+      {
+        headers: {
+          Accept: "application/json",
+          "X-Plex-Token": token,
+          "X-Plex-Client-Identifier": getClientId(),
+        },
+        signal: controller.signal,
+      }
+    );
 
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error(`[Server Access] Failed to get user resources: ${response.status}`);
+      console.error(
+        `[Server Access] Failed to get user resources: ${response.status}`
+      );
       return { hasAccess: false };
     }
 
@@ -207,8 +245,13 @@ async function checkUserServerAccess(token: string, targetMachineId: string): Pr
 
     // Find if user has access to the target server
     for (const resource of resources) {
-      if (resource.provides === "server" && resource.clientIdentifier === targetMachineId) {
-        console.log(`[Server Access] Found server: ${resource.name} (owned: ${resource.owned})`);
+      if (
+        resource.provides === "server" &&
+        resource.clientIdentifier === targetMachineId
+      ) {
+        console.log(
+          `[Server Access] Found server: ${resource.name} (owned: ${resource.owned})`
+        );
         return {
           hasAccess: true,
           serverName: resource.name,
@@ -236,14 +279,16 @@ async function checkUserServerAccess(token: string, targetMachineId: string): Pr
  * @param token - The user's Plex authentication token
  * @returns Object indicating whether user has access and server info
  */
-export async function verifyServerAccess(token: string): Promise<ServerAccessResult> {
-
+export async function verifyServerAccess(
+  token: string
+): Promise<ServerAccessResult> {
   // Get the machine identifier of our configured server
-  const machineId = await getServerMachineId();
+  const machineId = getServerConfig()?.machineIdentifier;
   if (!machineId) {
     return {
       hasAccess: false,
-      error: "Unable to identify the Plex server. Check PLEX_SERVER_URL and PLEX_TOKEN.",
+      error:
+        "No Plex server is configured yet. The server owner must complete setup.",
     };
   }
   console.log(`[Server Access] Target server machine ID: ${machineId}`);
@@ -252,14 +297,18 @@ export async function verifyServerAccess(token: string): Promise<ServerAccessRes
   const accessCheck = await checkUserServerAccess(token, machineId);
 
   if (!accessCheck.hasAccess) {
-    console.log(`[Server Access] DENIED - User does not have access to this server`);
+    console.log(
+      `[Server Access] DENIED - User does not have access to this server`
+    );
     return {
       hasAccess: false,
       error: "You do not have access to this Plex server.",
     };
   }
 
-  console.log(`[Server Access] GRANTED - ${accessCheck.serverName} (owner: ${accessCheck.isOwner})`);
+  console.log(
+    `[Server Access] GRANTED - ${accessCheck.serverName} (owner: ${accessCheck.isOwner})`
+  );
   return {
     hasAccess: true,
     serverName: accessCheck.serverName,
