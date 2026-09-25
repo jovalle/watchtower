@@ -20,6 +20,8 @@ import type { PlexMediaItem } from "~/lib/plex/types";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
 import { findLibraryMatch } from "~/lib/search";
+import { createSeerrClient } from "~/lib/integrations/seerr.server";
+import { RequestModal, type RequestableItem } from "~/components/media/RequestModal";
 
 export const meta: MetaFunction = () => {
   return [
@@ -69,6 +71,7 @@ interface LoaderData {
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
   extraRows: ExtraRow[];
+  seerrEnabled: boolean;
 }
 
 interface RowItem {
@@ -78,6 +81,7 @@ interface RowItem {
   imageUrl: string;
   href: string;
   ratingKey?: string; // Set when the title is in the library
+  tmdb?: { id: number; type: "movie" | "show"; posterUrl: string | null }; // Set for titles not in the library
 }
 
 interface ExtraRow {
@@ -174,6 +178,7 @@ async function getTrendingRow(client: PlexClient, token: string): Promise<RowIte
         year: rec.releaseDate?.slice(0, 4),
         imageUrl: rec.backdropUrl || "",
         href: rec.tmdbUrl,
+        tmdb: { id: rec.id, type: rec.type, posterUrl: rec.posterUrl },
       };
     })
   );
@@ -206,9 +211,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const respond = async (data: CachedHomeData) => {
-    const [trending, collections] = await Promise.all([
+    const [trending, collections, seerr] = await Promise.all([
       prefs.showTrending && !prefs.discoveryDisabled ? getTrendingRow(extrasClient, token) : [],
       prefs.showCollections ? getCollectionRows(extrasClient, token) : [],
+      createSeerrClient(),
     ]);
     const extraRows: ExtraRow[] = [
       ...(trending.length > 0 ? [{ title: "Trending Now", items: trending }] : []),
@@ -219,6 +225,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       continueWatching: prefs.showContinueWatching ? data.continueWatching : [],
       recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded : [],
       extraRows,
+      seerrEnabled: seerr !== null,
     });
   };
   const url = new URL(request.url);
@@ -383,8 +390,9 @@ interface ContextMenuState {
 }
 
 export default function AppIndex() {
-  const { billboardCandidates, continueWatching, recentlyAdded, extraRows } =
+  const { billboardCandidates, continueWatching, recentlyAdded, extraRows, seerrEnabled } =
     useLoaderData<typeof loader>();
+  const [requestItem, setRequestItem] = useState<RequestableItem | null>(null);
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
@@ -667,24 +675,27 @@ export default function AppIndex() {
 
         {extraRows.map((row) => (
           <MediaRow key={row.title} title={row.title}>
-            {row.items.map(({ ratingKey, ...item }) => (
+            {row.items.map(({ ratingKey, tmdb, ...item }) => (
               <MediaCard
                 key={item.key}
                 imageUrl={item.imageUrl}
                 title={item.title}
                 year={item.year}
                 badge={ratingKey ? undefined : "Not in library"}
-                onClick={() =>
-                  ratingKey
-                    ? navigate(item.href)
-                    : window.open(item.href, "_blank", "noopener,noreferrer")
-                }
+                onClick={() => {
+                  if (ratingKey) navigate(item.href);
+                  else if (seerrEnabled && tmdb)
+                    setRequestItem({ tmdbId: tmdb.id, type: tmdb.type, title: item.title, year: item.year, posterUrl: tmdb.posterUrl, tmdbUrl: item.href });
+                  else window.open(item.href, "_blank", "noopener,noreferrer");
+                }}
                 onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
               />
             ))}
           </MediaRow>
         ))}
       </Container>
+
+      {requestItem && <RequestModal item={requestItem} onClose={() => setRequestItem(null)} />}
 
       {/* Context Menu */}
       {contextMenu.isOpen && contextMenu.item && (

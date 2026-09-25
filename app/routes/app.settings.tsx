@@ -22,6 +22,9 @@ import {
   getDefaultValidationCache,
 } from "~/lib/settings/storage.server";
 import type { UserSettings, UserPreferences, ValidationCache } from "~/lib/settings/types";
+import { getIntegrations, toPublicIntegrations } from "~/lib/integrations/storage.server";
+import type { PublicIntegrationsConfig } from "~/lib/integrations/types";
+import { IntegrationsSection } from "~/components/settings/IntegrationsSection";
 
 const PREFERENCE_GROUPS: Array<{
   title: string;
@@ -144,6 +147,7 @@ interface LoaderData {
   validationCache: ValidationCache;
   isOwner: boolean;
   plexServer: { name: string; url: string } | null;
+  integrations: PublicIntegrationsConfig | null;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -158,6 +162,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     validationCache: validationCache ?? getDefaultValidationCache(),
     isOwner: ownerStatus,
     plexServer: config?.adminUserId === user.id ? { name: config.serverName, url: config.serverUrl } : null,
+    integrations: ownerStatus ? toPublicIntegrations(await getIntegrations()) : null,
   });
 }
 
@@ -166,7 +171,7 @@ type SaveStatus = "idle" | "saving" | "success" | "error";
 type ClearCacheStatus = "idle" | "confirming" | "clearing" | "success" | "error";
 
 export default function SettingsPage() {
-  const { settings, validationCache, isOwner, plexServer } = useLoaderData<typeof loader>();
+  const { settings, validationCache, isOwner, plexServer, integrations } = useLoaderData<typeof loader>();
 
   // Track the "saved" values to detect changes
   const savedTraktUsername = settings.traktUsername ?? "";
@@ -630,6 +635,8 @@ export default function SettingsPage() {
       </section>
 
       <PreferencesSection initial={settings.preferences} />
+
+      {integrations && <IntegrationsSection initial={integrations} />}
 
       {/* Server Administration Section - Only for server owner */}
       {isOwner && (
