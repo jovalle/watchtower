@@ -9,8 +9,10 @@ import { LRUCache } from "lru-cache";
 import { env } from "~/lib/env.server";
 import { getIntegrations } from "~/lib/integrations/storage.server";
 import type { TraktConnectionStatus } from "./types";
+import { version } from "../../../package.json";
 
 const TRAKT_API = "https://api.trakt.tv";
+const TRAKT_AUTH = "https://auth.trakt.tv";
 const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
 export interface TraktApp {
@@ -36,11 +38,11 @@ export async function traktFetch(
   clientId: string,
   init: { method?: string; body?: unknown; accessToken?: string } = {},
 ): Promise<Response> {
-  return fetch(`${TRAKT_API}${pathname}`, {
+  return fetch(`${pathname.startsWith("/oauth/") ? TRAKT_AUTH : TRAKT_API}${pathname}`, {
     method: init.method ?? (init.body ? "POST" : "GET"),
     headers: {
       "Content-Type": "application/json",
-      "User-Agent": "Watchtower",
+      "User-Agent": `Watchtower/${version}`,
       "trakt-api-version": "2",
       "trakt-api-key": clientId,
       ...(init.accessToken ? { Authorization: `Bearer ${init.accessToken}` } : {}),
@@ -104,8 +106,20 @@ function tokensToAccount(tokens: TokenResponse, username: string, scrobble: bool
   };
 }
 
+// Refresh tokens are single-use, so concurrent lookups for one user share a single read-or-refresh.
+const tokenRequests = new Map<number, Promise<string | null>>();
+
 /** Returns a valid access token for the user, refreshing it if it is about to expire. */
-export async function getTraktAccessToken(userId: number, app: TraktApp): Promise<string | null> {
+export function getTraktAccessToken(userId: number, app: TraktApp): Promise<string | null> {
+  let pending = tokenRequests.get(userId);
+  if (!pending) {
+    pending = readOrRefreshToken(userId, app).finally(() => tokenRequests.delete(userId));
+    tokenRequests.set(userId, pending);
+  }
+  return pending;
+}
+
+async function readOrRefreshToken(userId: number, app: TraktApp): Promise<string | null> {
   const account = await getTraktAccount(userId);
   if (!account) return null;
   if (account.expiresAt - Date.now() > REFRESH_MARGIN_MS) return account.accessToken;
