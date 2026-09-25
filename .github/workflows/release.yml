@@ -42,7 +42,7 @@ jobs:
           bun-version: latest
 
       - name: Install semantic-release
-        run: bun add -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/exec conventional-changelog-conventionalcommits
+        run: bun add -g semantic-release @semantic-release/git @semantic-release/github @semantic-release/exec conventional-changelog-conventionalcommits git-cliff@2.14.2
 
       - name: Semantic Release
         id: semantic
