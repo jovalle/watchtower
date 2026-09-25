@@ -47,6 +47,7 @@ interface SubtitleTrack {
   languageCode?: string;
   codec?: string;
   selected?: boolean;
+  sidecarUrl?: string;
 }
 
 interface EpisodeInfo {
@@ -99,6 +100,9 @@ export interface VideoPlayerProps {
   };
   audioTracks?: AudioTrack[];
   subtitleTracks?: SubtitleTrack[];
+  partId?: number;
+  /** Subtitle stream Plex is burning into the current stream, if any. */
+  burnedSubtitleId?: number | null;
   episodes?: EpisodeInfo[];
   seasonTitle?: string;
   seasonNumber?: number;
@@ -135,6 +139,8 @@ export function VideoPlayer({
   mediaInfo,
   audioTracks = [],
   subtitleTracks = [],
+  partId,
+  burnedSubtitleId = null,
   episodes = [],
   seasonTitle,
   seasonNumber,
@@ -183,6 +189,14 @@ export function VideoPlayer({
   const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<number | null>(
     subtitleTracks.find((t) => t.selected)?.id || null
   );
+  const [trackError, setTrackError] = useState<string | null>(null);
+  const sidecarId =
+    burnedSubtitleId === null
+      ? subtitleTracks.find(
+          (t) => t.id === selectedSubtitleTrack && t.sidecarUrl
+        )?.id
+      : undefined;
+  const sidecarTrack = subtitleTracks.find((t) => t.id === sidecarId);
 
   // Markers / next episode / PiP state
   const [hasEnded, setHasEnded] = useState(false);
@@ -499,6 +513,71 @@ export function VideoPlayer({
       }, 500);
     }
   }, [navigate, quality, ratingKey]);
+
+  /** Saves the pick on Plex, then restarts the stream unless a sidecar subtitle can switch in place. */
+  const handleTrackSelect = useCallback(
+    async (kind: "audio" | "subtitle", id: number) => {
+      const previous =
+        kind === "audio" ? selectedAudioTrack : selectedSubtitleTrack;
+      if (!partId || id === (previous ?? 0)) return;
+      const setSelected =
+        kind === "audio" ? setSelectedAudioTrack : setSelectedSubtitleTrack;
+      setTrackError(null);
+      setSelected(id || null);
+
+      const response = await fetch("/api/plex/streams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partId,
+          [kind === "audio" ? "audioStreamID" : "subtitleStreamID"]: id,
+        }),
+      }).catch(() => null);
+      if (!response?.ok) {
+        setSelected(previous);
+        setTrackError("Couldn't change the track. Try again.");
+        return;
+      }
+
+      const next = subtitleTracks.find((t) => t.id === id);
+      if (
+        kind === "audio" ||
+        burnedSubtitleId !== null ||
+        (id !== 0 && !next?.sidecarUrl)
+      ) {
+        setShowSettingsPanel(false);
+        reloadStreamAtPosition(
+          videoRef.current?.currentTime || resumePositionSeconds,
+          true
+        );
+      }
+    },
+    [
+      partId,
+      selectedAudioTrack,
+      selectedSubtitleTrack,
+      subtitleTracks,
+      burnedSubtitleId,
+      reloadStreamAtPosition,
+      resumePositionSeconds,
+    ]
+  );
+
+  // Show only the chosen sidecar; hls.js can add text tracks of its own.
+  useEffect(() => {
+    const tracks = videoRef.current?.textTracks;
+    // jsdom's TextTrackList is not an EventTarget.
+    if (typeof tracks?.addEventListener !== "function") return;
+    const apply = () => {
+      for (const track of Array.from(tracks)) {
+        track.mode =
+          track.id === `sidecar-${sidecarId}` ? "showing" : "disabled";
+      }
+    };
+    apply();
+    tracks.addEventListener("addtrack", apply);
+    return () => tracks.removeEventListener("addtrack", apply);
+  }, [sidecarId]);
 
   /**
    * Check if a time position is within the buffered range.
@@ -1217,7 +1296,18 @@ export function VideoPlayer({
         poster={posterUrl}
         onClick={togglePlay}
         aria-label={`Video player: ${title}`}
-      />
+      >
+        {sidecarTrack && (
+          <track
+            key={sidecarTrack.id}
+            id={`sidecar-${sidecarTrack.id}`}
+            kind="subtitles"
+            src={sidecarTrack.sidecarUrl}
+            srcLang={sidecarTrack.languageCode}
+            label={sidecarTrack.displayTitle}
+          />
+        )}
+      </video>
 
       {/* Loading spinner with back button */}
       {isLoading && !error && (
@@ -1642,11 +1732,7 @@ export function VideoPlayer({
                 {audioTracks.map((track) => (
                   <button
                     key={track.id}
-                    onClick={() => {
-                      setSelectedAudioTrack(track.id);
-                      // Note: Actually switching audio tracks requires re-requesting the stream with different parameters
-                      // For now, we track the selection locally
-                    }}
+                    onClick={() => handleTrackSelect("audio", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                       selectedAudioTrack === track.id ? "text-white" : "text-white/70"
                     }`}
@@ -1670,7 +1756,7 @@ export function VideoPlayer({
             {settingsTab === "subtitles" && (
               <div>
                 <button
-                  onClick={() => setSelectedSubtitleTrack(null)}
+                  onClick={() => handleTrackSelect("subtitle", 0)}
                   className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                     selectedSubtitleTrack === null ? "text-white" : "text-white/70"
                   }`}
@@ -1681,10 +1767,7 @@ export function VideoPlayer({
                 {subtitleTracks.map((track) => (
                   <button
                     key={track.id}
-                    onClick={() => {
-                      setSelectedSubtitleTrack(track.id);
-                      // Note: Actually switching subtitles requires re-requesting the stream
-                    }}
+                    onClick={() => handleTrackSelect("subtitle", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                       selectedSubtitleTrack === track.id ? "text-white" : "text-white/70"
                     }`}
@@ -1701,6 +1784,14 @@ export function VideoPlayer({
               </div>
             )}
           </div>
+          {trackError && (
+            <p
+              role="alert"
+              className="border-t border-white/10 px-3 py-2 text-xs text-red-400"
+            >
+              {trackError}
+            </p>
+          )}
         </div>
       )}
 
