@@ -377,6 +377,28 @@ export class PlexClient {
   }
 
   /**
+   * Get collections the server owner promoted to Home in Plex (Manage Recommendations).
+   */
+  async getPromotedCollections(): Promise<PlexResult<Array<{ title: string; items: PlexMediaItem[] }>>> {
+    const result = await this.request<{
+      MediaContainer: {
+        Hub?: Array<{ title: string; hubIdentifier?: string; promoted?: boolean; Metadata?: PlexMediaItem[] }>;
+      };
+    }>("/hubs?count=20");
+
+    if (!result.success) {
+      return result;
+    }
+
+    return {
+      success: true,
+      data: (result.data.MediaContainer.Hub || [])
+        .filter((hub) => hub.hubIdentifier?.startsWith("custom.collection") && hub.Metadata?.length)
+        .map((hub) => ({ title: hub.title, items: hub.Metadata || [] })),
+    };
+  }
+
+  /**
    * Get every episode of a show in airing order.
    */
   async getAllLeaves(showRatingKey: string): Promise<PlexResult<PlexMediaItem[]>> {
