@@ -479,9 +479,15 @@ export class PlexClient {
       offsetSeconds?: number;
       quality?: QualityProfile;
       forceTranscode?: boolean;
+      subtitles?: "burn" | "none";
     } = {}
   ): PlexPlaybackInfo {
-    const { offsetSeconds = 0, quality, forceTranscode = false } = options;
+    const {
+      offsetSeconds = 0,
+      quality,
+      forceTranscode = false,
+      subtitles = "none",
+    } = options;
     const selectedQuality = quality || QUALITY_PROFILES[0];
     const useDirectPlay = Boolean(selectedQuality.isOriginal) && !forceTranscode;
 
@@ -495,6 +501,8 @@ export class PlexClient {
     params.set("copyts", "1");
     params.set("mediaIndex", "0");
     params.set("partIndex", "0");
+    // Text subtitles are delivered as a WebVTT sidecar, so Plex only renders ones it must burn in.
+    params.set("subtitles", subtitles);
 
     if (useDirectPlay) {
       // Direct play/stream mode
@@ -550,6 +558,47 @@ export class PlexClient {
       availableQualities: QUALITY_PROFILES,
       method: useDirectPlay ? "direct_play" : "transcode",
     };
+  }
+
+  /**
+   * Saves this user's audio/subtitle choice for a media part on the server, as Plex apps do.
+   * subtitleStreamID 0 turns subtitles off.
+   */
+  async setStreamSelection(
+    partId: number,
+    selection: { audioStreamID?: number; subtitleStreamID?: number }
+  ): Promise<PlexResult<void>> {
+    const params = new URLSearchParams({ allParts: "1" });
+    for (const [key, value] of Object.entries(selection)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    try {
+      const response = await fetch(
+        `${this.serverUrl}/library/parts/${partId}?${params.toString()}`,
+        {
+          method: "PUT",
+          headers: this.getHeaders(),
+          signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT),
+        }
+      );
+      if (response.ok) return { success: true, data: undefined };
+      return {
+        success: false,
+        error: {
+          code: response.status,
+          message: `HTTP ${response.status}: ${response.statusText}`,
+          status: response.status,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: -1,
+          message: error instanceof Error ? error.message : "Unknown error occurred",
+        },
+      };
+    }
   }
 
   /**
