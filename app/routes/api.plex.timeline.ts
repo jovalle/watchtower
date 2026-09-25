@@ -11,6 +11,8 @@ import { PlexClient } from "~/lib/plex/client.server";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
 import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { scrobbleTimeline } from "~/lib/trakt/scrobble.server";
 
 interface TimelineRequest {
   ratingKey: string;
@@ -77,6 +79,13 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
   // Invalidate user's home cache when playback stops so Continue Watching updates immediately
   if (state === "stopped") {
     await invalidateCache(getUserCacheKey("home", token));
+  }
+
+  const user = await getCurrentUser(request);
+  if (user) {
+    scrobbleTimeline({ userId: user.id, client, ratingKey, state, time, duration }).catch((error) =>
+      console.error("[Trakt] Scrobble failed:", error)
+    );
   }
 
   return json({ success: true });
