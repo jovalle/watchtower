@@ -18,6 +18,14 @@ export type TraktResult<T> =
   | { success: true; data: T }
   | { success: false; error: TraktError };
 
+/** A user's Trakt account link as shown in settings. */
+export interface TraktConnectionStatus {
+  available: boolean; // Server owner has configured Trakt app credentials
+  connected: boolean;
+  username: string | null;
+  scrobble: boolean;
+}
+
 /**
  * Trakt movie IDs object.
  */

@@ -60,6 +60,31 @@ export function IntegrationsSection({ initial }: { initial: PublicIntegrationsCo
     }
   };
 
+  const [traktId, setTraktId] = useState(initial.trakt?.clientId ?? "");
+  const [traktSecret, setTraktSecret] = useState("");
+  const [traktResult, setTraktResult] = useState<Result>(null);
+
+  const runTrakt = async (intent: "test" | "save", payload: Record<string, unknown> = {}) => {
+    setBusy(`trakt-${intent}`);
+    setTraktResult(null);
+    try {
+      const data = await post({ intent, service: "trakt", clientId: traktId, clientSecret: traktSecret, ...payload });
+      if (data.ok) {
+        if (data.integrations) {
+          setConfig(data.integrations);
+          setTraktSecret("");
+        }
+        setTraktResult({ ok: true, message: data.message || (payload.clientId === "" ? "Trakt removed" : "Trakt saved") });
+      } else {
+        setTraktResult({ ok: false, message: data.error || "Failed" });
+      }
+    } catch {
+      setTraktResult({ ok: false, message: "Request failed" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <section className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6">
       <Typography variant="subtitle" as="h2" className="mb-2">
@@ -124,6 +149,58 @@ export function IntegrationsSection({ initial }: { initial: PublicIntegrationsCo
           )}
         </div>
         <ResultLine result={seerrResult} />
+      </div>
+
+      <div className="mt-8 space-y-3">
+        <Typography variant="body" className="font-medium text-foreground-primary">
+          Trakt
+        </Typography>
+        <Typography variant="caption" className="block text-foreground-muted">
+          Lets users connect their Trakt accounts for scrobbling. Create an app at trakt.tv/oauth/applications with the
+          redirect URI <code>urn:ietf:wg:oauth:2.0:oob</code>, then paste its client ID and secret.
+        </Typography>
+        <input
+          type="text"
+          value={traktId}
+          onChange={(e) => setTraktId(e.target.value)}
+          placeholder="Client ID"
+          aria-label="Trakt client ID"
+          autoComplete="off"
+          className={inputClass}
+        />
+        <input
+          type="password"
+          value={traktSecret}
+          onChange={(e) => setTraktSecret(e.target.value)}
+          placeholder={config.trakt?.hasClientSecret ? "Saved; leave blank to keep" : "Client secret"}
+          aria-label="Trakt client secret"
+          autoComplete="off"
+          className={inputClass}
+        />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => runTrakt("test")} disabled={busy !== null || !traktId} className={buttonClass}>
+            {busy === "trakt-test" && <Loader2 className="h-4 w-4 animate-spin" />}
+            Test
+          </button>
+          <button type="button" onClick={() => runTrakt("save")} disabled={busy !== null || !traktId} className={buttonClass}>
+            {busy === "trakt-save" && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save
+          </button>
+          {config.trakt && (
+            <button
+              type="button"
+              onClick={() => {
+                setTraktId("");
+                runTrakt("save", { clientId: "" });
+              }}
+              disabled={busy !== null}
+              className={buttonClass}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        <ResultLine result={traktResult} />
       </div>
     </section>
   );
