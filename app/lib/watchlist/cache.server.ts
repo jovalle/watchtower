@@ -14,8 +14,8 @@ import type { UnifiedWatchlistItem, WatchlistCounts } from "./types";
 const CACHE_DIR = "watchlist";
 const CACHE_FRESH_TTL_MS = 5 * 60 * 1000; // 5 minutes - considered fresh
 const CACHE_STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours - serve stale but trigger refresh
-// Version 1 image URLs embedded the plex.tv token.
-const CACHE_VERSION = 2;
+// Version 4 refreshes older snapshots that may contain only the first Plex page.
+const CACHE_VERSION = 4;
 
 interface WatchlistCacheData {
   version: number;
@@ -80,7 +80,9 @@ export interface WatchlistCacheResult {
  * Returns stale data with isStale=true if cache is old but still usable.
  * Returns null only if cache doesn't exist or is too old.
  */
-export async function getWatchlistCache(token: string): Promise<WatchlistCacheResult | null> {
+export async function getWatchlistCache(
+  token: string
+): Promise<WatchlistCacheResult | null> {
   try {
     const data = await fs.readFile(getCachePath(token), "utf-8");
     const cache = JSON.parse(data) as WatchlistCacheData;
@@ -95,12 +97,16 @@ export async function getWatchlistCache(token: string): Promise<WatchlistCacheRe
     const ageSeconds = Math.round((Date.now() - cache.fetchedAt) / 1000);
 
     if (!isUsable) {
-      console.log(`[WatchlistCache] Cache too old (${ageSeconds}s), will refresh`);
+      console.log(
+        `[WatchlistCache] Cache too old (${ageSeconds}s), will refresh`
+      );
       return null;
     }
 
     console.log(
-      `[WatchlistCache] Cache ${isFresh ? "hit" : "stale"} - ${cache.items.length} items, age: ${ageSeconds}s`
+      `[WatchlistCache] Cache ${isFresh ? "hit" : "stale"} - ${
+        cache.items.length
+      } items, age: ${ageSeconds}s`
     );
 
     return {
