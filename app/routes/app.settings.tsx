@@ -25,6 +25,9 @@ import type { UserSettings, UserPreferences, ValidationCache } from "~/lib/setti
 import { getIntegrations, toPublicIntegrations } from "~/lib/integrations/storage.server";
 import type { PublicIntegrationsConfig } from "~/lib/integrations/types";
 import { IntegrationsSection } from "~/components/settings/IntegrationsSection";
+import { TraktConnectSection } from "~/components/settings/TraktConnectSection";
+import { getTraktConnectionStatus } from "~/lib/trakt/oauth.server";
+import type { TraktConnectionStatus } from "~/lib/trakt/types";
 
 const PREFERENCE_GROUPS: Array<{
   title: string;
@@ -148,6 +151,7 @@ interface LoaderData {
   isOwner: boolean;
   plexServer: { name: string; url: string } | null;
   integrations: PublicIntegrationsConfig | null;
+  trakt: TraktConnectionStatus;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -163,6 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isOwner: ownerStatus,
     plexServer: config?.adminUserId === user.id ? { name: config.serverName, url: config.serverUrl } : null,
     integrations: ownerStatus ? toPublicIntegrations(await getIntegrations()) : null,
+    trakt: await getTraktConnectionStatus(user.id),
   });
 }
 
@@ -171,7 +176,7 @@ type SaveStatus = "idle" | "saving" | "success" | "error";
 type ClearCacheStatus = "idle" | "confirming" | "clearing" | "success" | "error";
 
 export default function SettingsPage() {
-  const { settings, validationCache, isOwner, plexServer, integrations } = useLoaderData<typeof loader>();
+  const { settings, validationCache, isOwner, plexServer, integrations, trakt } = useLoaderData<typeof loader>();
 
   // Track the "saved" values to detect changes
   const savedTraktUsername = settings.traktUsername ?? "";
@@ -635,6 +640,8 @@ export default function SettingsPage() {
       </section>
 
       <PreferencesSection initial={settings.preferences} />
+
+      <TraktConnectSection initial={trakt} />
 
       {integrations && <IntegrationsSection initial={integrations} />}
 

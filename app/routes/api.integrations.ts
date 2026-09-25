@@ -1,7 +1,7 @@
 /**
  * Server-owner integration settings.
  * GET  /api/integrations - current settings without secrets
- * POST /api/integrations - { intent: "save" | "test" | "detect", service: "seerr", url?, apiKey? }
+ * POST /api/integrations - { intent: "save" | "test" | "detect", service: "seerr" | "trakt", ...fields }
  */
 
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
@@ -13,6 +13,7 @@ import {
   normalizeServiceUrl,
 } from "~/lib/integrations/storage.server";
 import { SeerrClient, detectSeerrUrl } from "~/lib/integrations/seerr.server";
+import { traktFetch } from "~/lib/trakt/oauth.server";
 
 async function requireOwner(request: Request) {
   await requirePlexToken(request);
@@ -64,6 +65,31 @@ export async function action({ request }: ActionFunctionArgs) {
         return json({ ok: false, error: error instanceof Error ? error.message : "Connection failed" });
       }
       await saveIntegrations({ seerr: { url, apiKey } });
+      return json({ ok: true, integrations: toPublicIntegrations(await getIntegrations()) });
+    }
+  }
+
+  if (service === "trakt") {
+    const current = (await getIntegrations()).trakt;
+    const clientId = str("clientId");
+    const clientSecret = str("clientSecret") || current?.clientSecret || "";
+    if (intent === "save" && !clientId) {
+      await saveIntegrations({ trakt: undefined });
+      return json({ ok: true, integrations: toPublicIntegrations(await getIntegrations()) });
+    }
+    if (!clientId) return json({ ok: false, error: "Enter the Trakt client ID" }, { status: 400 });
+
+    if (intent === "test" || intent === "save") {
+      // Requesting a device code is the only check Trakt offers without a user; it validates the client ID.
+      const response = await traktFetch("/oauth/device/code", clientId, { body: { client_id: clientId } }).catch(
+        () => null
+      );
+      if (!response?.ok) {
+        return json({ ok: false, error: `Trakt rejected the client ID${response ? ` (HTTP ${response.status})` : ""}` });
+      }
+      if (intent === "test") return json({ ok: true, message: "Client ID accepted by Trakt" });
+      if (!clientSecret) return json({ ok: false, error: "Enter the Trakt client secret" }, { status: 400 });
+      await saveIntegrations({ trakt: { clientId, clientSecret } });
       return json({ ok: true, integrations: toPublicIntegrations(await getIntegrations()) });
     }
   }
