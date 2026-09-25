@@ -39,9 +39,13 @@ describe('SeerrClient', () => {
     expect(await new SeerrClient('http://seerr:5055', 'key').findUserIdByPlexId(12345)).toBeNull();
   });
 
-  it('maps Seerr media status codes', async () => {
-    stubFetch(() => ({ mediaInfo: { status: 5 } }));
-    expect(await new SeerrClient('http://seerr:5055', 'key').getStatus('movie', 603)).toBe('available');
+  it.each([
+    [5, 'available'],
+    [6, 'blocklisted'],
+    [7, 'unknown'],
+  ])('maps Seerr media status %i to %s', async (code, expected) => {
+    stubFetch(() => ({ mediaInfo: { status: code } }));
+    expect(await new SeerrClient('http://seerr:5055', 'key').getStatus('movie', 603)).toBe(expected);
   });
 });
 
