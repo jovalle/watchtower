@@ -15,6 +15,7 @@ import {
   useLocation,
 } from "@remix-run/react";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { Logo } from "~/components/ui";
 import { getPlexToken, getSession } from "~/lib/auth/session.server";
 import { getPlexUser, type PlexUser } from "~/lib/auth/plex.server";
 
@@ -135,7 +136,7 @@ export default function VoteLayout() {
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
           <div className="flex items-center shrink-0">
             <Link to="/private" className="flex items-center">
-              <img src="/logo.png" alt="Watchtower" className="h-7 w-auto" />
+              <Logo />
             </Link>
           </div>
 

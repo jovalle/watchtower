@@ -3,3 +3,5 @@ export { Button } from "./Button";
 export { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 export { ProxiedImage } from "./ProxiedImage";
 export { FilterDropdown, type FilterOption } from "./FilterDropdown";
+export { Logo } from "./Logo";
+export { Toaster, toast } from "./Toast";
