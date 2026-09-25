@@ -5,6 +5,7 @@
 
 import type { TraktResult, TraktWatchlistItem } from "./types";
 import { env } from "~/lib/env.server";
+import { getIntegrations } from "~/lib/integrations/storage.server";
 
 const TRAKT_BASE_URL = "https://api.trakt.tv";
 const TRAKT_REQUEST_TIMEOUT = 10000; // 10 seconds
@@ -124,22 +125,25 @@ export class TraktClient {
   }
 }
 
+/** The Integrations setting takes precedence over the legacy TRAKT_CLIENT_ID env var. */
+async function getTraktClientId(): Promise<string | null> {
+  const { trakt } = await getIntegrations();
+  return trakt?.clientId || env.TRAKT_CLIENT_ID;
+}
+
 /**
  * Create a TraktClient if configured.
  * Returns null if Trakt is not configured.
  */
-export function createTraktClient(): TraktClient | null {
-  const clientId = env.TRAKT_CLIENT_ID;
-  if (!clientId) {
-    return null;
-  }
-  return new TraktClient(clientId);
+export async function createTraktClient(): Promise<TraktClient | null> {
+  const clientId = await getTraktClientId();
+  return clientId ? new TraktClient(clientId) : null;
 }
 
 /**
  * Check if Trakt integration is available (client ID configured).
  * Actual per-user enablement depends on user settings.
  */
-export function isTraktAvailable(): boolean {
-  return !!env.TRAKT_CLIENT_ID;
+export async function isTraktAvailable(): Promise<boolean> {
+  return !!(await getTraktClientId());
 }
