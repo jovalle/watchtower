@@ -19,6 +19,7 @@ import type { QualityProfile, PlaybackMethod, PlexStream } from "~/lib/plex/type
 import { getPlaybackPref } from "~/lib/playback-prefs";
 import { parsePlaybackCaps, canDirectPlay } from "~/lib/playback-caps";
 import { toPlaybackMarkers, findNextEpisode, type PlaybackMarker } from "~/lib/plex/markers";
+import { canSidecar, selectedTrackNeeds } from "~/lib/plex/tracks";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
 
@@ -39,6 +40,7 @@ interface SubtitleTrack {
   languageCode?: string;
   codec?: string;
   selected?: boolean;
+  sidecarUrl?: string;
 }
 
 interface EpisodeInfo {
@@ -78,6 +80,8 @@ interface LoaderData {
   };
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  partId?: number;
+  burnedSubtitleId: number | null;
   episodes?: EpisodeInfo[];
   markers: PlaybackMarker[];
   nextEpisode: NextEpisodeInfo | null;
@@ -182,12 +186,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const media = metadata.Media?.[0];
   const caps = parsePlaybackCaps(cookieHeader);
   const videoStream = media?.Part?.[0]?.Stream?.find((s) => s.streamType === 1);
+  // Browsers can't burn in subtitles or pick a non-default audio track from a file, so those need HLS.
+  const trackNeeds = selectedTrackNeeds(media?.Part?.[0]?.Stream ?? []);
   const directFile =
     !!caps &&
     !!media &&
     qualityId === "original" &&
     !forceTranscodeParam &&
     !useStoredTranscode &&
+    trackNeeds.burnSubtitleId === null &&
+    !trackNeeds.nonDefaultAudio &&
     canDirectPlay(media, caps, videoStream?.DOVIProfile);
 
   // Force transcoding for mobile devices to ensure compatible H.264/AAC format
@@ -203,6 +211,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     offsetSeconds: resumeSeconds,
     quality: selectedQuality,
     forceTranscode,
+    subtitles: trackNeeds.burnSubtitleId !== null ? "burn" : "none",
   });
 
   // Logging
@@ -246,6 +255,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       languageCode: s.languageCode,
       codec: s.codec,
       selected: s.selected,
+      sidecarUrl: canSidecar(s) ? `/api/plex/subtitles/${s.id}` : undefined,
     }));
 
   // Fetch episodes if this is a TV episode
@@ -320,6 +330,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
     audioTracks,
     subtitleTracks,
+    partId: part?.id,
+    burnedSubtitleId: trackNeeds.burnSubtitleId,
     episodes,
     markers: toPlaybackMarkers(metadata.Marker),
     nextEpisode,
@@ -348,6 +360,8 @@ export default function WatchPage() {
     mediaInfo,
     audioTracks,
     subtitleTracks,
+    partId,
+    burnedSubtitleId,
     episodes,
     markers,
     nextEpisode,
@@ -380,6 +394,8 @@ export default function WatchPage() {
         mediaInfo={mediaInfo}
         audioTracks={audioTracks}
         subtitleTracks={subtitleTracks}
+        partId={partId}
+        burnedSubtitleId={burnedSubtitleId}
         episodes={episodes}
         seasonTitle={parentTitle}
         seasonNumber={parentIndex}

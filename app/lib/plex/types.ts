@@ -331,6 +331,8 @@ export interface PlexStream {
   selected?: boolean;
   default?: boolean;
   bitrate?: number;
+  // Subtitle-specific: set for external subtitle files (/library/streams/{id})
+  key?: string;
   // Video-specific
   width?: number;
   height?: number;
