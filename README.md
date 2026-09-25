@@ -79,12 +79,16 @@ Open `http://localhost:9001`, sign in with the Plex account that owns your serve
 ### Local Development
 
 ```bash
-# Prerequisites: Bun (https://bun.sh)
-bun install
-bun run dev
+# Prerequisites: Node.js 22+, Bun (https://bun.sh), and just (https://just.systems)
+bun install --frozen-lockfile
+just dev
 ```
 
-Open `http://localhost:9001`
+Open `http://127.0.0.1:9001`. On first setup, follow the setup code printed in the terminal. `just dev` runs Remix/Vite with live reload for UI and server-route edits; it does not require a production build. Keep the same hostname and port while signing in through Plex.
+
+Use `just dev 9021` if port 9001 is occupied. For testing on another device on your network, explicitly bind all interfaces with `just dev 9021 0.0.0.0` and open your computer's LAN address on that device. Development uses your configured services and local data; requests and playback actions affect those services.
+
+Run `just check` for lint, TypeScript, and tests, or `just test` for tests alone. `just build` followed by `just start` evaluates a production build without live reload. Run `just` to list recipes. Without just, the equivalent dev command is `bun run dev --host 127.0.0.1 --port 9001 --strictPort`.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/26a1/512.gif" height="24"> Environment Variables
 
