@@ -127,7 +127,7 @@ export async function invalidateCache(key: string): Promise<void> {
  * Uses first 12 chars of SHA-256 hash for uniqueness while keeping filenames short.
  */
 function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+  return crypto.createHash("sha256").update(`${env.PLEX_SERVER_URL}:${token}`).digest("hex").slice(0, 12);
 }
 
 /**
