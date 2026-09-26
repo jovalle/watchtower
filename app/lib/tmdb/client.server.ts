@@ -30,7 +30,12 @@ const VIDEO_TYPE_RANK = ["Trailer", "Teaser", "Clip"];
 
 export function pickTrailerKey(videos: TMDBVideo[]): string | null {
   const candidates = videos
-    .filter((v) => v.site === "YouTube" && /^[\w-]{6,20}$/.test(v.key) && VIDEO_TYPE_RANK.includes(v.type))
+    .filter(
+      (v) =>
+        v.site === "YouTube" &&
+        /^[\w-]{6,20}$/.test(v.key) &&
+        VIDEO_TYPE_RANK.includes(v.type)
+    )
     .sort(
       (a, b) =>
         VIDEO_TYPE_RANK.indexOf(a.type) - VIDEO_TYPE_RANK.indexOf(b.type) ||
@@ -78,7 +83,9 @@ export class TMDBClient {
         // Check for rate limiting
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After") || "unknown";
-          console.error(`[TMDB] RATE LIMITED! Retry after: ${retryAfter}s. Path: ${path}`);
+          console.error(
+            `[TMDB] RATE LIMITED! Retry after: ${retryAfter}s. Path: ${path}`
+          );
         }
 
         return {
@@ -144,6 +151,19 @@ export class TMDBClient {
     };
   }
 
+  async getTitle(type: "movie" | "show", id: number) {
+    const result = await this.request<TMDBMovie & TMDBShow>(`/${type === "show" ? "tv" : "movie"}/${id}`);
+    if (!result.success) return null;
+    const item = result.data;
+    return {
+      title: item.title || item.name,
+      overview: item.overview,
+      posterPath: item.poster_path,
+      backdropPath: item.backdrop_path,
+      year: (item.release_date || item.first_air_date || "").slice(0, 4),
+    };
+  }
+
   /**
    * Get TV show recommendations by TMDB ID.
    */
@@ -192,7 +212,10 @@ export class TMDBClient {
   /**
    * Search for a TV show by title and optional year.
    */
-  async searchTV(title: string, year?: number): Promise<TMDBResult<TMDBShow[]>> {
+  async searchTV(
+    title: string,
+    year?: number
+  ): Promise<TMDBResult<TMDBShow[]>> {
     const params = new URLSearchParams();
     params.set("query", title);
     if (year) {
@@ -216,7 +239,10 @@ export class TMDBClient {
   /**
    * Get the best YouTube trailer key for a title: official trailers first, then trailers, teasers, clips.
    */
-  async getTrailerKey(type: "movie" | "show", tmdbId: number): Promise<string | null> {
+  async getTrailerKey(
+    type: "movie" | "show",
+    tmdbId: number
+  ): Promise<string | null> {
     const result = await this.request<{ results: TMDBVideo[] }>(
       `/${type === "movie" ? "movie" : "tv"}/${tmdbId}/videos`
     );
@@ -229,7 +255,11 @@ export class TMDBClient {
    */
   async getTrending(): Promise<TMDBResult<TMDBRecommendation[]>> {
     const result = await this.request<
-      TMDBPaginatedResponse<(TMDBMovie & { media_type: "movie" }) | (TMDBShow & { media_type: "tv" }) | { media_type: "person" }>
+      TMDBPaginatedResponse<
+        | (TMDBMovie & { media_type: "movie" })
+        | (TMDBShow & { media_type: "tv" })
+        | { media_type: "person" }
+      >
     >("/trending/all/week");
 
     if (!result.success) {
@@ -238,8 +268,10 @@ export class TMDBClient {
 
     const data: TMDBRecommendation[] = [];
     for (const item of result.data.results) {
-      if (item.media_type === "movie") data.push(this.movieToRecommendation(item));
-      else if (item.media_type === "tv") data.push(this.showToRecommendation(item));
+      if (item.media_type === "movie")
+        data.push(this.movieToRecommendation(item));
+      else if (item.media_type === "tv")
+        data.push(this.showToRecommendation(item));
     }
     return { success: true, data };
   }
@@ -250,7 +282,11 @@ export class TMDBClient {
   async searchMulti(query: string): Promise<TMDBResult<TMDBRecommendation[]>> {
     const params = new URLSearchParams({ query, include_adult: "false" });
     const result = await this.request<
-      TMDBPaginatedResponse<(TMDBMovie & { media_type: "movie" }) | (TMDBShow & { media_type: "tv" }) | { media_type: "person" }>
+      TMDBPaginatedResponse<
+        | (TMDBMovie & { media_type: "movie" })
+        | (TMDBShow & { media_type: "tv" })
+        | { media_type: "person" }
+      >
     >(`/search/multi?${params.toString()}`);
 
     if (!result.success) {
@@ -259,8 +295,10 @@ export class TMDBClient {
 
     const data: TMDBRecommendation[] = [];
     for (const item of result.data.results) {
-      if (item.media_type === "movie") data.push(this.movieToRecommendation(item));
-      else if (item.media_type === "tv") data.push(this.showToRecommendation(item));
+      if (item.media_type === "movie")
+        data.push(this.movieToRecommendation(item));
+      else if (item.media_type === "tv")
+        data.push(this.showToRecommendation(item));
     }
     return { success: true, data };
   }
@@ -354,9 +392,9 @@ export class TMDBClient {
     }
 
     // Transform to unified format
-    const recommendations = recsResult.data.slice(0, 12).map((m) =>
-      this.movieToRecommendation(m)
-    );
+    const recommendations = recsResult.data
+      .slice(0, 12)
+      .map((m) => this.movieToRecommendation(m));
 
     return { success: true, data: recommendations };
   }
@@ -389,9 +427,9 @@ export class TMDBClient {
     }
 
     // Transform to unified format
-    const recommendations = recsResult.data.slice(0, 12).map((s) =>
-      this.showToRecommendation(s)
-    );
+    const recommendations = recsResult.data
+      .slice(0, 12)
+      .map((s) => this.showToRecommendation(s));
 
     return { success: true, data: recommendations };
   }
@@ -441,7 +479,9 @@ export class TMDBClient {
   /**
    * Get images (logos, backdrops, posters) for a movie by TMDB ID.
    */
-  async getMovieImages(tmdbId: number): Promise<TMDBResult<TMDBImagesResponse>> {
+  async getMovieImages(
+    tmdbId: number
+  ): Promise<TMDBResult<TMDBImagesResponse>> {
     return this.request<TMDBImagesResponse>(`/movie/${tmdbId}/images`);
   }
 
@@ -471,7 +511,7 @@ export class TMDBClient {
 
     // Prefer English logos, then fall back to any logo
     const logos = imagesResult.data.logos;
-    const englishLogo = logos.find(logo => logo.iso_639_1 === 'en');
+    const englishLogo = logos.find((logo) => logo.iso_639_1 === "en");
     const bestLogo = englishLogo || logos[0];
 
     return `${TMDB_IMAGE_BASE_URL}/w500${bestLogo.file_path}`;
@@ -496,7 +536,7 @@ export class TMDBClient {
 
     // Prefer English logos, then fall back to any logo
     const logos = imagesResult.data.logos;
-    const englishLogo = logos.find(logo => logo.iso_639_1 === 'en');
+    const englishLogo = logos.find((logo) => logo.iso_639_1 === "en");
     const bestLogo = englishLogo || logos[0];
 
     return `${TMDB_IMAGE_BASE_URL}/w500${bestLogo.file_path}`;
@@ -506,7 +546,10 @@ export class TMDBClient {
    * Get a cached movie logo URL, fetching and caching if needed.
    * Returns a local URL that can be served from the cache.
    */
-  async getCachedMovieLogoUrl(title: string, year?: number): Promise<string | null> {
+  async getCachedMovieLogoUrl(
+    title: string,
+    year?: number
+  ): Promise<string | null> {
     // Clean up title - remove year suffixes like "(2017)" that might be in the title
     const cleanTitle = title.replace(/\s*\(\d{4}\)\s*$/, "").trim();
 
@@ -514,15 +557,27 @@ export class TMDBClient {
     const cached = await getCachedLogo("movie", cleanTitle, year);
     if (cached.hit) {
       if (cached.logoPath) {
-        console.log(`[TMDB] Logo cache HIT: movie "${cleanTitle}" -> ${cached.logoPath.split("/").pop()}`);
+        console.log(
+          `[TMDB] Logo cache HIT: movie "${cleanTitle}" -> ${cached.logoPath
+            .split("/")
+            .pop()}`
+        );
         return `/api/cache/tmdb/logos/${cached.logoPath.split("/").pop()}`;
       }
       // Cached negative result - no logo available
-      console.log(`[TMDB] Logo cache HIT (no logo exists): movie "${cleanTitle}" (${year || 'no year'})`);
+      console.log(
+        `[TMDB] Logo cache HIT (no logo exists): movie "${cleanTitle}" (${
+          year || "no year"
+        })`
+      );
       return null;
     }
 
-    console.log(`[TMDB] Logo cache MISS: movie "${cleanTitle}" (${year || 'no year'}) - fetching from TMDB...`);
+    console.log(
+      `[TMDB] Logo cache MISS: movie "${cleanTitle}" (${
+        year || "no year"
+      }) - fetching from TMDB...`
+    );
 
     // Try with year first for movies (more accurate), then without
     let searchResult = await this.searchMovie(cleanTitle, year);
@@ -533,13 +588,18 @@ export class TMDBClient {
     }
 
     if (!searchResult.success) {
-      console.error(`[TMDB] Search failed for movie "${cleanTitle}":`, searchResult.error);
+      console.error(
+        `[TMDB] Search failed for movie "${cleanTitle}":`,
+        searchResult.error
+      );
       await cacheLogo("movie", cleanTitle, year, null);
       return null;
     }
 
     if (searchResult.data.length === 0) {
-      console.warn(`[TMDB] No movie found for "${cleanTitle}" (${year || 'no year'})`);
+      console.warn(
+        `[TMDB] No movie found for "${cleanTitle}" (${year || "no year"})`
+      );
       await cacheLogo("movie", cleanTitle, year, null);
       return null;
     }
@@ -548,32 +608,47 @@ export class TMDBClient {
     const imagesResult = await this.getMovieImages(movie.id);
 
     if (!imagesResult.success) {
-      console.error(`[TMDB] Failed to get images for movie "${cleanTitle}" (TMDB ID: ${movie.id}):`, imagesResult.error);
+      console.error(
+        `[TMDB] Failed to get images for movie "${cleanTitle}" (TMDB ID: ${movie.id}):`,
+        imagesResult.error
+      );
       await cacheLogo("movie", cleanTitle, year, null, movie.id);
       return null;
     }
 
     if (imagesResult.data.logos.length === 0) {
-      console.warn(`[TMDB] No logos available for movie "${cleanTitle}" (TMDB ID: ${movie.id}, matched: "${movie.title}")`);
+      console.warn(
+        `[TMDB] No logos available for movie "${cleanTitle}" (TMDB ID: ${movie.id}, matched: "${movie.title}")`
+      );
       await cacheLogo("movie", cleanTitle, year, null, movie.id);
       return null;
     }
 
     // Prefer English logos, then fall back to any logo
     const logos = imagesResult.data.logos;
-    const englishLogo = logos.find(logo => logo.iso_639_1 === 'en');
+    const englishLogo = logos.find((logo) => logo.iso_639_1 === "en");
     const bestLogo = englishLogo || logos[0];
     const remoteUrl = `${TMDB_IMAGE_BASE_URL}/w500${bestLogo.file_path}`;
 
     // Download and cache the logo
-    const localPath = await cacheLogo("movie", cleanTitle, year, remoteUrl, movie.id);
+    const localPath = await cacheLogo(
+      "movie",
+      cleanTitle,
+      year,
+      remoteUrl,
+      movie.id
+    );
 
     if (localPath) {
-      console.log(`[TMDB] Logo cached for movie "${cleanTitle}" (TMDB ID: ${movie.id})`);
+      console.log(
+        `[TMDB] Logo cached for movie "${cleanTitle}" (TMDB ID: ${movie.id})`
+      );
       return `/api/cache/tmdb/logos/${localPath.split("/").pop()}`;
     }
 
-    console.error(`[TMDB] Failed to download/cache logo for movie "${cleanTitle}"`);
+    console.error(
+      `[TMDB] Failed to download/cache logo for movie "${cleanTitle}"`
+    );
     return null;
   }
 
@@ -583,7 +658,10 @@ export class TMDBClient {
    * Note: For TV shows, year is often unreliable (could be last aired year),
    * so we search without year first, then fall back to with year.
    */
-  async getCachedTVLogoUrl(title: string, year?: number): Promise<string | null> {
+  async getCachedTVLogoUrl(
+    title: string,
+    year?: number
+  ): Promise<string | null> {
     // Clean up title - remove year suffixes like "(2017)" that Plex sometimes adds
     const cleanTitle = title.replace(/\s*\(\d{4}\)\s*$/, "").trim();
 
@@ -591,15 +669,27 @@ export class TMDBClient {
     const cached = await getCachedLogo("tv", cleanTitle, year);
     if (cached.hit) {
       if (cached.logoPath) {
-        console.log(`[TMDB] Logo cache HIT: tv "${cleanTitle}" -> ${cached.logoPath.split("/").pop()}`);
+        console.log(
+          `[TMDB] Logo cache HIT: tv "${cleanTitle}" -> ${cached.logoPath
+            .split("/")
+            .pop()}`
+        );
         return `/api/cache/tmdb/logos/${cached.logoPath.split("/").pop()}`;
       }
       // Cached negative result - no logo available
-      console.log(`[TMDB] Logo cache HIT (no logo exists): tv "${cleanTitle}" (${year || 'no year'})`);
+      console.log(
+        `[TMDB] Logo cache HIT (no logo exists): tv "${cleanTitle}" (${
+          year || "no year"
+        })`
+      );
       return null;
     }
 
-    console.log(`[TMDB] Logo cache MISS: tv "${cleanTitle}" (${year || 'no year'}) - fetching from TMDB...`);
+    console.log(
+      `[TMDB] Logo cache MISS: tv "${cleanTitle}" (${
+        year || "no year"
+      }) - fetching from TMDB...`
+    );
 
     // For TV shows, try searching without year first (more reliable)
     // since Plex often provides the "last aired" year, not premiere year
@@ -611,13 +701,18 @@ export class TMDBClient {
     }
 
     if (!searchResult.success) {
-      console.error(`[TMDB] Search failed for TV "${cleanTitle}":`, searchResult.error);
+      console.error(
+        `[TMDB] Search failed for TV "${cleanTitle}":`,
+        searchResult.error
+      );
       await cacheLogo("tv", cleanTitle, year, null);
       return null;
     }
 
     if (searchResult.data.length === 0) {
-      console.warn(`[TMDB] No TV show found for "${cleanTitle}" (${year || 'no year'})`);
+      console.warn(
+        `[TMDB] No TV show found for "${cleanTitle}" (${year || "no year"})`
+      );
       await cacheLogo("tv", cleanTitle, year, null);
       return null;
     }
@@ -626,35 +721,49 @@ export class TMDBClient {
     const imagesResult = await this.getTVImages(show.id);
 
     if (!imagesResult.success) {
-      console.error(`[TMDB] Failed to get images for TV "${cleanTitle}" (TMDB ID: ${show.id}):`, imagesResult.error);
+      console.error(
+        `[TMDB] Failed to get images for TV "${cleanTitle}" (TMDB ID: ${show.id}):`,
+        imagesResult.error
+      );
       await cacheLogo("tv", cleanTitle, year, null, show.id);
       return null;
     }
 
     if (imagesResult.data.logos.length === 0) {
-      console.warn(`[TMDB] No logos available for TV "${cleanTitle}" (TMDB ID: ${show.id}, matched: "${show.name}")`);
+      console.warn(
+        `[TMDB] No logos available for TV "${cleanTitle}" (TMDB ID: ${show.id}, matched: "${show.name}")`
+      );
       await cacheLogo("tv", cleanTitle, year, null, show.id);
       return null;
     }
 
     // Prefer English logos, then fall back to any logo
     const logos = imagesResult.data.logos;
-    const englishLogo = logos.find(logo => logo.iso_639_1 === 'en');
+    const englishLogo = logos.find((logo) => logo.iso_639_1 === "en");
     const bestLogo = englishLogo || logos[0];
     const remoteUrl = `${TMDB_IMAGE_BASE_URL}/w500${bestLogo.file_path}`;
 
     // Download and cache the logo
-    const localPath = await cacheLogo("tv", cleanTitle, year, remoteUrl, show.id);
+    const localPath = await cacheLogo(
+      "tv",
+      cleanTitle,
+      year,
+      remoteUrl,
+      show.id
+    );
 
     if (localPath) {
-      console.log(`[TMDB] Logo cached for TV "${cleanTitle}" (TMDB ID: ${show.id})`);
+      console.log(
+        `[TMDB] Logo cached for TV "${cleanTitle}" (TMDB ID: ${show.id})`
+      );
       return `/api/cache/tmdb/logos/${localPath.split("/").pop()}`;
     }
 
-    console.error(`[TMDB] Failed to download/cache logo for TV "${cleanTitle}"`);
+    console.error(
+      `[TMDB] Failed to download/cache logo for TV "${cleanTitle}"`
+    );
     return null;
   }
-
 }
 
 /**

@@ -44,6 +44,9 @@ import { getCurrentUser } from "~/lib/auth/user.server";
 import { getUserSettings } from "~/lib/settings/storage.server";
 import type { PlexMediaItem, PlexMetadata, PlexRole } from "~/lib/plex/types";
 import type { TMDBRecommendation } from "~/lib/tmdb/types";
+import { externalTitle, externalImdbTitle } from "~/lib/title.server";
+import { RequestModal } from "~/components/media/RequestModal";
+import { ExternalTitle } from "~/components/media/ExternalTitle";
 
 interface SeasonView {
   ratingKey: string;
@@ -174,10 +177,10 @@ interface LoaderData {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  const title = data?.metadata?.title ?? "Media Details";
+  const title = data && "external" in data ? data.external.title : data?.metadata?.title ?? "Media Details";
   return [
     { title: `${title} | Watchtower` },
-    { name: "description", content: data?.metadata?.summary ?? "" },
+    { name: "description", content: data && "external" in data ? data.external.overview ?? "" : data?.metadata?.summary ?? "" },
   ];
 };
 
@@ -637,6 +640,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     token: serverToken,
     clientId: env.PLEX_CLIENT_ID,
   });
+
+  if (ratingKey.startsWith("imdb-") && (type === "movie" || type === "show")) return externalImdbTitle(request, client, type, ratingKey.slice(5));
+
+  if (ratingKey.startsWith("tmdb-") && (type === "movie" || type === "show")) {
+    const id = /^tmdb-\d+$/.test(ratingKey) ? Number(ratingKey.slice(5)) : NaN;
+    return externalTitle(request, client, type, id);
+  }
 
   // Client for Discover API operations (watchlist check)
   const discoverClient = new PlexClient({
@@ -1109,6 +1119,11 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export default function MediaDetailPage() {
   const data = useLoaderData<typeof loader>();
+  return "external" in data ? <ExternalTitle data={data.external} /> : <LibraryDetail data={data} />;
+}
+
+function LibraryDetail({ data }: { data: LoaderData }) {
+  const [requesting, setRequesting] = useState(false);
   const {
     metadata,
     backdropUrl,
@@ -1243,9 +1258,8 @@ export default function MediaDetailPage() {
       } finally {
         setIsLoadingEpisodes(false);
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [seasons]
+    [seasons, seasonIndex]
   );
 
   const handlePlay = () => {
@@ -1335,6 +1349,7 @@ export default function MediaDetailPage() {
 
   return (
     <div className="min-h-screen pb-16">
+      {requesting && tmdbId && (type === "movie" || type === "show") && <RequestModal item={{ tmdbId, type, title: metadata.title, year: year ?? undefined, posterUrl, tmdbUrl: `https://www.themoviedb.org/${type === "show" ? "tv" : "movie"}/${tmdbId}` }} onClose={() => setRequesting(false)} />}
       {showTrailer && trailerKey && (
         <TrailerModal
           youtubeKey={trailerKey}
@@ -1401,6 +1416,7 @@ export default function MediaDetailPage() {
                       : metadata.title}
                   </h1>
 
+                  {type === "show" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
                   {/* Season subtitle */}
                   {type === "season" && (
                     <Typography
@@ -1692,9 +1708,7 @@ export default function MediaDetailPage() {
                 {recommendations.map((rec) => (
                   <a
                     key={rec.id}
-                    href={rec.tmdbUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href={`/app/media/${rec.type}/tmdb-${rec.id}`}
                     className="group relative"
                   >
                     <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
@@ -1812,6 +1826,7 @@ export default function MediaDetailPage() {
                       {displayTitle}
                     </h1>
 
+                    {type === "movie" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
                     {/* Metadata row - wrapped and centered on mobile */}
                     <div className="mb-4 flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start sm:gap-3 sm:text-base">
                       {type === "episode" && originallyAired && (
@@ -2265,9 +2280,7 @@ export default function MediaDetailPage() {
                   {recommendations.map((rec) => (
                     <a
                       key={rec.id}
-                      href={rec.tmdbUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={`/app/media/${rec.type}/tmdb-${rec.id}`}
                       className="group relative"
                     >
                       <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated">
