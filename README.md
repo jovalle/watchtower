@@ -48,6 +48,30 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 - **TV show navigation** — Season/episode browsing with On Deck integration
 - **Responsive design** — Optimized for desktop, tablet, and mobile
 
+## Navigation and playback
+
+The logo opens Home. **Watch** contains Movies, Series, and New in library. **Discover** opens external discovery; disabling discovery in Settings hides that section and prevents its feeds from loading. **My Stuff** contains Watchlist and Lists. Old bookmarks redirect with their query parameters. Requests, Issues, and Settings remain in the profile menu.
+
+Home separates in-progress titles from next unwatched episodes and labels related library recommendations with the title that prompted them. Playback reports progress to Plex. Settings includes **Autoplay next episode**, enabled by default; the countdown can also be cancelled in the player. Stream information distinguishes requested quality, source-file metadata, and delivered video dimensions when the browser reports them.
+
+Title pages use media type and provider IDs to resolve accessible library matches. **Requests & availability** shows regular/4K and season status from Seerr. Partial series can request remaining seasons through Seerr's permissions and quota checks. Availability in Seerr alone does not grant access to a Plex library.
+
+## Request notifications
+
+Configure Seerr in Settings and import the corresponding Plex users into Seerr. The header checks for request updates once per minute while the page is visible. Opening Notifications also checks for updates, subject to the same one-minute minimum. No background scheduler or external email/push service is required.
+
+The first successful check establishes the existing request state without sending old updates. Later observed transitions produce unread notifications linking to the title page. Updates that occur entirely between polls cannot be reconstructed. Read state and deduplication history survive restarts in `DATA_PATH/notifications`, scoped to the Plex user and configured Seerr URL. Keep the data volume persistent and backed up.
+
+Polling covers the most recent 200 requests and retains the newest 200 notifications. The inbox reports when older requests fall outside that window. When the listing is complete, each poll also checks up to 20 previously observed missing requests; only a confirmed 404 is treated as cancelled/deleted. An outage preserves existing notifications and displays a refresh error.
+
+Run one Watchtower process against a data directory. Notification writes use an in-process lock and atomic replacement; multiple writers require shared transactional storage. Playback session ownership also lives in the app process. After an app restart, reload an active player to establish a new session. No existing config or watch history migration is needed; the autoplay setting has an additive default. Rolling back the application can leave the new notification files in place.
+
+## Casting and validation status
+
+The player exposes browser-native AirPlay/Remote Playback only when the browser reports a receiver for a native media source. HLS played through Media Source Extensions does not use this path. Stream URLs remain authenticated; receivers must support the browser's authenticated playback handoff. There is no custom Chromecast receiver or public token-bearing stream URL.
+
+**Receiver playback is not yet verified.** Desktop/mobile playback compatibility, audible track selection, cross-device resume, and the full keyboard/remote journey also require live acceptance. See the [delivery ledger](docs/netflix-replacement-plan.md#delivery-ledger) and [continuation handoff](docs/implementation-handoff.md) for evidence and remaining work. A visible casting control is not a compatibility guarantee.
+
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f4f8/512.gif" height="24"> Screenshots
 
 <p align="center">
