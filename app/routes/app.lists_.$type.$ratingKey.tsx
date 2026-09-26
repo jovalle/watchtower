@@ -55,7 +55,9 @@ function buildImageUrl(
   height: number = 450
 ): string {
   if (!path) return "";
-  return `/api/plex/image?path=${encodeURIComponent(path)}&width=${width}&height=${height}`;
+  return `/api/plex/image?path=${encodeURIComponent(
+    path
+  )}&width=${width}&height=${height}`;
 }
 
 function formatRuntime(durationMs?: number): string | undefined {
@@ -103,7 +105,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Get playlist metadata for title
     const playlistsResult = await client.getPlaylists();
     if (playlistsResult.success) {
-      const playlist = playlistsResult.data.find((p) => p.ratingKey === ratingKey);
+      const playlist = playlistsResult.data.find(
+        (p) => p.ratingKey === ratingKey
+      );
       if (playlist) {
         title = playlist.title;
         summary = playlist.summary;
@@ -123,7 +127,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         if (library.type === "movie" || library.type === "show") {
           const collectionsResult = await client.getCollections(library.key);
           if (collectionsResult.success) {
-            const collection = collectionsResult.data.find((c) => c.ratingKey === ratingKey);
+            const collection = collectionsResult.data.find(
+              (c) => c.ratingKey === ratingKey
+            );
             if (collection) {
               title = collection.title;
               summary = collection.summary;
@@ -205,7 +211,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export default function ListDetailPage() {
-  const { title, summary, itemCount, items, listType } = useLoaderData<typeof loader>();
+  const { title, summary, itemCount, items, listType } =
+    useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   const handlePlay = (item: ListItem) => {
@@ -238,13 +245,17 @@ export default function ListDetailPage() {
         </Typography>
 
         {summary && (
-          <Typography variant="body" className="mb-2 max-w-3xl text-foreground-secondary">
+          <Typography
+            variant="body"
+            className="mb-2 max-w-3xl text-foreground-secondary"
+          >
             {summary}
           </Typography>
         )}
 
         <Typography variant="caption" className="text-foreground-muted">
-          {itemCount} {itemCount === 1 ? "item" : "items"} • {listType === "playlist" ? "Playlist" : "Collection"}
+          {itemCount} {itemCount === 1 ? "item" : "items"} •{" "}
+          {listType === "playlist" ? "Playlist" : "Collection"}
         </Typography>
       </div>
 
