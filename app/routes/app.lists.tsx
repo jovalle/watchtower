@@ -4,7 +4,7 @@
  */
 
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { ListVideo, FolderOpen, Film, Tv } from "lucide-react";
 import { Container } from "~/components/layout";
@@ -41,11 +41,15 @@ function buildImageUrl(
   height: number = 450
 ): string | null {
   if (!path) return null;
-  return `/api/plex/image?path=${encodeURIComponent(path)}&width=${width}&height=${height}`;
+  return `/api/plex/image?path=${encodeURIComponent(
+    path
+  )}&width=${width}&height=${height}`;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
+  const url = new URL(request.url);
+  if (url.pathname === "/app/lists") throw redirect(`/app/stuff/lists${url.search}`);
 
   const client = new PlexClient({
     serverUrl: env.PLEX_SERVER_URL,
@@ -163,7 +167,10 @@ export default function ListsPage() {
           <Typography variant="subtitle" className="mb-2">
             No lists found
           </Typography>
-          <Typography variant="body" className="max-w-md text-foreground-secondary">
+          <Typography
+            variant="body"
+            className="max-w-md text-foreground-secondary"
+          >
             Create playlists or collections in Plex to organize your media.
             They&apos;ll appear here for easy access.
           </Typography>

@@ -11,17 +11,20 @@ import { Plus, ListX, X } from "lucide-react";
 import { Billboard, MediaCard, MediaRow } from "~/components/media";
 import { Container } from "~/components/layout";
 import { ContextMenu, type ContextMenuItem } from "~/components/ui";
-import { requireServerToken } from "~/lib/auth/session.server";
+import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { getCache, setCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import type { PlexMediaItem } from "~/lib/plex/types";
 import { getCurrentUser } from "~/lib/auth/user.server";
-import { getUserSettings, DEFAULT_PREFERENCES } from "~/lib/settings/storage.server";
-import { findLibraryMatch } from "~/lib/search";
+import {
+  getUserSettings,
+  DEFAULT_PREFERENCES,
+} from "~/lib/settings/storage.server";
 import { createSeerrClient } from "~/lib/integrations/seerr.server";
-import { RequestModal, type RequestableItem } from "~/components/media/RequestModal";
+import { personalRecommendations } from "~/lib/home.server";
+
 
 export const meta: MetaFunction = () => {
   return [
@@ -72,6 +75,7 @@ interface LoaderData {
   recentlyAdded: MediaItemView[];
   extraRows: ExtraRow[];
   seerrEnabled: boolean;
+  feedErrors: string[];
 }
 
 interface RowItem {
@@ -121,7 +125,9 @@ function transformToView(
     title: isEpisode ? item.grandparentTitle || item.title : item.title,
     year: item.year?.toString(),
     type: item.type as "movie" | "show" | "episode",
-    backdropUrl: buildBackdropUrl(item.art || item.grandparentThumb || item.thumb),
+    backdropUrl: buildBackdropUrl(
+      item.art || item.grandparentThumb || item.thumb
+    ),
     progress,
     viewOffset: item.viewOffset,
     viewCount: item.viewCount ?? 0,
@@ -144,6 +150,7 @@ interface CachedHomeData {
   billboardCandidates: BillboardData[];
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
+  feedErrors?: string[];
 }
 
 function libraryRowItem(item: PlexMediaItem): RowItem {
@@ -158,8 +165,11 @@ function libraryRowItem(item: PlexMediaItem): RowItem {
 }
 
 /** TMDB trending titles, linked to the library when a matching title exists. */
-async function getTrendingRow(client: PlexClient, token: string): Promise<RowItem[]> {
-  const cacheKey = getUserCacheKey("home-trending", token);
+async function getTrendingRow(
+  client: PlexClient,
+  token: string
+): Promise<RowItem[]> {
+  const cacheKey = getUserCacheKey("home-trending-guid-v2", token);
   const cached = await getCache<RowItem[]>(cacheKey);
   if (cached) return cached.data;
 
@@ -169,15 +179,15 @@ async function getTrendingRow(client: PlexClient, token: string): Promise<RowIte
 
   const items = await Promise.all(
     trending.data.slice(0, 20).map(async (rec): Promise<RowItem> => {
-      const search = await client.search(rec.title, 10);
-      const match = search.success ? findLibraryMatch(rec, search.data) : undefined;
+      const matches = await client.findByTmdbId(rec.type, rec.id);
+      const match = matches.success ? matches.data[0] : undefined;
       if (match) return libraryRowItem(match);
       return {
         key: `tmdb-${rec.type}-${rec.id}`,
         title: rec.title,
         year: rec.releaseDate?.slice(0, 4),
         imageUrl: rec.backdropUrl || "",
-        href: rec.tmdbUrl,
+        href: `/app/media/${rec.type}/tmdb-${rec.id}`,
         tmdb: { id: rec.id, type: rec.type, posterUrl: rec.posterUrl },
       };
     })
@@ -186,14 +196,20 @@ async function getTrendingRow(client: PlexClient, token: string): Promise<RowIte
   return items;
 }
 
-async function getCollectionRows(client: PlexClient, token: string): Promise<ExtraRow[]> {
+async function getCollectionRows(
+  client: PlexClient,
+  token: string
+): Promise<ExtraRow[]> {
   const cacheKey = getUserCacheKey("home-collections", token);
   const cached = await getCache<ExtraRow[]>(cacheKey);
   if (cached) return cached.data;
 
   const result = await client.getPromotedCollections();
   if (!result.success) return [];
-  const rows = result.data.map((hub) => ({ title: hub.title, items: hub.items.map(libraryRowItem) }));
+  const rows = result.data.map((hub) => ({
+    title: hub.title,
+    items: hub.items.map(libraryRowItem),
+  }));
   await setCache(cacheKey, rows);
   return rows;
 }
@@ -211,21 +227,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const respond = async (data: CachedHomeData) => {
-    const [trending, collections, seerr] = await Promise.all([
-      prefs.showTrending && !prefs.discoveryDisabled ? getTrendingRow(extrasClient, token) : [],
+    const [trending, collections, seerr, recommendations] = await Promise.all([
+      prefs.showTrending && !prefs.discoveryDisabled
+        ? getTrendingRow(extrasClient, token)
+        : [],
       prefs.showCollections ? getCollectionRows(extrasClient, token) : [],
       createSeerrClient(),
+      personalRecommendations(extrasClient).catch(() => null),
     ]);
+    const nextEpisodes = prefs.showContinueWatching ? data.continueWatching.filter((item) => item.type === "episode" && !item.viewOffset && !item.viewCount) : [];
+    const continueItems = prefs.showContinueWatching ? data.continueWatching.filter((item) => !!item.viewOffset) : [];
+    const used = new Set(continueItems.map((item) => item.ratingKey));
     const extraRows: ExtraRow[] = [
-      ...(trending.length > 0 ? [{ title: "Trending Now", items: trending }] : []),
+      ...(nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : []),
+      ...(recommendations ? [{ title: recommendations.title, items: recommendations.items.filter((item) => !used.has(item.ratingKey)).map(libraryRowItem) }] : []),
+      ...(trending.length > 0
+        ? [{ title: "Trending Now", items: trending }]
+        : []),
       ...collections,
     ];
+    const uniqueRows = extraRows.map((row) => ({ ...row, items: row.items.filter((item) => {
+      const key = item.ratingKey || item.href;
+      if (used.has(key)) return false;
+      used.add(key);
+      return true;
+    }) })).filter((row) => row.items.length > 0);
     return json<LoaderData>({
       billboardCandidates: data.billboardCandidates,
-      continueWatching: prefs.showContinueWatching ? data.continueWatching : [],
-      recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded : [],
-      extraRows,
+      continueWatching: continueItems,
+      recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded.filter((item) => !used.has(item.ratingKey)) : [],
+      extraRows: uniqueRows,
       seerrEnabled: seerr !== null,
+      feedErrors: data.feedErrors ?? [],
     });
   };
   const url = new URL(request.url);
@@ -233,7 +266,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Try cache first for instant loading (user-specific cache key)
   const cacheKey = getUserCacheKey("home", token);
-  const cached = !forceRefresh ? await getCache<CachedHomeData>(cacheKey) : null;
+  const cached = !forceRefresh
+    ? await getCache<CachedHomeData>(cacheKey)
+    : null;
 
   if (cached && !cached.isStale) {
     // Fresh cache - return immediately
@@ -248,28 +283,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // If we have stale cache, return it immediately while fetching fresh data
   // For now, we'll just return stale data and let the next request get fresh
-  if (cached) {
-    // Return stale data - background refresh will happen on next navigation
-    return respond(cached.data);
-  }
+  // Stale data must actually refresh so playback updates become visible.
 
   // Fetch data in parallel
-  const [onDeckResult, recentlyAddedResult, watchlistResult] = await Promise.all([
-    client.getContinueWatching(10),
-    client.getRecentlyAdded(undefined, 20),
-    client.getWatchlist(),
-  ]);
+  const [onDeckResult, recentlyAddedResult, watchlistResult] =
+    await Promise.all([
+      prefs.showContinueWatching ? client.getContinueWatching(20) : Promise.resolve({ success: true as const, data: [] }),
+      client.getRecentlyAdded(undefined, 20),
+      new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token: await requirePlexToken(request), clientId: env.PLEX_CLIENT_ID }).getWatchlist(),
+    ]);
 
   // Build a set of GUIDs that are in watchlist for fast lookup
   const watchlistGuids = new Set(
-    watchlistResult.success
-      ? watchlistResult.data.map((item) => item.guid)
-      : []
+    watchlistResult.success ? watchlistResult.data.map((item) => item.guid) : []
   );
 
   // Sort by lastViewedAt descending (most recently watched first) to match Plex app order
   const sortedOnDeck = onDeckResult.success
-    ? [...onDeckResult.data].sort((a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0))
+    ? [...onDeckResult.data].sort(
+        (a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0)
+      )
     : [];
 
   const continueWatching: MediaItemView[] = sortedOnDeck.map((item) =>
@@ -284,9 +317,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch logos for all items (continue watching + recently added)
   // Uses local caching to reduce TMDB API calls and bandwidth
-  const tmdbClient = createTMDBClient();
+  const tmdbClient = prefs.discoveryDisabled ? null : createTMDBClient();
   if (!tmdbClient) {
-    console.log("[Logo] TMDB not configured - skipping logo fetch. Set TMDB_API_KEY in .env");
+    console.log(
+      "[Logo] TMDB not configured - skipping logo fetch. Set TMDB_API_KEY in .env"
+    );
   }
   if (tmdbClient) {
     // Helper to fetch logo for an item (uses cache)
@@ -298,8 +333,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
         // Use cached methods - downloads and stores logos locally
         const logoUrl = isShow
-          ? await tmdbClient.getCachedTVLogoUrl(titleForLookup, item.year ? parseInt(item.year) : undefined)
-          : await tmdbClient.getCachedMovieLogoUrl(item.title, item.year ? parseInt(item.year) : undefined);
+          ? await tmdbClient.getCachedTVLogoUrl(
+              titleForLookup,
+              item.year ? parseInt(item.year) : undefined
+            )
+          : await tmdbClient.getCachedMovieLogoUrl(
+              item.title,
+              item.year ? parseInt(item.year) : undefined
+            );
 
         if (logoUrl) {
           item.logoUrl = logoUrl;
@@ -324,7 +365,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // First, add watchlist items that are in our library (prioritize user's picks)
   for (const item of recentlyAdded) {
-    if (item.isInWatchlist && item.backdropUrl && (item.type === "movie" || item.type === "show")) {
+    if (
+      item.isInWatchlist &&
+      item.backdropUrl &&
+      (item.type === "movie" || item.type === "show")
+    ) {
       if (!seenRatingKeys.has(item.ratingKey)) {
         seenRatingKeys.add(item.ratingKey);
         billboardCandidates.push({
@@ -366,8 +411,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const limitedCandidates = billboardCandidates.slice(0, 10);
 
   // Only cache if we have actual data - prevents caching empty results from API failures
-  const hasData = limitedCandidates.length > 0 || continueWatching.length > 0 || recentlyAdded.length > 0;
-  if (hasData) {
+  const hasData =
+    limitedCandidates.length > 0 ||
+    continueWatching.length > 0 ||
+    recentlyAdded.length > 0;
+  const feedErrors = [!onDeckResult.success && "Couldn't refresh Continue Watching.", !recentlyAddedResult.success && "Couldn't refresh recently added titles."].filter((value): value is string => !!value);
+  if (hasData && !feedErrors.length) {
     await setCache<CachedHomeData>(cacheKey, {
       billboardCandidates: limitedCandidates,
       continueWatching,
@@ -379,6 +428,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     billboardCandidates: limitedCandidates,
     continueWatching,
     recentlyAdded,
+    feedErrors,
   });
 }
 
@@ -390,9 +440,13 @@ interface ContextMenuState {
 }
 
 export default function AppIndex() {
-  const { billboardCandidates, continueWatching, recentlyAdded, extraRows, seerrEnabled } =
-    useLoaderData<typeof loader>();
-  const [requestItem, setRequestItem] = useState<RequestableItem | null>(null);
+  const {
+    billboardCandidates,
+    continueWatching,
+    recentlyAdded,
+    extraRows,
+    feedErrors,
+  } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
@@ -422,12 +476,16 @@ export default function AppIndex() {
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [revalidator]);
 
   // Local state for optimistic updates
-  const [localWatchlistState, setLocalWatchlistState] = useState<Record<string, boolean>>({});
-  const [removedFromContinueWatching, setRemovedFromContinueWatching] = useState<Set<string>>(new Set());
+  const [localWatchlistState, setLocalWatchlistState] = useState<
+    Record<string, boolean>
+  >({});
+  const [removedFromContinueWatching, setRemovedFromContinueWatching] =
+    useState<Set<string>>(new Set());
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -458,13 +516,16 @@ export default function AppIndex() {
     navigate(`/app/media/${mediaType}/${ratingKey}`);
   };
 
-  const handleContextMenu = useCallback((item: MediaItemView, position: { x: number; y: number }) => {
-    setContextMenu({
-      isOpen: true,
-      position,
-      item,
-    });
-  }, []);
+  const handleContextMenu = useCallback(
+    (item: MediaItemView, position: { x: number; y: number }) => {
+      setContextMenu({
+        isOpen: true,
+        position,
+        item,
+      });
+    },
+    []
+  );
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
@@ -483,7 +544,10 @@ export default function AppIndex() {
 
       if (!response.ok) {
         // Revert on failure
-        setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
+        setLocalWatchlistState((prev) => ({
+          ...prev,
+          [item.ratingKey]: false,
+        }));
       }
     } catch {
       // Revert on error
@@ -512,37 +576,42 @@ export default function AppIndex() {
     }
   }, []);
 
-  const handleRemoveFromContinueWatching = useCallback(async (item: MediaItemView) => {
-    // Optimistic update - hide from UI immediately
-    setRemovedFromContinueWatching((prev) => new Set(prev).add(item.ratingKey));
+  const handleRemoveFromContinueWatching = useCallback(
+    async (item: MediaItemView) => {
+      // Optimistic update - hide from UI immediately
+      setRemovedFromContinueWatching((prev) =>
+        new Set(prev).add(item.ratingKey)
+      );
 
-    try {
-      const response = await fetch("/api/plex/scrobble", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
+      try {
+        const response = await fetch("/api/plex/scrobble", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ratingKey: item.ratingKey }),
+        });
 
-      if (response.ok) {
-        // Revalidate data after successful removal
-        revalidator.revalidate();
-      } else {
-        // Revert on failure
+        if (response.ok) {
+          // Revalidate data after successful removal
+          revalidator.revalidate();
+        } else {
+          // Revert on failure
+          setRemovedFromContinueWatching((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(item.ratingKey);
+            return newSet;
+          });
+        }
+      } catch {
+        // Revert on error
         setRemovedFromContinueWatching((prev) => {
           const newSet = new Set(prev);
           newSet.delete(item.ratingKey);
           return newSet;
         });
       }
-    } catch {
-      // Revert on error
-      setRemovedFromContinueWatching((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(item.ratingKey);
-        return newSet;
-      });
-    }
-  }, [revalidator]);
+    },
+    [revalidator]
+  );
 
   // Get the effective watchlist state for an item
   const getIsInWatchlist = (item: MediaItemView): boolean => {
@@ -620,6 +689,7 @@ export default function AppIndex() {
 
       {/* Media rows below the billboard */}
       <Container size="wide" className="relative z-10 -mt-16 space-y-8">
+        {feedErrors.map((message) => <p key={message} role="alert" className="text-red-400">{message}</p>)}
         {/* Continue Watching row */}
         {filteredContinueWatching.length > 0 && (
           <MediaRow title="Continue Watching">
@@ -643,6 +713,21 @@ export default function AppIndex() {
           </MediaRow>
         )}
 
+        {extraRows.map((row, index) => (
+          <MediaRow key={`${index}:${row.title}`} title={row.title}>
+            {row.items.map(({ ratingKey, ...item }) => (
+              <MediaCard
+                key={item.key}
+                imageUrl={item.imageUrl}
+                title={item.title}
+                year={item.year}
+                badge={ratingKey ? undefined : "Not in library"}
+                onClick={() => navigate(item.href)}
+                onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
+              />
+            ))}
+          </MediaRow>
+        ))}
         {/* Recently Added row */}
         {recentlyAdded.length > 0 && (
           <MediaRow title="Recently Added">
@@ -673,29 +758,7 @@ export default function AppIndex() {
           </MediaRow>
         )}
 
-        {extraRows.map((row) => (
-          <MediaRow key={row.title} title={row.title}>
-            {row.items.map(({ ratingKey, tmdb, ...item }) => (
-              <MediaCard
-                key={item.key}
-                imageUrl={item.imageUrl}
-                title={item.title}
-                year={item.year}
-                badge={ratingKey ? undefined : "Not in library"}
-                onClick={() => {
-                  if (ratingKey) navigate(item.href);
-                  else if (seerrEnabled && tmdb)
-                    setRequestItem({ tmdbId: tmdb.id, type: tmdb.type, title: item.title, year: item.year, posterUrl: tmdb.posterUrl, tmdbUrl: item.href });
-                  else window.open(item.href, "_blank", "noopener,noreferrer");
-                }}
-                onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
-              />
-            ))}
-          </MediaRow>
-        ))}
       </Container>
-
-      {requestItem && <RequestModal item={requestItem} onClose={() => setRequestItem(null)} />}
 
       {/* Context Menu */}
       {contextMenu.isOpen && contextMenu.item && (
