@@ -6,11 +6,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useNavigation, useSearchParams } from "@remix-run/react";
+import {
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+  useSearchParams,
+} from "@remix-run/react";
 import { Loader2, Search } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
-import { RequestModal, type RequestableItem } from "~/components/media/RequestModal";
 import { Typography } from "~/components/ui";
 import { createSeerrClient } from "~/lib/integrations/seerr.server";
 import { requireServerToken } from "~/lib/auth/session.server";
@@ -35,15 +39,28 @@ interface LibraryResult {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
-  const q = (new URL(request.url).searchParams.get("q") || "").trim().slice(0, 100);
+  const q = (new URL(request.url).searchParams.get("q") || "")
+    .trim()
+    .slice(0, 100);
   const seerrEnabled = Boolean(await createSeerrClient());
   if (!q) {
-    return json({ q, library: [] as LibraryResult[], discover: [] as TMDBRecommendation[], seerrEnabled });
+    return json({
+      q,
+      library: [] as LibraryResult[],
+      discover: [] as TMDBRecommendation[],
+      seerrEnabled,
+    });
   }
 
-  const client = new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token, clientId: env.PLEX_CLIENT_ID });
+  const client = new PlexClient({
+    serverUrl: env.PLEX_SERVER_URL,
+    token,
+    clientId: env.PLEX_CLIENT_ID,
+  });
   const user = await getCurrentUser(request);
-  const discoveryDisabled = user ? (await getUserSettings(user.id))?.preferences.discoveryDisabled : false;
+  const discoveryDisabled = user
+    ? (await getUserSettings(user.id))?.preferences.discoveryDisabled
+    : false;
   const tmdb = discoveryDisabled ? null : createTMDBClient();
   const [plexResult, tmdbResult] = await Promise.all([
     client.search(q),
@@ -66,8 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function SearchPage() {
-  const { q, library, discover, seerrEnabled } = useLoaderData<typeof loader>();
-  const [requestItem, setRequestItem] = useState<RequestableItem | null>(null);
+  const { q, library, discover } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -79,14 +95,19 @@ export default function SearchPage() {
     const trimmed = value.trim();
     if (trimmed === (searchParams.get("q") || "")) return;
     debounceRef.current = setTimeout(() => {
-      setSearchParams(trimmed ? { q: trimmed } : {}, { replace: true, preventScrollReset: true });
+      setSearchParams(trimmed ? { q: trimmed } : {}, {
+        replace: true,
+        preventScrollReset: true,
+      });
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [value, searchParams, setSearchParams]);
 
-  const isSearching = navigation.state === "loading" && navigation.location?.pathname === "/app/search";
+  const isSearching =
+    navigation.state === "loading" &&
+    navigation.location?.pathname === "/app/search";
 
   return (
     <Container className="py-8">
@@ -109,7 +130,8 @@ export default function SearchPage() {
 
       {!q && (
         <Typography variant="body" className="text-foreground-secondary">
-          Search your library by title. Press ⌘K or Ctrl+K from anywhere to jump here.
+          Search your library by title. Press ⌘K or Ctrl+K from anywhere to jump
+          here.
         </Typography>
       )}
 
@@ -147,7 +169,7 @@ export default function SearchPage() {
       {discover.length > 0 && (
         <section>
           <Typography variant="subtitle" as="h2" className="mb-4">
-            Not in your library
+            Discover
           </Typography>
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
             {discover.map((item) => (
@@ -158,16 +180,7 @@ export default function SearchPage() {
                 year={item.releaseDate?.slice(0, 4)}
                 hideHoverPlay
                 onClick={() =>
-                  seerrEnabled
-                    ? setRequestItem({
-                        tmdbId: item.id,
-                        type: item.type,
-                        title: item.title,
-                        year: item.releaseDate?.slice(0, 4),
-                        posterUrl: item.posterUrl,
-                        tmdbUrl: item.tmdbUrl,
-                      })
-                    : window.open(item.tmdbUrl, "_blank", "noopener,noreferrer")
+                  navigate(`/app/media/${item.type}/tmdb-${item.id}`)
                 }
               />
             ))}
@@ -175,7 +188,7 @@ export default function SearchPage() {
         </section>
       )}
 
-      {requestItem && <RequestModal item={requestItem} onClose={() => setRequestItem(null)} />}
+
     </Container>
   );
 }
