@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--color-accent-hover);
+    outline-offset: 3px;
+    scroll-margin: 5rem;
+  }
+  /* Route announcements receive focus without looking like interactive controls. */
+  :where(h1, main)[tabindex="-1"]:focus {
+    outline: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Hover-zoom extensions (Imagus, Hover Zoom) key off hovered <img> targets. */
+@layer base {
+  img {
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+}
+
 /* Utility to hide scrollbar while maintaining scroll functionality */
 @layer utilities {
   .scrollbar-hide {
@@ -86,9 +114,7 @@
   body {
     margin: 0;
     padding: 0;
-    font-feature-settings:
-      "kern" 1,
-      "liga" 1;
+    font-feature-settings: "kern" 1, "liga" 1;
     background-color: var(--color-background-primary);
     color: var(--color-foreground-primary);
     /* Ensure body fills viewport and prevents overflow artifacts */
