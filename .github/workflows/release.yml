@@ -66,7 +66,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # The release tag includes semantic-release's package.json bump; head_sha does not.
+          ref: v${{ needs.release.outputs.new_release_version }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
