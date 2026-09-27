@@ -45,9 +45,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Build direct stream URL
-  const streamUrl = `${env.PLEX_SERVER_URL}${mediaPart.key}?X-Plex-Token=${token}`;
-  console.log(`[Stream] Streaming: ${metadata.title} (${ratingKey})`);
+  const streamUrl = new URL(mediaPart.key, env.PLEX_SERVER_URL);
+  streamUrl.searchParams.set("X-Plex-Token", token);
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     // Forward range headers for seeking support
     const headers: HeadersInit = {
@@ -60,17 +62,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     // Fetch from Plex with range support
-    const plexResponse = await fetch(streamUrl, { headers });
+    const plexResponse = await fetch(streamUrl, {
+      headers,
+      signal: AbortSignal.any([request.signal, controller.signal]),
+    });
 
     if (!plexResponse.ok && plexResponse.status !== 206) {
       console.error("[Stream] Plex error:", plexResponse.status, plexResponse.statusText);
       return new Response(`Plex error: ${plexResponse.statusText}`, {
         status: plexResponse.status,
+        headers: plexResponse.headers.has("Content-Range")
+          ? { "Content-Range": plexResponse.headers.get("Content-Range")! }
+          : {},
       });
     }
 
     // Build response headers
     const responseHeaders = new Headers();
+    responseHeaders.set("Cache-Control", "private, no-store");
 
     // Copy important headers from Plex response
     const contentType = plexResponse.headers.get("Content-Type");
@@ -94,8 +103,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       status: plexResponse.status,
       headers: responseHeaders,
     });
-  } catch (error) {
-    console.error("[Stream] Proxy error:", error);
-    return new Response("Failed to fetch stream", { status: 500 });
+  } catch {
+    return new Response("Failed to fetch stream", { status: controller.signal.aborted ? 504 : 502 });
+  } finally {
+    clearTimeout(timeout);
   }
 }

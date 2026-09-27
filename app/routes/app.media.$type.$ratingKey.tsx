@@ -13,17 +13,40 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Link, useNavigate } from "@remix-run/react";
-import { Play, Plus, Check, Star, Clock, Calendar, ExternalLink, ChevronRight, HardDrive, Volume2, Subtitles, RotateCcw } from "lucide-react";
+import {
+  Play,
+  Plus,
+  Check,
+  Star,
+  Clock,
+  Calendar,
+  ExternalLink,
+  ChevronRight,
+  HardDrive,
+  Volume2,
+  Subtitles,
+  RotateCcw,
+  Film,
+} from "lucide-react";
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
+import { TrailerModal } from "~/components/media/TrailerModal";
 import { Typography, Button } from "~/components/ui";
-import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
+import {
+  requireServerToken,
+  requirePlexToken,
+} from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { createTMDBClient } from "~/lib/tmdb/client.server";
 import { createOMDbClient } from "~/lib/omdb/client.server";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import { getUserSettings } from "~/lib/settings/storage.server";
 import type { PlexMediaItem, PlexMetadata, PlexRole } from "~/lib/plex/types";
 import type { TMDBRecommendation } from "~/lib/tmdb/types";
+import { externalTitle, externalImdbTitle } from "~/lib/title.server";
+import { RequestModal } from "~/components/media/RequestModal";
+import { ExternalTitle } from "~/components/media/ExternalTitle";
 
 interface SeasonView {
   ratingKey: string;
@@ -91,8 +114,7 @@ interface LoaderData {
     type: string;
   }>;
   recommendations: TMDBRecommendation[];
-  serverUrl: string;
-  token: string;
+  trailerKey?: string; // YouTube video key from TMDB
   type: "movie" | "show" | "season" | "episode";
   viewOffset?: number; // Resume position in milliseconds
   viewCount: number; // Number of times watched
@@ -155,15 +177,19 @@ interface LoaderData {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  const title = data?.metadata?.title ?? "Media Details";
+  const title = data && "external" in data ? data.external.title : data?.metadata?.title ?? "Media Details";
   return [
     { title: `${title} | Watchtower` },
-    { name: "description", content: data?.metadata?.summary ?? "" },
+    { name: "description", content: data && "external" in data ? data.external.overview ?? "" : data?.metadata?.summary ?? "" },
   ];
 };
 
 // Use shared image URL helpers with proper sizing
-import { buildPosterUrl, buildBackdropUrl, buildPlexImageUrl } from "~/lib/plex/images";
+import {
+  buildPosterUrl,
+  buildBackdropUrl,
+  buildPlexImageUrl,
+} from "~/lib/plex/images";
 
 function formatRuntime(durationMs?: number): string | null {
   if (!durationMs) return null;
@@ -209,7 +235,9 @@ function parseMetacriticRating(rating: string): number | null {
  * @param externalRatings - OMDb ratings data
  * @returns Rating as string (e.g., "9.5") or null if not available
  */
-function getOMDbCriticRating(externalRatings: ExternalRatings | null): string | null {
+function getOMDbCriticRating(
+  externalRatings: ExternalRatings | null
+): string | null {
   if (!externalRatings) return null;
 
   const scores: number[] = [];
@@ -305,7 +333,14 @@ function formatVotes(votes: string): string {
   return votes;
 }
 
-function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFromPlex, plexAudienceRating }: RatingBadgeProps) {
+function RatingBadge({
+  type,
+  value,
+  externalRatings,
+  lastRatedAt,
+  isAudienceFromPlex,
+  plexAudienceRating,
+}: RatingBadgeProps) {
   const [isOpen, setIsOpen] = useState(false);
   const badgeRef = useRef<HTMLButtonElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -352,13 +387,19 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
       return (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-foreground-secondary">Your Rating</span>
-            <span className="font-medium text-foreground-primary">{value}/10</span>
+            <span className="text-sm text-foreground-secondary">
+              Your Rating
+            </span>
+            <span className="font-medium text-foreground-primary">
+              {value}/10
+            </span>
           </div>
           {lastRatedAt && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground-secondary">Rated</span>
-              <span className="text-sm text-foreground-muted">{formatRatedDate(lastRatedAt)}</span>
+              <span className="text-sm text-foreground-muted">
+                {formatRatedDate(lastRatedAt)}
+              </span>
             </div>
           )}
           <p className="mt-2 text-xs text-foreground-muted">
@@ -369,7 +410,8 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
     }
 
     if (type === "critic") {
-      const hasRatings = externalRatings?.rottenTomatoes || externalRatings?.metacritic;
+      const hasRatings =
+        externalRatings?.rottenTomatoes || externalRatings?.metacritic;
       return (
         <div className="space-y-2">
           {hasRatings ? (
@@ -377,25 +419,38 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
               <div className="space-y-1.5">
                 {externalRatings?.rottenTomatoes && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground-secondary">Rotten Tomatoes</span>
-                    <span className="font-medium text-foreground-primary">{externalRatings.rottenTomatoes.rating}</span>
+                    <span className="text-sm text-foreground-secondary">
+                      Rotten Tomatoes
+                    </span>
+                    <span className="font-medium text-foreground-primary">
+                      {externalRatings.rottenTomatoes.rating}
+                    </span>
                   </div>
                 )}
                 {externalRatings?.metacritic && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground-secondary">Metacritic</span>
-                    <span className="font-medium text-foreground-primary">{externalRatings.metacritic.rating}</span>
+                    <span className="text-sm text-foreground-secondary">
+                      Metacritic
+                    </span>
+                    <span className="font-medium text-foreground-primary">
+                      {externalRatings.metacritic.rating}
+                    </span>
                   </div>
                 )}
               </div>
-              {externalRatings?.rottenTomatoes && externalRatings?.metacritic && (
-                <div className="border-t border-border-subtle pt-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-foreground-secondary">Average</span>
-                    <span className="font-medium text-foreground-primary">{value}/10</span>
+              {externalRatings?.rottenTomatoes &&
+                externalRatings?.metacritic && (
+                  <div className="border-t border-border-subtle pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-foreground-secondary">
+                        Average
+                      </span>
+                      <span className="font-medium text-foreground-primary">
+                        {value}/10
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
             </>
           ) : (
             <p className="text-sm text-foreground-secondary">
@@ -415,7 +470,9 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
               <div className="space-y-1.5">
                 {externalRatings?.imdb && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground-secondary">IMDb</span>
+                    <span className="text-sm text-foreground-secondary">
+                      IMDb
+                    </span>
                     <span className="font-medium text-foreground-primary">
                       {externalRatings.imdb.rating}/10
                       <span className="ml-1 text-xs text-foreground-muted">
@@ -430,7 +487,9 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-foreground-secondary">Plex</span>
-                <span className="font-medium text-foreground-primary">{plexAudienceRating}/10</span>
+                <span className="font-medium text-foreground-primary">
+                  {plexAudienceRating}/10
+                </span>
               </div>
               <p className="mt-2 text-xs text-foreground-muted">
                 Audience rating from Plex metadata.
@@ -466,7 +525,9 @@ function RatingBadge({ type, value, externalRatings, lastRatedAt, isAudienceFrom
         >
           <div className="mb-2 flex items-center gap-2">
             <Star className={`h-4 w-4 ${config.color}`} />
-            <span className="font-medium text-foreground-primary">{config.title}</span>
+            <span className="font-medium text-foreground-primary">
+              {config.title}
+            </span>
           </div>
           {renderTooltipContent()}
         </div>
@@ -527,7 +588,11 @@ function formatAudioCodec(codec?: string): string {
   return codecMap[codec.toLowerCase()] || codec.toUpperCase();
 }
 
-function formatResolution(width?: number, height?: number, resolution?: string): string {
+function formatResolution(
+  width?: number,
+  height?: number,
+  resolution?: string
+): string {
   if (resolution) {
     // Map common resolution strings
     if (resolution === "4k" || resolution === "2160") return "4K";
@@ -555,7 +620,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { type, ratingKey } = params;
 
   // Validate type parameter - now supports all content types
-  if (type !== "movie" && type !== "show" && type !== "season" && type !== "episode") {
+  if (
+    type !== "movie" &&
+    type !== "show" &&
+    type !== "season" &&
+    type !== "episode"
+  ) {
     throw new Response("Invalid media type", { status: 400 });
   }
 
@@ -570,6 +640,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     token: serverToken,
     clientId: env.PLEX_CLIENT_ID,
   });
+
+  if (ratingKey.startsWith("imdb-") && (type === "movie" || type === "show")) return externalImdbTitle(request, client, type, ratingKey.slice(5));
+
+  if (ratingKey.startsWith("tmdb-") && (type === "movie" || type === "show")) {
+    const id = /^tmdb-\d+$/.test(ratingKey) ? Number(ratingKey.slice(5)) : NaN;
+    return externalTitle(request, client, type, id);
+  }
 
   // Client for Discover API operations (watchlist check)
   const discoverClient = new PlexClient({
@@ -627,7 +704,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
         // Fetch show info from season's parent
         if (seasonResult.data.parentRatingKey) {
-          const showResult = await client.getMetadata(seasonResult.data.parentRatingKey);
+          const showResult = await client.getMetadata(
+            seasonResult.data.parentRatingKey
+          );
           if (showResult.success) {
             showTitle = showResult.data.title;
             showRatingKey = seasonResult.data.parentRatingKey;
@@ -678,7 +757,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // For episodes/seasons, use parent art as backdrop if not available
-  const artPath = metadata.art || (type === "episode" ? metadata.grandparentArt : undefined);
+  const artPath =
+    metadata.art || (type === "episode" ? metadata.grandparentArt : undefined);
 
   // Extract external IDs from Plex Guid array (contains external references like imdb://, tmdb://)
   // Also fall back to checking the main guid field for older Plex agents
@@ -729,7 +809,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Build media info
     mediaInfo = {
-      resolution: formatResolution(media.width, media.height, media.videoResolution),
+      resolution: formatResolution(
+        media.width,
+        media.height,
+        media.videoResolution
+      ),
       videoCodec: formatVideoCodec(media.videoCodec),
       audioCodec: formatAudioCodec(media.audioCodec),
       audioChannels: formatAudioChannels(media.audioChannels) ?? undefined,
@@ -743,7 +827,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       .filter((s) => s.streamType === 1)
       .map((s) => ({
         id: s.id,
-        displayTitle: s.displayTitle || `${formatResolution(s.width, s.height)} ${formatVideoCodec(s.codec)}`,
+        displayTitle:
+          s.displayTitle ||
+          `${formatResolution(s.width, s.height)} ${formatVideoCodec(s.codec)}`,
         resolution: formatResolution(s.width, s.height),
         codec: formatVideoCodec(s.codec),
         selected: s.selected,
@@ -754,7 +840,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       .filter((s) => s.streamType === 2)
       .map((s) => ({
         id: s.id,
-        displayTitle: s.displayTitle || `${s.language || "Unknown"} (${formatAudioCodec(s.codec)})`,
+        displayTitle:
+          s.displayTitle ||
+          `${s.language || "Unknown"} (${formatAudioCodec(s.codec)})`,
         language: s.language,
         channels: formatAudioChannels(s.channels) ?? undefined,
         codec: formatAudioCodec(s.codec),
@@ -786,8 +874,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Calculate audience rating with fallback logic
-  const calculatedAudienceRating = getOMDbAudienceRating(externalRatings, metadata.audienceRating);
-  const isAudienceFromPlex = !externalRatings?.imdb && metadata.audienceRating !== undefined;
+  const calculatedAudienceRating = getOMDbAudienceRating(
+    externalRatings,
+    metadata.audienceRating
+  );
+  const isAudienceFromPlex =
+    !externalRatings?.imdb && metadata.audienceRating !== undefined;
 
   // Build processed data for the view
   const loaderData: LoaderData = {
@@ -797,7 +889,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     year: metadata.year?.toString() ?? null,
     duration: formatRuntime(metadata.duration),
     contentRating: metadata.contentRating ?? null,
-    criticRating: getOMDbCriticRating(externalRatings) ?? formatRating(metadata.rating),
+    criticRating:
+      getOMDbCriticRating(externalRatings) ?? formatRating(metadata.rating),
     audienceRating: calculatedAudienceRating,
     userRating: formatRating(metadata.userRating),
     lastRatedAt: metadata.lastRatedAt,
@@ -819,8 +912,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         type,
       })),
     recommendations: [],
-    serverUrl: env.PLEX_SERVER_URL,
-    token: serverToken, // serverToken for local server operations (images, API calls)
     type,
     viewOffset: metadata.viewOffset,
     viewCount: metadata.viewCount ?? 0,
@@ -874,9 +965,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       if (regularSeasons.length > 0) {
         // Find first season that's not fully watched
         const firstUnwatched = regularSeasons.find(
-          (s) => (s.leafCount ?? 0) > 0 && (s.viewedLeafCount ?? 0) < (s.leafCount ?? 0)
+          (s) =>
+            (s.leafCount ?? 0) > 0 &&
+            (s.viewedLeafCount ?? 0) < (s.leafCount ?? 0)
         );
-        targetSeason = firstUnwatched || regularSeasons[regularSeasons.length - 1];
+        targetSeason =
+          firstUnwatched || regularSeasons[regularSeasons.length - 1];
       }
 
       if (targetSeason) {
@@ -887,22 +981,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 
           loaderData.episodes = sortedEpisodes.map((episode) => ({
-              ratingKey: episode.ratingKey,
-              title: episode.title,
-              index: episode.index ?? 0,
-              seasonIndex: episode.parentIndex ?? targetSeason.index ?? 0,
-              duration: formatRuntime(episode.duration),
-              thumb: buildBackdropUrl(episode.thumb),
-              summary: episode.summary,
-              viewCount: episode.viewCount ?? 0,
-              viewOffset: episode.viewOffset,
-            }));
+            ratingKey: episode.ratingKey,
+            title: episode.title,
+            index: episode.index ?? 0,
+            seasonIndex: episode.parentIndex ?? targetSeason.index ?? 0,
+            duration: formatRuntime(episode.duration),
+            thumb: buildBackdropUrl(episode.thumb),
+            summary: episode.summary,
+            viewCount: episode.viewCount ?? 0,
+            viewOffset: episode.viewOffset,
+          }));
           // Store the initially selected season index
           loaderData.initialSeasonIndex = targetSeason.index ?? 1;
 
           // Find On Deck episode (first with viewOffset or first unwatched)
-          const inProgressEp = sortedEpisodes.find((e) => e.viewOffset && e.viewOffset > 0);
-          const firstUnwatchedEp = sortedEpisodes.find((e) => (e.viewCount ?? 0) === 0);
+          const inProgressEp = sortedEpisodes.find(
+            (e) => e.viewOffset && e.viewOffset > 0
+          );
+          const firstUnwatchedEp = sortedEpisodes.find(
+            (e) => (e.viewCount ?? 0) === 0
+          );
           const onDeckEpisode = inProgressEp || firstUnwatchedEp;
 
           if (onDeckEpisode) {
@@ -928,20 +1026,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 
       loaderData.episodes = sortedEpisodes.map((episode) => ({
-          ratingKey: episode.ratingKey,
-          title: episode.title,
-          index: episode.index ?? 0,
-          seasonIndex: seasonIndex ?? 0,
-          duration: formatRuntime(episode.duration),
-          thumb: buildBackdropUrl(episode.thumb),
-          summary: episode.summary,
-          viewCount: episode.viewCount ?? 0,
-          viewOffset: episode.viewOffset,
-        }));
+        ratingKey: episode.ratingKey,
+        title: episode.title,
+        index: episode.index ?? 0,
+        seasonIndex: seasonIndex ?? 0,
+        duration: formatRuntime(episode.duration),
+        thumb: buildBackdropUrl(episode.thumb),
+        summary: episode.summary,
+        viewCount: episode.viewCount ?? 0,
+        viewOffset: episode.viewOffset,
+      }));
 
       // Find On Deck episode for season page
-      const inProgressEp = sortedEpisodes.find((e) => e.viewOffset && e.viewOffset > 0);
-      const firstUnwatchedEp = sortedEpisodes.find((e) => (e.viewCount ?? 0) === 0);
+      const inProgressEp = sortedEpisodes.find(
+        (e) => e.viewOffset && e.viewOffset > 0
+      );
+      const firstUnwatchedEp = sortedEpisodes.find(
+        (e) => (e.viewCount ?? 0) === 0
+      );
       const onDeckEpisode = inProgressEp || firstUnwatchedEp;
 
       if (onDeckEpisode) {
@@ -962,13 +1064,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (tmdbClient && metadata.title) {
       try {
         const year = metadata.year;
-        const recsResult =
-          type === "movie"
-            ? await tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
-            : await tmdbClient.getTVRecommendationsByTitle(metadata.title, year);
+        const user = await getCurrentUser(request);
+        const discoveryDisabled = user
+          ? (await getUserSettings(user.id))?.preferences.discoveryDisabled
+          : false;
+        const [recsResult, trailerKey] = await Promise.all([
+          discoveryDisabled
+            ? null
+            : type === "movie"
+            ? tmdbClient.getMovieRecommendationsByTitle(metadata.title, year)
+            : tmdbClient.getTVRecommendationsByTitle(metadata.title, year),
+          tmdbId ? tmdbClient.getTrailerKey(type, tmdbId) : null,
+        ]);
 
-        if (recsResult.success) {
+        if (recsResult?.success) {
           loaderData.recommendations = recsResult.data;
+        }
+        if (trailerKey) {
+          loaderData.trailerKey = trailerKey;
         }
       } catch (error) {
         // Silently fail - recommendations are optional
@@ -1006,6 +1119,11 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export default function MediaDetailPage() {
   const data = useLoaderData<typeof loader>();
+  return "external" in data ? <ExternalTitle data={data.external} /> : <LibraryDetail data={data} />;
+}
+
+function LibraryDetail({ data }: { data: LoaderData }) {
+  const [requesting, setRequesting] = useState(false);
   const {
     metadata,
     backdropUrl,
@@ -1027,8 +1145,7 @@ export default function MediaDetailPage() {
     cast,
     similar,
     recommendations,
-    serverUrl,
-    token,
+    trailerKey,
     type,
     viewOffset,
     viewCount,
@@ -1076,63 +1193,74 @@ export default function MediaDetailPage() {
 
   // Handle season change - fetch episodes for the selected season
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleSeasonChange = useCallback(async (newSeasonIndex: number) => {
-    setSelectedSeasonIndex(newSeasonIndex);
+  const handleSeasonChange = useCallback(
+    async (newSeasonIndex: number) => {
+      setSelectedSeasonIndex(newSeasonIndex);
 
-    const selectedSeason = seasons?.find((s) => s.index === newSeasonIndex);
-    if (!selectedSeason) return;
+      const selectedSeason = seasons?.find((s) => s.index === newSeasonIndex);
+      if (!selectedSeason) return;
 
-    setIsLoadingEpisodes(true);
-    try {
-      // Fetch episodes via API route
-      const response = await fetch(
-        `/api/plex/children/${selectedSeason.ratingKey}`
-      );
-      if (response.ok) {
-        const data = await response.json();
-        if (data.children) {
-          const sortedEpisodes = data.children
+      setIsLoadingEpisodes(true);
+      try {
+        // Fetch episodes via API route
+        const response = await fetch(
+          `/api/plex/children/${selectedSeason.ratingKey}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          if (data.children) {
+            const sortedEpisodes = data.children
               .filter((e: PlexMediaItem) => e.type === "episode")
-              .sort((a: PlexMediaItem, b: PlexMediaItem) => (a.index ?? 0) - (b.index ?? 0));
+              .sort(
+                (a: PlexMediaItem, b: PlexMediaItem) =>
+                  (a.index ?? 0) - (b.index ?? 0)
+              );
 
-          setEpisodes(
-            sortedEpisodes.map((episode: PlexMediaItem) => ({
+            setEpisodes(
+              sortedEpisodes.map((episode: PlexMediaItem) => ({
                 ratingKey: episode.ratingKey,
                 title: episode.title,
                 index: episode.index ?? 0,
                 seasonIndex: episode.parentIndex ?? seasonIndex,
-                duration: episode.duration ? formatRuntime(episode.duration) : null,
+                duration: episode.duration
+                  ? formatRuntime(episode.duration)
+                  : null,
                 thumb: buildBackdropUrl(episode.thumb),
                 summary: episode.summary,
                 viewCount: episode.viewCount ?? 0,
                 viewOffset: episode.viewOffset,
               }))
-          );
+            );
 
-          // Update On Deck
-          const inProgressEp = sortedEpisodes.find((e: PlexMediaItem) => e.viewOffset && e.viewOffset > 0);
-          const firstUnwatchedEp = sortedEpisodes.find((e: PlexMediaItem) => (e.viewCount ?? 0) === 0);
-          const onDeckEp = inProgressEp || firstUnwatchedEp;
-          if (onDeckEp) {
-            setOnDeck({
-              seasonIndex: onDeckEp.parentIndex ?? seasonIndex,
-              episodeIndex: onDeckEp.index ?? 1,
-              episodeTitle: onDeckEp.title,
-              episodeRatingKey: onDeckEp.ratingKey,
-              viewOffset: onDeckEp.viewOffset,
-            });
-          } else {
-            setOnDeck(undefined);
+            // Update On Deck
+            const inProgressEp = sortedEpisodes.find(
+              (e: PlexMediaItem) => e.viewOffset && e.viewOffset > 0
+            );
+            const firstUnwatchedEp = sortedEpisodes.find(
+              (e: PlexMediaItem) => (e.viewCount ?? 0) === 0
+            );
+            const onDeckEp = inProgressEp || firstUnwatchedEp;
+            if (onDeckEp) {
+              setOnDeck({
+                seasonIndex: onDeckEp.parentIndex ?? seasonIndex,
+                episodeIndex: onDeckEp.index ?? 1,
+                episodeTitle: onDeckEp.title,
+                episodeRatingKey: onDeckEp.ratingKey,
+                viewOffset: onDeckEp.viewOffset,
+              });
+            } else {
+              setOnDeck(undefined);
+            }
           }
         }
+      } catch (error) {
+        console.error("Failed to load episodes:", error);
+      } finally {
+        setIsLoadingEpisodes(false);
       }
-    } catch (error) {
-      console.error("Failed to load episodes:", error);
-    } finally {
-      setIsLoadingEpisodes(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seasons, serverUrl, token]);
+    },
+    [seasons, seasonIndex]
+  );
 
   const handlePlay = () => {
     // For TV shows and seasons, play the On Deck episode
@@ -1162,6 +1290,20 @@ export default function MediaDetailPage() {
 
   const [isInList, setIsInList] = useState(initialIsInWatchlist);
   const [isAddingToList, setIsAddingToList] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
+  const closeTrailer = useCallback(() => setShowTrailer(false), []);
+
+  const trailerButton = trailerKey ? (
+    <Button
+      variant="secondary"
+      size="lg"
+      onClick={() => setShowTrailer(true)}
+      className="w-full sm:w-auto"
+    >
+      <Film className="mr-2 h-5 w-5" />
+      Trailer
+    </Button>
+  ) : null;
 
   const handleAddToList = useCallback(async () => {
     if (isAddingToList) return;
@@ -1186,13 +1328,16 @@ export default function MediaDetailPage() {
 
   // Determine display title for episodes
   const displayTitle =
-    type === "episode" && seasonIndex !== undefined && episodeIndex !== undefined
+    type === "episode" &&
+    seasonIndex !== undefined &&
+    episodeIndex !== undefined
       ? `${episodeIndex}. ${metadata.title}`
       : metadata.title;
 
   // Determine button label based on watch state
   const playButtonLabel = () => {
-    if ((type === "show" || type === "season") && onDeck?.viewOffset) return "Resume";
+    if ((type === "show" || type === "season") && onDeck?.viewOffset)
+      return "Resume";
     if (viewOffset) return "Resume";
     if (isWatched) return "Play Again";
     return "Play";
@@ -1204,6 +1349,14 @@ export default function MediaDetailPage() {
 
   return (
     <div className="min-h-screen pb-16">
+      {requesting && tmdbId && (type === "movie" || type === "show") && <RequestModal item={{ tmdbId, type, title: metadata.title, year: year ?? undefined, posterUrl, tmdbUrl: `https://www.themoviedb.org/${type === "show" ? "tv" : "movie"}/${tmdbId}` }} onClose={() => setRequesting(false)} />}
+      {showTrailer && trailerKey && (
+        <TrailerModal
+          youtubeKey={trailerKey}
+          title={metadata.title}
+          onClose={closeTrailer}
+        />
+      )}
       {usePlexLayout ? (
         /* ===== PLEX-STYLE LAYOUT FOR TV SHOWS AND SEASONS ===== */
         <>
@@ -1233,7 +1386,9 @@ export default function MediaDetailPage() {
                         {isWatched ? (
                           <Check className="h-4 w-4 text-white sm:h-5 sm:w-5" />
                         ) : (
-                          <span className="text-xs font-semibold text-white sm:text-sm">{leafCount}</span>
+                          <span className="text-xs font-semibold text-white sm:text-sm">
+                            {leafCount}
+                          </span>
                         )}
                       </div>
                     )}
@@ -1256,12 +1411,18 @@ export default function MediaDetailPage() {
                 <div className="w-full text-center sm:flex-1 sm:pt-2 sm:text-left">
                   {/* Title */}
                   <h1 className="mb-1 text-2xl font-bold text-foreground-primary sm:text-3xl md:text-4xl lg:text-5xl">
-                    {type === "season" && showTitle ? showTitle : metadata.title}
+                    {type === "season" && showTitle
+                      ? showTitle
+                      : metadata.title}
                   </h1>
 
+                  {type === "show" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
                   {/* Season subtitle */}
                   {type === "season" && (
-                    <Typography variant="title" className="mb-2 text-foreground-secondary sm:mb-3">
+                    <Typography
+                      variant="title"
+                      className="mb-2 text-foreground-secondary sm:mb-3"
+                    >
                       Season {seasonIndex}
                     </Typography>
                   )}
@@ -1270,7 +1431,9 @@ export default function MediaDetailPage() {
                   <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-sm text-foreground-secondary sm:justify-start sm:gap-3">
                     {year && <span>{year}</span>}
                     {genres.length > 0 && (
-                      <span className="hidden sm:inline">{genres.slice(0, 2).join(", ")}</span>
+                      <span className="hidden sm:inline">
+                        {genres.slice(0, 2).join(", ")}
+                      </span>
                     )}
                     {contentRating && (
                       <span className="rounded bg-white/10 px-2 py-0.5">
@@ -1278,19 +1441,38 @@ export default function MediaDetailPage() {
                       </span>
                     )}
                     {criticRating && (
-                      <RatingBadge type="critic" value={criticRating} externalRatings={externalRatings} />
+                      <RatingBadge
+                        type="critic"
+                        value={criticRating}
+                        externalRatings={externalRatings}
+                      />
                     )}
                     {audienceRating && (
-                      <RatingBadge type="audience" value={audienceRating} externalRatings={externalRatings} isAudienceFromPlex={isAudienceFromPlex} plexAudienceRating={plexAudienceRating} />
+                      <RatingBadge
+                        type="audience"
+                        value={audienceRating}
+                        externalRatings={externalRatings}
+                        isAudienceFromPlex={isAudienceFromPlex}
+                        plexAudienceRating={plexAudienceRating}
+                      />
                     )}
                     {userRating && (
-                      <RatingBadge type="user" value={userRating} lastRatedAt={lastRatedAt} />
+                      <RatingBadge
+                        type="user"
+                        value={userRating}
+                        lastRatedAt={lastRatedAt}
+                      />
                     )}
                   </div>
 
                   {/* Action buttons - full width on mobile, inline on desktop */}
                   <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-                    <Button variant="primary" size="lg" onClick={handlePlay} className="w-full sm:w-auto">
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={handlePlay}
+                      className="w-full sm:w-auto"
+                    >
                       <Play className="mr-2 h-5 w-5 fill-current" />
                       {playButtonLabel()}
                     </Button>
@@ -1316,6 +1498,7 @@ export default function MediaDetailPage() {
                         )}
                       </Button>
                     )}
+                    {trailerButton}
                     {/* External Links - hidden on very small screens */}
                     <div className="hidden gap-2 sm:flex">
                       {tmdbId && (
@@ -1349,7 +1532,10 @@ export default function MediaDetailPage() {
 
                   {/* Summary - clamp to 3 lines on mobile, 4 on desktop */}
                   {metadata.summary && (
-                    <Typography variant="body" className="max-w-2xl text-foreground-secondary line-clamp-3 sm:line-clamp-4">
+                    <Typography
+                      variant="body"
+                      className="max-w-2xl text-foreground-secondary line-clamp-3 sm:line-clamp-4"
+                    >
                       {metadata.summary}
                     </Typography>
                   )}
@@ -1375,10 +1561,13 @@ export default function MediaDetailPage() {
                       <div className="relative w-28 sm:w-32 md:w-36">
                         {/* Episode count or checkmark badge */}
                         <div className="absolute right-0 top-0 z-10 flex h-6 min-w-6 items-center justify-center rounded-bl-lg bg-black/70 px-1.5">
-                          {season.viewedLeafCount >= season.leafCount && season.leafCount > 0 ? (
+                          {season.viewedLeafCount >= season.leafCount &&
+                          season.leafCount > 0 ? (
                             <Check className="h-3.5 w-3.5 text-white" />
                           ) : (
-                            <span className="text-xs font-semibold text-white">{season.leafCount}</span>
+                            <span className="text-xs font-semibold text-white">
+                              {season.leafCount}
+                            </span>
                           )}
                         </div>
                         {/* Season poster */}
@@ -1392,11 +1581,18 @@ export default function MediaDetailPage() {
                         </div>
                         {/* Season info */}
                         <div className="mt-2">
-                          <Typography variant="body" className="text-sm font-medium sm:text-base">
+                          <Typography
+                            variant="body"
+                            className="text-sm font-medium sm:text-base"
+                          >
                             {season.title}
                           </Typography>
-                          <Typography variant="caption" className="text-foreground-muted">
-                            {season.leafCount} ep{season.leafCount !== 1 ? "s" : ""}
+                          <Typography
+                            variant="caption"
+                            className="text-foreground-muted"
+                          >
+                            {season.leafCount} ep
+                            {season.leafCount !== 1 ? "s" : ""}
                           </Typography>
                         </div>
                       </div>
@@ -1446,7 +1642,13 @@ export default function MediaDetailPage() {
                             <div
                               className="h-full bg-accent-primary"
                               style={{
-                                width: `${Math.min(100, Math.max(0, (episode.viewOffset / 1000 / 60) * 2))}%`,
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(
+                                    0,
+                                    (episode.viewOffset / 1000 / 60) * 2
+                                  )
+                                )}%`,
                               }}
                             />
                           </div>
@@ -1454,18 +1656,28 @@ export default function MediaDetailPage() {
                       </div>
                       {/* Episode Info - side text on mobile, below thumbnail on sm+ */}
                       <div className="flex flex-1 flex-col justify-center sm:mt-2">
-                        <Typography variant="body" className="text-sm font-medium line-clamp-2 group-hover:text-accent-primary sm:text-base sm:line-clamp-1">
+                        <Typography
+                          variant="body"
+                          className="text-sm font-medium line-clamp-2 group-hover:text-accent-primary sm:text-base sm:line-clamp-1"
+                        >
                           {episode.title}
                         </Typography>
-                        <Typography variant="caption" className="text-foreground-muted">
-                          Episode {episode.index}{episode.duration && ` · ${episode.duration}`}
+                        <Typography
+                          variant="caption"
+                          className="text-foreground-muted"
+                        >
+                          Episode {episode.index}
+                          {episode.duration && ` · ${episode.duration}`}
                         </Typography>
                       </div>
                     </Link>
                   ))}
                 </div>
               ) : (
-                <Typography variant="body" className="py-8 text-center text-foreground-muted">
+                <Typography
+                  variant="body"
+                  className="py-8 text-center text-foreground-muted"
+                >
                   No episodes available for this season.
                 </Typography>
               )}
@@ -1475,7 +1687,11 @@ export default function MediaDetailPage() {
           {/* Cast Section */}
           {cast.length > 0 && (
             <Container size="wide" className="mt-6 sm:mt-8">
-              <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
+              <CastRow
+                title="Cast"
+                people={cast}
+                buildPhotoUrl={buildPhotoUrl}
+              />
             </Container>
           )}
 
@@ -1492,9 +1708,7 @@ export default function MediaDetailPage() {
                 {recommendations.map((rec) => (
                   <a
                     key={rec.id}
-                    href={rec.tmdbUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href={`/app/media/${rec.type}/tmdb-${rec.id}`}
                     className="group relative"
                   >
                     <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated ring-1 ring-white/10 transition-all duration-200 group-hover:ring-2 group-hover:ring-white/30">
@@ -1571,11 +1785,13 @@ export default function MediaDetailPage() {
                 <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-end sm:gap-6 md:gap-8">
                   {/* Poster - visible on all sizes, smaller on mobile */}
                   {posterUrl && (
-                    <div className={`flex-shrink-0 ${
-                      type === "episode"
-                        ? "w-40 sm:w-48 md:w-56 lg:w-64"
-                        : "w-32 sm:w-40 md:w-48 lg:w-56"
-                    }`}>
+                    <div
+                      className={`flex-shrink-0 ${
+                        type === "episode"
+                          ? "w-40 sm:w-48 md:w-56 lg:w-64"
+                          : "w-32 sm:w-40 md:w-48 lg:w-56"
+                      }`}
+                    >
                       <img
                         src={posterUrl}
                         alt={metadata.title}
@@ -1597,7 +1813,10 @@ export default function MediaDetailPage() {
 
                     {/* Season indicator for episodes */}
                     {type === "episode" && seasonIndex !== undefined && (
-                      <Typography variant="caption" className="mb-1 block text-accent-primary">
+                      <Typography
+                        variant="caption"
+                        className="mb-1 block text-accent-primary"
+                      >
                         Season {seasonIndex}
                       </Typography>
                     )}
@@ -1607,20 +1826,26 @@ export default function MediaDetailPage() {
                       {displayTitle}
                     </h1>
 
+                    {type === "movie" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
                     {/* Metadata row - wrapped and centered on mobile */}
                     <div className="mb-4 flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start sm:gap-3 sm:text-base">
                       {type === "episode" && originallyAired && (
                         <span className="flex items-center gap-1 text-foreground-secondary">
                           <Calendar className="h-4 w-4" />
-                          {new Date(originallyAired).toLocaleDateString("en-US", {
-                            year: "numeric",
-                            month: "short",
-                            day: "numeric",
-                          })}
+                          {new Date(originallyAired).toLocaleDateString(
+                            "en-US",
+                            {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            }
+                          )}
                         </span>
                       )}
                       {type === "movie" && year && (
-                        <span className="text-foreground-secondary">{year}</span>
+                        <span className="text-foreground-secondary">
+                          {year}
+                        </span>
                       )}
                       {duration && (
                         <span className="flex items-center gap-1 text-foreground-secondary">
@@ -1634,31 +1859,62 @@ export default function MediaDetailPage() {
                         </span>
                       )}
                       {criticRating && (
-                        <RatingBadge type="critic" value={criticRating} externalRatings={externalRatings} />
+                        <RatingBadge
+                          type="critic"
+                          value={criticRating}
+                          externalRatings={externalRatings}
+                        />
                       )}
                       {audienceRating && (
-                        <RatingBadge type="audience" value={audienceRating} externalRatings={externalRatings} isAudienceFromPlex={isAudienceFromPlex} plexAudienceRating={plexAudienceRating} />
+                        <RatingBadge
+                          type="audience"
+                          value={audienceRating}
+                          externalRatings={externalRatings}
+                          isAudienceFromPlex={isAudienceFromPlex}
+                          plexAudienceRating={plexAudienceRating}
+                        />
                       )}
                       {userRating && (
-                        <RatingBadge type="user" value={userRating} lastRatedAt={lastRatedAt} />
+                        <RatingBadge
+                          type="user"
+                          value={userRating}
+                          lastRatedAt={lastRatedAt}
+                        />
                       )}
                     </div>
 
                     {/* Tagline - hidden on very small screens */}
                     {metadata.tagline && (
-                      <Typography variant="subtitle" className="mb-4 hidden italic text-foreground-secondary sm:block">
+                      <Typography
+                        variant="subtitle"
+                        className="mb-4 hidden italic text-foreground-secondary sm:block"
+                      >
                         &quot;{metadata.tagline}&quot;
                       </Typography>
                     )}
 
                     {/* Action buttons - full width on mobile, inline on desktop */}
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
-                      <Button variant="primary" size="lg" onClick={handlePlay} className="w-full sm:w-auto">
+                      <Button
+                        variant="primary"
+                        size="lg"
+                        onClick={handlePlay}
+                        className="w-full sm:w-auto"
+                      >
                         <Play className="mr-2 h-5 w-5 fill-current" />
-                        {viewOffset ? "Resume" : isWatched ? "Play Again" : "Play"}
+                        {viewOffset
+                          ? "Resume"
+                          : isWatched
+                          ? "Play Again"
+                          : "Play"}
                       </Button>
                       {viewOffset && (
-                        <Button variant="secondary" size="lg" onClick={handlePlayFromBeginning} className="w-full sm:w-auto">
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          onClick={handlePlayFromBeginning}
+                          className="w-full sm:w-auto"
+                        >
                           <RotateCcw className="mr-2 h-5 w-5" />
                           From Start
                         </Button>
@@ -1684,6 +1940,7 @@ export default function MediaDetailPage() {
                           )}
                         </Button>
                       )}
+                      {trailerButton}
                     </div>
                   </div>
                 </div>
@@ -1692,14 +1949,20 @@ export default function MediaDetailPage() {
           </div>
 
           {/* Details Section */}
-          <Container size="wide" className="relative z-10 mt-6 space-y-6 sm:mt-8 sm:space-y-8">
+          <Container
+            size="wide"
+            className="relative z-10 mt-6 space-y-6 sm:mt-8 sm:space-y-8"
+          >
             {/* Summary - full width on all sizes */}
             {metadata.summary && (
               <div>
                 <Typography variant="title" className="mb-2 sm:mb-3">
                   Overview
                 </Typography>
-                <Typography variant="body" className="text-foreground-secondary">
+                <Typography
+                  variant="body"
+                  className="text-foreground-secondary"
+                >
                   {metadata.summary}
                 </Typography>
               </div>
@@ -1707,7 +1970,11 @@ export default function MediaDetailPage() {
 
             {/* Cast - horizontal scroll */}
             {cast.length > 0 && (
-              <CastRow title="Cast" people={cast} buildPhotoUrl={buildPhotoUrl} />
+              <CastRow
+                title="Cast"
+                people={cast}
+                buildPhotoUrl={buildPhotoUrl}
+              />
             )}
 
             {/* Metadata grid - 2 cols on mobile, sidebar on desktop */}
@@ -1717,7 +1984,10 @@ export default function MediaDetailPage() {
                 {/* Genres */}
                 {genres.length > 0 && (
                   <div>
-                    <Typography variant="caption" className="mb-2 block text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-2 block text-foreground-muted"
+                    >
                       Genres
                     </Typography>
                     <div className="flex flex-wrap gap-2">
@@ -1736,7 +2006,10 @@ export default function MediaDetailPage() {
                 {/* Studio */}
                 {studio && (
                   <div>
-                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-1 block text-foreground-muted"
+                    >
                       Studio
                     </Typography>
                     <Typography variant="body">{studio}</Typography>
@@ -1746,17 +2019,25 @@ export default function MediaDetailPage() {
                 {/* Directors */}
                 {directors.length > 0 && (
                   <div>
-                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-1 block text-foreground-muted"
+                    >
                       {directors.length === 1 ? "Director" : "Directors"}
                     </Typography>
-                    <Typography variant="body">{directors.join(", ")}</Typography>
+                    <Typography variant="body">
+                      {directors.join(", ")}
+                    </Typography>
                   </div>
                 )}
 
                 {/* Writers (especially for episodes) */}
                 {writers.length > 0 && (
                   <div>
-                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-1 block text-foreground-muted"
+                    >
                       {writers.length === 1 ? "Writer" : "Writers"}
                     </Typography>
                     <Typography variant="body">{writers.join(", ")}</Typography>
@@ -1764,33 +2045,48 @@ export default function MediaDetailPage() {
                 )}
 
                 {/* Original title if different */}
-                {metadata.originalTitle && metadata.originalTitle !== metadata.title && (
-                  <div>
-                    <Typography variant="caption" className="mb-1 block text-foreground-muted">
-                      Original Title
-                    </Typography>
-                    <Typography variant="body">{metadata.originalTitle}</Typography>
-                  </div>
-                )}
+                {metadata.originalTitle &&
+                  metadata.originalTitle !== metadata.title && (
+                    <div>
+                      <Typography
+                        variant="caption"
+                        className="mb-1 block text-foreground-muted"
+                      >
+                        Original Title
+                      </Typography>
+                      <Typography variant="body">
+                        {metadata.originalTitle}
+                      </Typography>
+                    </div>
+                  )}
 
                 {/* Media Info Section */}
                 {mediaInfo && (
                   <div className="border-t border-border-subtle pt-4">
-                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-3 flex items-center gap-2 text-foreground-muted"
+                    >
                       <HardDrive className="h-4 w-4" />
                       Media Info
                     </Typography>
                     <div className="space-y-2 text-sm">
                       {mediaInfo.resolution && (
                         <div className="flex items-center justify-between">
-                          <span className="text-foreground-muted">Resolution</span>
-                          <span className="font-medium">{mediaInfo.resolution}</span>
+                          <span className="text-foreground-muted">
+                            Resolution
+                          </span>
+                          <span className="font-medium">
+                            {mediaInfo.resolution}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.videoCodec && (
                         <div className="flex items-center justify-between">
                           <span className="text-foreground-muted">Video</span>
-                          <span className="font-medium">{mediaInfo.videoCodec}</span>
+                          <span className="font-medium">
+                            {mediaInfo.videoCodec}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.audioCodec && (
@@ -1798,26 +2094,35 @@ export default function MediaDetailPage() {
                           <span className="text-foreground-muted">Audio</span>
                           <span className="font-medium">
                             {mediaInfo.audioCodec}
-                            {mediaInfo.audioChannels && ` ${mediaInfo.audioChannels}`}
+                            {mediaInfo.audioChannels &&
+                              ` ${mediaInfo.audioChannels}`}
                           </span>
                         </div>
                       )}
                       {mediaInfo.container && (
                         <div className="flex items-center justify-between">
-                          <span className="text-foreground-muted">Container</span>
-                          <span className="font-medium">{mediaInfo.container}</span>
+                          <span className="text-foreground-muted">
+                            Container
+                          </span>
+                          <span className="font-medium">
+                            {mediaInfo.container}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.fileSize && (
                         <div className="flex items-center justify-between">
                           <span className="text-foreground-muted">Size</span>
-                          <span className="font-medium">{mediaInfo.fileSize}</span>
+                          <span className="font-medium">
+                            {mediaInfo.fileSize}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.bitrate && (
                         <div className="flex items-center justify-between">
                           <span className="text-foreground-muted">Bitrate</span>
-                          <span className="font-medium">{mediaInfo.bitrate}</span>
+                          <span className="font-medium">
+                            {mediaInfo.bitrate}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1827,7 +2132,10 @@ export default function MediaDetailPage() {
                 {/* Audio Streams */}
                 {audioStreams && audioStreams.length > 1 && (
                   <div className="border-t border-border-subtle pt-4">
-                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-3 flex items-center gap-2 text-foreground-muted"
+                    >
                       <Volume2 className="h-4 w-4" />
                       Audio Tracks ({audioStreams.length})
                     </Typography>
@@ -1836,13 +2144,19 @@ export default function MediaDetailPage() {
                         <div
                           key={stream.id}
                           className={`flex items-center gap-2 rounded px-2 py-1 ${
-                            stream.selected ? "bg-accent-primary/20 text-accent-primary" : "text-foreground-secondary"
+                            stream.selected
+                              ? "bg-accent-primary/20 text-accent-primary"
+                              : "text-foreground-secondary"
                           }`}
                         >
                           {stream.selected && <Check className="h-3 w-3" />}
-                          <span className="flex-1 truncate">{stream.displayTitle}</span>
+                          <span className="flex-1 truncate">
+                            {stream.displayTitle}
+                          </span>
                           {stream.channels && (
-                            <span className="text-xs text-foreground-muted">{stream.channels}</span>
+                            <span className="text-xs text-foreground-muted">
+                              {stream.channels}
+                            </span>
                           )}
                         </div>
                       ))}
@@ -1853,7 +2167,10 @@ export default function MediaDetailPage() {
                 {/* Subtitle Streams */}
                 {subtitleStreams && subtitleStreams.length > 0 && (
                   <div className="border-t border-border-subtle pt-4">
-                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-3 flex items-center gap-2 text-foreground-muted"
+                    >
                       <Subtitles className="h-4 w-4" />
                       Subtitles ({subtitleStreams.length})
                     </Typography>
@@ -1862,11 +2179,15 @@ export default function MediaDetailPage() {
                         <div
                           key={stream.id}
                           className={`flex items-center gap-2 rounded px-2 py-1 ${
-                            stream.selected ? "bg-accent-primary/20 text-accent-primary" : "text-foreground-secondary"
+                            stream.selected
+                              ? "bg-accent-primary/20 text-accent-primary"
+                              : "text-foreground-secondary"
                           }`}
                         >
                           {stream.selected && <Check className="h-3 w-3" />}
-                          <span className="flex-1 truncate">{stream.displayTitle}</span>
+                          <span className="flex-1 truncate">
+                            {stream.displayTitle}
+                          </span>
                         </div>
                       ))}
                       {subtitleStreams.length > 5 && (
@@ -1881,7 +2202,10 @@ export default function MediaDetailPage() {
                 {/* External Links */}
                 {(tmdbId || imdbId) && (
                   <div className="border-t border-border-subtle pt-4">
-                    <Typography variant="caption" className="mb-3 flex items-center gap-2 text-foreground-muted">
+                    <Typography
+                      variant="caption"
+                      className="mb-3 flex items-center gap-2 text-foreground-muted"
+                    >
                       <ExternalLink className="h-4 w-4" />
                       External Links
                     </Typography>
@@ -1891,9 +2215,11 @@ export default function MediaDetailPage() {
                           href={
                             type === "movie"
                               ? `https://www.themoviedb.org/movie/${tmdbId}`
-                              : type === "episode" && seasonIndex !== undefined && episodeIndex !== undefined
-                                ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}/episode/${episodeIndex}`
-                                : `https://www.themoviedb.org/tv/${tmdbId}`
+                              : type === "episode" &&
+                                seasonIndex !== undefined &&
+                                episodeIndex !== undefined
+                              ? `https://www.themoviedb.org/tv/${tmdbId}/season/${seasonIndex}/episode/${episodeIndex}`
+                              : `https://www.themoviedb.org/tv/${tmdbId}`
                           }
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1954,9 +2280,7 @@ export default function MediaDetailPage() {
                   {recommendations.map((rec) => (
                     <a
                       key={rec.id}
-                      href={rec.tmdbUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={`/app/media/${rec.type}/tmdb-${rec.id}`}
                       className="group relative"
                     >
                       <div className="aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated">

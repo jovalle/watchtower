@@ -7,17 +7,12 @@ import {
   ScrollRestoration,
   useRouteError,
 } from "@remix-run/react";
-import type {
-  LinksFunction,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
+import type { LinksFunction, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
 import "./tailwind.css";
 import { Shell } from "~/components/layout";
 import { InstallPrompt } from "~/components/pwa";
-import { getPlexToken } from "~/lib/auth/session.server";
 import { runStartupChecks } from "~/lib/startup.server";
 
 export const meta: MetaFunction = () => {
@@ -27,10 +22,9 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader() {
   // Run startup checks on first request
-  const token = await getPlexToken(request);
-  await runStartupChecks(token ?? undefined);
+  await runStartupChecks();
   return json({});
 }
 

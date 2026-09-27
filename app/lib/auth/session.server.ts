@@ -7,9 +7,11 @@ import { createCookieSessionStorage, redirect } from "@remix-run/node";
 import { env } from "~/lib/env.server";
 
 type SessionData = {
-  plexToken: string;      // OAuth token for plex.tv API calls
-  serverToken: string;    // Server-specific token for Plex server API calls
-  isOwner: boolean;       // Whether the user owns this Plex server
+  plexToken: string; // OAuth token for plex.tv API calls
+  serverToken: string; // Server-specific token for Plex server API calls
+  isOwner: boolean; // Whether the user owns this Plex server
+  serverMachineId: string; // Server the serverToken was issued for; re-verify if config changes
+  setupClaimUserId: number; // Plex user who entered the setup code
   pendingPinId: number;
   pendingRedirectTo: string;
 };
@@ -18,7 +20,10 @@ type SessionFlashData = {
   error: string;
 };
 
-const sessionStorage = createCookieSessionStorage<SessionData, SessionFlashData>({
+const sessionStorage = createCookieSessionStorage<
+  SessionData,
+  SessionFlashData
+>({
   cookie: {
     name: "__plex_session",
     httpOnly: true,
@@ -41,14 +46,18 @@ export async function getSession(request: Request) {
 /**
  * Commit the session and return the Set-Cookie header value.
  */
-export async function commitSession(session: Awaited<ReturnType<typeof getSession>>) {
+export async function commitSession(
+  session: Awaited<ReturnType<typeof getSession>>
+) {
   return sessionStorage.commitSession(session);
 }
 
 /**
  * Destroy the session and return the Set-Cookie header value.
  */
-export async function destroySession(session: Awaited<ReturnType<typeof getSession>>) {
+export async function destroySession(
+  session: Awaited<ReturnType<typeof getSession>>
+) {
   return sessionStorage.destroySession(session);
 }
 
@@ -67,7 +76,11 @@ export async function getPlexToken(request: Request): Promise<string | null> {
 export function sanitizeRedirectTo(
   redirectTo: string | null | undefined
 ): string | null {
-  if (!redirectTo || !redirectTo.startsWith("/") || redirectTo.startsWith("//")) {
+  if (
+    !redirectTo ||
+    !redirectTo.startsWith("/") ||
+    redirectTo.startsWith("//")
+  ) {
     return null;
   }
 
@@ -110,7 +123,11 @@ export async function requireServerToken(request: Request): Promise<string> {
 /**
  * Set the server-specific token and owner status in the session.
  */
-export async function setServerToken(request: Request, serverToken: string, isOwner: boolean = false): Promise<string> {
+export async function setServerToken(
+  request: Request,
+  serverToken: string,
+  isOwner: boolean = false
+): Promise<string> {
   const session = await getSession(request);
   session.set("serverToken", serverToken);
   session.set("isOwner", isOwner);
@@ -133,7 +150,7 @@ export async function createUserSession(
   redirectTo: string,
   existingSession?: Awaited<ReturnType<typeof getSession>>
 ) {
-  const session = existingSession ?? await sessionStorage.getSession();
+  const session = existingSession ?? (await sessionStorage.getSession());
   session.set("plexToken", plexToken);
   // Clear any pending auth state
   session.unset("pendingPinId");
@@ -158,7 +175,9 @@ export async function setPendingPinId(request: Request, pinId: number) {
 /**
  * Get and clear the pending PIN ID from the session.
  */
-export async function getPendingPinId(request: Request): Promise<number | null> {
+export async function getPendingPinId(
+  request: Request
+): Promise<number | null> {
   const session = await getSession(request);
   const pinId = session.get("pendingPinId");
   return pinId ?? null;

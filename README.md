@@ -48,6 +48,30 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 - **TV show navigation** — Season/episode browsing with On Deck integration
 - **Responsive design** — Optimized for desktop, tablet, and mobile
 
+## Navigation and playback
+
+The logo opens Home. **Watch** contains Movies, Series, and New in library. **Discover** opens external discovery; disabling discovery in Settings hides that section and prevents its feeds from loading. **My Stuff** contains Watchlist and Lists. Old bookmarks redirect with their query parameters. Requests, Issues, and Settings remain in the profile menu.
+
+Home separates in-progress titles from next unwatched episodes and labels related library recommendations with the title that prompted them. Playback reports progress to Plex. Settings includes **Autoplay next episode**, enabled by default; the countdown can also be cancelled in the player. Stream information distinguishes requested quality, source-file metadata, and delivered video dimensions when the browser reports them.
+
+Title pages use media type and provider IDs to resolve accessible library matches. **Requests & availability** shows regular/4K and season status from Seerr. Partial series can request remaining seasons through Seerr's permissions and quota checks. Availability in Seerr alone does not grant access to a Plex library.
+
+## Request notifications
+
+Configure Seerr in Settings and import the corresponding Plex users into Seerr. The header checks for request updates once per minute while the page is visible. Opening Notifications also checks for updates, subject to the same one-minute minimum. No background scheduler or external email/push service is required.
+
+The first successful check establishes the existing request state without sending old updates. Later observed transitions produce unread notifications linking to the title page. Updates that occur entirely between polls cannot be reconstructed. Read state and deduplication history survive restarts in `DATA_PATH/notifications`, scoped to the Plex user and configured Seerr URL. Keep the data volume persistent and backed up.
+
+Polling covers the most recent 200 requests and retains the newest 200 notifications. The inbox reports when older requests fall outside that window. When the listing is complete, each poll also checks up to 20 previously observed missing requests; only a confirmed 404 is treated as cancelled/deleted. An outage preserves existing notifications and displays a refresh error.
+
+Run one Watchtower process against a data directory. Notification writes use an in-process lock and atomic replacement; multiple writers require shared transactional storage. Playback session ownership also lives in the app process. After an app restart, reload an active player to establish a new session. No existing config or watch history migration is needed; the autoplay setting has an additive default. Rolling back the application can leave the new notification files in place.
+
+## Casting and validation status
+
+The player exposes browser-native AirPlay/Remote Playback only when the browser reports a receiver for a native media source. HLS played through Media Source Extensions does not use this path. Stream URLs remain authenticated; receivers must support the browser's authenticated playback handoff. There is no custom Chromecast receiver or public token-bearing stream URL.
+
+**Receiver playback is not yet verified.** Desktop/mobile playback compatibility, audible track selection, cross-device resume, and the full keyboard/remote journey also require live acceptance. See the [delivery ledger](docs/netflix-replacement-plan.md#delivery-ledger) and [continuation handoff](docs/implementation-handoff.md) for evidence and remaining work. A visible casting control is not a compatibility guarantee.
+
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f4f8/512.gif" height="24"> Screenshots
 
 <p align="center">
@@ -65,43 +89,45 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 ### Docker (Recommended)
 
 ```bash
-# Clone and configure
+# Clone and launch
 git clone https://github.com/jovalle/watchtower.git
 cd watchtower
-cp .env.example .env
-
-# Edit .env with your Plex credentials
-# SESSION_SECRET=<openssl rand -base64 32>
-# PLEX_SERVER_URL=http://your-plex-server:32400
-# PLEX_TOKEN=<your-plex-token>
-
-# Launch
 docker compose up -d
+
+# Get the one-time setup code
+docker compose logs watchtower | grep -A2 'setup code'
 ```
 
-Open `http://localhost:9001` and sign in with Plex.
+Open `http://localhost:9001`, sign in with the Plex account that owns your server, enter the setup code, and pick a server connection. Watchtower saves the server and its token under `./data/config`, so setup survives restarts. Other users see a "not set up yet" notice until you finish. You can change the server later from **Settings → Server Administration**.
 
 ### Local Development
 
 ```bash
-# Prerequisites: Bun (https://bun.sh)
-bun install
-bun run dev
+# Prerequisites: Node.js 22+, Bun (https://bun.sh), and just (https://just.systems)
+bun install --frozen-lockfile
+just dev
 ```
 
-Open `http://localhost:9001`
+Open `http://127.0.0.1:9001`. On first setup, follow the setup code printed in the terminal. `just dev` runs Remix/Vite with live reload for UI and server-route edits; it does not require a production build. Keep the same hostname and port while signing in through Plex.
+
+Use `just dev 9021` if port 9001 is occupied. For testing on another device on your network, explicitly bind all interfaces with `just dev 9021 0.0.0.0` and open your computer's LAN address on that device. Development uses your configured services and local data; requests and playback actions affect those services.
+
+Run `just check` for lint, TypeScript, and tests, or `just test` for tests alone. `just build` followed by `just start` evaluates a production build without live reload. Run `just` to list recipes. Without just, the equivalent dev command is `bun run dev --host 127.0.0.1 --port 9001 --strictPort`.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/26a1/512.gif" height="24"> Environment Variables
 
-| Variable          | Required | Description                                                                                   |
-| ----------------- | :------: | --------------------------------------------------------------------------------------------- |
-| `SESSION_SECRET`  |    ✓     | Secret for session cookies (`openssl rand -base64 32`)                                        |
-| `PLEX_SERVER_URL` |    ✓     | Your Plex server URL (e.g., `http://192.168.1.100:32400`)                                     |
-| `PLEX_TOKEN`      |    ✓     | Your Plex authentication token ([how to find](https://support.plex.tv/articles/204059436))    |
-| `PLEX_CLIENT_ID`  |          | Client identifier (default: `watchtower-001`)                                                 |
-| `PORT`            |          | Server port (default: `9001`)                                                                 |
-| `TMDB_API_KEY`    |          | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
-| `TRAKT_CLIENT_ID` |          | Trakt API key to enable Trakt integration (users set their own username in Settings)          |
+All optional. The Plex server and token are configured at `/setup`, not through the environment.
+
+| Variable          | Description                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `SESSION_SECRET`  | Secret for session cookies. Default: generated and saved to `DATA_PATH/config/session-secret` |
+| `DATA_PATH`       | Data directory for config and caches (default: `/data` in production, `./data` otherwise)     |
+| `PLEX_CLIENT_ID`  | Client identifier (default: `watchtower-001`)                                                 |
+| `PORT`            | Server port (default: `9001`)                                                                 |
+| `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
+| `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
+
+Trakt is enabled only by a saved client ID and secret in Settings → Integrations. A legacy `TRAKT_CLIENT_ID` environment value no longer enables requests; move existing credentials into Integrations to keep using Trakt. Users also need a watchlist username for list imports.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f6a8/512.gif" height="24"> Security Note
 
@@ -122,10 +148,7 @@ Open `http://localhost:9001`
 ```bash
 # Build and run manually
 docker build -t watchtower .
-docker run -d -p 9001:9001 \
-  -e SESSION_SECRET="your-secret" \
-  -e PLEX_SERVER_URL="http://your-plex:32400" \
-  -e PLEX_TOKEN="your-token" \
+docker run -d -p 9001:9001 -v "$PWD/data:/data" \
   --name watchtower watchtower
 
 # Or use Docker Compose

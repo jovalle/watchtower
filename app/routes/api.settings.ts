@@ -4,7 +4,11 @@
  * PUT /api/settings - Update current user's settings
  */
 
-import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
+import {
+  json,
+  type LoaderFunctionArgs,
+  type ActionFunctionArgs,
+} from "@remix-run/node";
 import { requireUser } from "~/lib/auth/user.server";
 import {
   getUserSettings,
@@ -12,13 +16,17 @@ import {
   getDefaultSettings,
   getValidationCache,
   getDefaultValidationCache,
+  DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
+import type { UserPreferences, UserSettings } from "~/lib/settings/types";
 
 /**
  * GET /api/settings
  * Returns the current user's settings and validation cache.
  */
-export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
+export async function loader({
+  request,
+}: LoaderFunctionArgs): Promise<Response> {
   const user = await requireUser(request);
   const settings = await getUserSettings(user.id);
   const validationCache = await getValidationCache(user.id);
@@ -33,7 +41,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
  * PUT /api/settings
  * Updates the current user's settings.
  */
-export async function action({ request }: ActionFunctionArgs): Promise<Response> {
+export async function action({
+  request,
+}: ActionFunctionArgs): Promise<Response> {
   if (request.method !== "PUT") {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
@@ -52,30 +62,64 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return json({ error: "Request body must be an object" }, { status: 400 });
   }
 
-  const { traktUsername, imdbWatchlistIds } = body as Record<string, unknown>;
+  const { traktUsername, imdbWatchlistIds, preferences } = body as Record<
+    string,
+    unknown
+  >;
 
   // Validate traktUsername - must be string or null
-  if (traktUsername !== undefined && traktUsername !== null && typeof traktUsername !== "string") {
-    return json({ error: "traktUsername must be a string or null" }, { status: 400 });
+  if (
+    traktUsername !== undefined &&
+    traktUsername !== null &&
+    typeof traktUsername !== "string"
+  ) {
+    return json(
+      { error: "traktUsername must be a string or null" },
+      { status: 400 }
+    );
   }
 
   // Validate imdbWatchlistIds - must be array of strings
   if (imdbWatchlistIds !== undefined) {
     if (!Array.isArray(imdbWatchlistIds)) {
-      return json({ error: "imdbWatchlistIds must be an array" }, { status: 400 });
+      return json(
+        { error: "imdbWatchlistIds must be an array" },
+        { status: 400 }
+      );
     }
     if (!imdbWatchlistIds.every((id) => typeof id === "string")) {
-      return json({ error: "imdbWatchlistIds must contain only strings" }, { status: 400 });
+      return json(
+        { error: "imdbWatchlistIds must contain only strings" },
+        { status: 400 }
+      );
     }
   }
 
   // Build update object with only provided fields
-  const updates: { traktUsername?: string | null; imdbWatchlistIds?: string[] } = {};
+  const updates: Partial<
+    Pick<UserSettings, "traktUsername" | "imdbWatchlistIds" | "preferences">
+  > = {};
   if (traktUsername !== undefined) {
     updates.traktUsername = traktUsername as string | null;
   }
   if (imdbWatchlistIds !== undefined) {
     updates.imdbWatchlistIds = imdbWatchlistIds as string[];
+  }
+
+  if (preferences !== undefined) {
+    if (typeof preferences !== "object" || preferences === null) {
+      return json({ error: "preferences must be an object" }, { status: 400 });
+    }
+    const current =
+      (await getUserSettings(user.id))?.preferences ?? DEFAULT_PREFERENCES;
+    const next: UserPreferences = { ...current };
+    for (const [key, value] of Object.entries(preferences)) {
+      if (!(key in DEFAULT_PREFERENCES) || typeof value !== "boolean") {
+        return json({ error: `Invalid preference: ${key}` }, { status: 400 });
+      }
+      next[key as keyof UserPreferences] = value;
+    }
+    updates.preferences = next;
   }
 
   await setUserSettings(user.id, updates);

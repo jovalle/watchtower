@@ -5,8 +5,8 @@
  * with stacked navigation links and smooth animations.
  */
 
-import { useEffect } from "react";
-import { NavLink, Form } from "@remix-run/react";
+import { useEffect, useRef } from "react";
+import { NavLink, Form, useLocation } from "@remix-run/react";
 import { X, LogOut, User } from "lucide-react";
 import type { PlexUser } from "~/lib/auth/plex.server";
 
@@ -22,52 +22,36 @@ interface MobileMenuProps {
   user: PlexUser;
 }
 
-export function MobileMenu({ isOpen, onClose, navItems, user }: MobileMenuProps) {
-  // Close on escape key and manage body scroll
+export function MobileMenu({
+  isOpen,
+  onClose,
+  navItems,
+  user,
+}: MobileMenuProps) {
+  const { pathname } = useLocation();
+  const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener("keydown", handleEscape);
-      // Prevent body scroll when menu is open
-      document.body.style.overflow = "hidden";
-    }
-
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, onClose]);
+    const dialog = dialogRef.current;
+    if (!isOpen || !dialog) return;
+    const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow = "hidden";
+    return () => { dialog.close(); document.body.style.overflow = previousOverflow; };
+  }, [isOpen]);
 
   return (
     <>
-      {/* Backdrop overlay */}
-      <div
-        className={`fixed inset-0 z-40 bg-black/60 transition-opacity duration-300 ${
-          isOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Menu panel - slides in from right */}
-      <div
-        className={`fixed right-0 top-0 z-50 h-full w-72 bg-background-primary shadow-xl transition-transform duration-300 ease-in-out ${
-          isOpen ? "translate-x-0" : "translate-x-full"
-        }`}
-        role="dialog"
-        aria-modal="true"
+      <dialog
+        ref={dialogRef}
+        onCancel={onClose}
+        className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-72 max-w-full border-0 bg-background-primary p-0 text-foreground-primary shadow-xl backdrop:bg-black/60"
         aria-label="Navigation menu"
       >
         {/* Header with close button */}
         <div className="flex h-16 items-center justify-end border-b border-border-subtle px-4">
           <button
             onClick={onClose}
-            className="rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary"
+            className="min-h-11 min-w-11 rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary"
             aria-label="Close menu"
           >
             <X className="h-6 w-6" />
@@ -75,8 +59,13 @@ export function MobileMenu({ isOpen, onClose, navItems, user }: MobileMenuProps)
         </div>
 
         {/* Navigation links - stacked vertically */}
-        <nav className="flex flex-col gap-2 p-4">
-          {navItems.map((item) => (
+        <nav className="flex max-h-[calc(100dvh-15rem)] flex-col gap-2 overflow-y-auto p-4">
+          {[
+            ...navItems,
+            { label: "Requests", to: "/app/requests" },
+            { label: "Issues", to: "/app/issues" },
+            { label: "Settings", to: "/app/settings" },
+          ].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -84,7 +73,7 @@ export function MobileMenu({ isOpen, onClose, navItems, user }: MobileMenuProps)
               onClick={onClose}
               className={({ isActive }) =>
                 `rounded-md px-4 py-3 text-base font-medium transition-colors duration-200 ${
-                  isActive
+                  isActive || (item.to === "/app/stuff" && pathname.startsWith("/app/lists/"))
                     ? "bg-background-elevated text-foreground-primary"
                     : "text-foreground-secondary hover:bg-background-elevated hover:text-foreground-primary"
                 }`
@@ -131,7 +120,7 @@ export function MobileMenu({ isOpen, onClose, navItems, user }: MobileMenuProps)
             </button>
           </Form>
         </div>
-      </div>
+      </dialog>
     </>
   );
 }

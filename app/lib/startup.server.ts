@@ -4,6 +4,8 @@
  */
 
 import { env } from "./env.server";
+import { getServerConfig } from "./config/server-config.server";
+import { formatSetupCode, getSetupCode } from "./config/setup.server";
 
 interface HealthCheckResult {
   plexReachable: boolean;
@@ -18,8 +20,10 @@ let lastCheckResult: HealthCheckResult | null = null;
 /**
  * Check if Plex server is reachable and authenticated.
  */
-async function checkPlexHealth(token: string): Promise<HealthCheckResult> {
-  const serverUrl = env.PLEX_SERVER_URL;
+async function checkPlexHealth(
+  serverUrl: string,
+  token: string
+): Promise<HealthCheckResult> {
   const result: HealthCheckResult = {
     plexReachable: false,
     plexAuthenticated: false,
@@ -71,9 +75,11 @@ async function checkPlexHealth(token: string): Promise<HealthCheckResult> {
  * Run startup health checks and log results.
  * Called automatically on first request.
  */
-export async function runStartupChecks(token?: string): Promise<void> {
+export async function runStartupChecks(): Promise<void> {
   if (startupCheckDone) return;
   startupCheckDone = true;
+
+  const config = getServerConfig();
 
   console.log("\n" + "=".repeat(60));
   console.log("🗼 WATCHTOWER STARTUP");
@@ -81,32 +87,37 @@ export async function runStartupChecks(token?: string): Promise<void> {
 
   // Log configuration
   console.log("\n📋 Configuration:");
-  console.log(`   PLEX_SERVER_URL: ${env.PLEX_SERVER_URL}`);
+  console.log(
+    `   PLEX_SERVER:     ${
+      config ? `${config.serverName} (${config.serverUrl})` : "not configured"
+    }`
+  );
   console.log(`   PLEX_CLIENT_ID:  ${env.PLEX_CLIENT_ID}`);
   console.log(`   NODE_ENV:        ${env.NODE_ENV}`);
   console.log(`   DATA_PATH:       ${env.DATA_PATH}`);
 
-  // Check Plex connectivity if we have a token
-  if (token) {
+  if (!config) {
+    console.log(`\n⚠️  No Plex server configured.`);
+    console.log(
+      `   Sign in as the Plex server owner, open /setup, and enter this setup code:`
+    );
+    console.log(`\n      ${formatSetupCode(getSetupCode())}\n`);
+    console.log(
+      `   The code changes on every restart until setup is complete.`
+    );
+  } else {
     console.log("\n🔍 Checking Plex connectivity...");
-    const result = await checkPlexHealth(token);
+    const result = await checkPlexHealth(config.serverUrl, config.token);
     lastCheckResult = result;
 
     if (result.plexReachable && result.plexAuthenticated) {
       console.log(`   ✅ Plex server is reachable and authenticated`);
-    } else if (result.plexReachable) {
-      console.log(`   ⚠️  Plex server reachable but NOT authenticated`);
-      console.log(`   ❌ ${result.error}`);
     } else {
-      console.log(`   ❌ Plex server NOT reachable`);
       console.log(`   ❌ ${result.error}`);
-      console.log(`\n   💡 Hints:`);
-      console.log(`      - Check if PLEX_SERVER_URL is correct`);
-      console.log(`      - If using Docker, ensure containers are on the same network`);
-      console.log(`      - Try using host IP instead of container name`);
+      console.log(
+        `\n   💡 The admin (${config.adminUsername}) can pick a new connection or re-authorize at /setup`
+      );
     }
-  } else {
-    console.log("\n⏳ Plex connectivity will be checked on first authenticated request");
   }
 
   console.log("\n" + "=".repeat(60) + "\n");
@@ -123,13 +134,16 @@ export function getLastHealthCheck(): HealthCheckResult | null {
  * Log a Plex connection error with helpful hints.
  */
 export function logPlexError(context: string, error: unknown): void {
-  const serverUrl = env.PLEX_SERVER_URL;
+  const serverUrl = getServerConfig()?.serverUrl ?? "not configured";
   console.error(`\n❌ [${context}] Plex connection error:`);
   console.error(`   Server URL: ${serverUrl}`);
-  console.error(`   Error: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(
+    `   Error: ${error instanceof Error ? error.message : String(error)}`
+  );
   console.error(`\n   💡 Troubleshooting:`);
-  console.error(`      1. Verify PLEX_SERVER_URL is correct (currently: ${serverUrl})`);
-  console.error(`      2. Check if Plex server is running`);
-  console.error(`      3. Ensure network connectivity between containers`);
-  console.error(`      4. Verify PLEX_TOKEN is valid\n`);
+  console.error(`      1. Check if Plex server is running`);
+  console.error(`      2. Ensure network connectivity between containers`);
+  console.error(
+    `      3. Have the admin pick a working connection at /setup\n`
+  );
 }

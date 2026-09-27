@@ -4,7 +4,7 @@
  */
 
 import type { TraktResult, TraktWatchlistItem } from "./types";
-import { env } from "~/lib/env.server";
+import { getTraktApp } from "./oauth.server";
 
 const TRAKT_BASE_URL = "https://api.trakt.tv";
 const TRAKT_REQUEST_TIMEOUT = 10000; // 10 seconds
@@ -124,22 +124,24 @@ export class TraktClient {
   }
 }
 
+/** Use the same saved integration as Trakt sign-in and scrobbling. */
+async function getTraktClientId(): Promise<string | null> {
+  return (await getTraktApp())?.clientId ?? null;
+}
+
 /**
  * Create a TraktClient if configured.
  * Returns null if Trakt is not configured.
  */
-export function createTraktClient(): TraktClient | null {
-  const clientId = env.TRAKT_CLIENT_ID;
-  if (!clientId) {
-    return null;
-  }
-  return new TraktClient(clientId);
+export async function createTraktClient(): Promise<TraktClient | null> {
+  const clientId = await getTraktClientId();
+  return clientId ? new TraktClient(clientId) : null;
 }
 
 /**
  * Check if Trakt integration is available (client ID configured).
  * Actual per-user enablement depends on user settings.
  */
-export function isTraktAvailable(): boolean {
-  return !!env.TRAKT_CLIENT_ID;
+export async function isTraktAvailable(): Promise<boolean> {
+  return !!(await getTraktClientId());
 }
