@@ -7,11 +7,9 @@ services:
       - ALL
     container_name: watchtower
     environment:
-      # Required
-      PLEX_TOKEN: ${PLEX_TOKEN:?PLEX_TOKEN is required}
-      SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-in-production}
-      # Server config (defaults work for local Docker with Plex container)
-      PLEX_SERVER_URL: ${PLEX_SERVER_URL:-http://plex:32400}
+      # Plex server and token are configured in-app at /setup and saved to ./data/config
+      # Optional: generated and saved to ./data/config/session-secret when unset
+      SESSION_SECRET: ${SESSION_SECRET:-}
       PLEX_CLIENT_ID: ${PLEX_CLIENT_ID:-watchtower-001}
       PORT: ${WATCHTOWER_PORT:-9001}
       NODE_ENV: production
@@ -20,7 +18,6 @@ services:
       # Optional integrations (leave empty to disable)
       OMDB_API_KEY: ${OMDB_API_KEY:-}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
-      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID:-}
     healthcheck:
       interval: 30s
       retries: 3

@@ -9,18 +9,176 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { Settings, Save, Loader2, CheckCircle, AlertCircle, XCircle, Trash2 } from "lucide-react";
+import {
+  Settings,
+  Save,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
+  XCircle,
+  Trash2,
+} from "lucide-react";
 import { Container } from "~/components/layout";
-import { Typography } from "~/components/ui";
+import { Typography, Toaster, toast } from "~/components/ui";
 import { requireUser } from "~/lib/auth/user.server";
 import { isServerOwner } from "~/lib/auth/session.server";
+import { getServerConfig } from "~/lib/config/server-config.server";
 import {
   getUserSettings,
   getDefaultSettings,
   getValidationCache,
   getDefaultValidationCache,
 } from "~/lib/settings/storage.server";
-import type { UserSettings, ValidationCache } from "~/lib/settings/types";
+import type {
+  UserSettings,
+  UserPreferences,
+  ValidationCache,
+} from "~/lib/settings/types";
+import {
+  getIntegrations,
+  toPublicIntegrations,
+} from "~/lib/integrations/storage.server";
+import type { PublicIntegrationsConfig } from "~/lib/integrations/types";
+import { IntegrationsSection } from "~/components/settings/IntegrationsSection";
+import { TraktConnectSection } from "~/components/settings/TraktConnectSection";
+import { getTraktConnectionStatus } from "~/lib/trakt/oauth.server";
+import type { TraktConnectionStatus } from "~/lib/trakt/types";
+
+const PREFERENCE_GROUPS: Array<{
+  title: string;
+  items: Array<{
+    key: keyof UserPreferences;
+    label: string;
+    description: string;
+  }>;
+}> = [
+  {
+    title: "Playback",
+    items: [
+      {
+        key: "autoPlayNextEpisode",
+        label: "Autoplay next episode",
+        description: "Start the next episode after the countdown. You can cancel it in the player.",
+      },
+      {
+        key: "autoSkipIntro",
+        label: "Auto-skip intros",
+        description:
+          "Jump past intros automatically when Plex has detected them.",
+      },
+    ],
+  },
+  {
+    title: "Home",
+    items: [
+      {
+        key: "showContinueWatching",
+        label: "Continue Watching",
+        description: "Titles you've started.",
+      },
+      {
+        key: "showRecentlyAdded",
+        label: "Recently Added",
+        description: "The newest movies and shows in the library.",
+      },
+      {
+        key: "showTrending",
+        label: "Trending Now",
+        description:
+          "This week's trending titles from TMDB, linked to the library when available.",
+      },
+      {
+        key: "showCollections",
+        label: "Promoted collections",
+        description: "Collections the server owner promoted to Home in Plex.",
+      },
+    ],
+  },
+  {
+    title: "Discovery",
+    items: [
+      {
+        key: "discoveryDisabled",
+        label: "Library only",
+        description:
+          "Hide titles that aren't in the library: TMDB trending, search results, and recommendations.",
+      },
+    ],
+  },
+];
+
+function PreferencesSection({ initial }: { initial: UserPreferences }) {
+  const [prefs, setPrefs] = useState(initial);
+  const [error, setError] = useState("");
+
+  const toggle = async (key: keyof UserPreferences) => {
+    const previous = prefs;
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    setError("");
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: { [key]: next[key] } }),
+      });
+      if (!response.ok)
+        throw new Error((await response.json()).error || "Failed to save");
+      const label = PREFERENCE_GROUPS.flatMap((g) => g.items).find(
+        (item) => item.key === key
+      )?.label;
+      toast(`${label} ${next[key] ? "on" : "off"}`);
+    } catch (err) {
+      setPrefs(previous);
+      setError(err instanceof Error ? err.message : "Failed to save");
+    }
+  };
+
+  return (
+    <>
+      {PREFERENCE_GROUPS.map((group) => (
+        <section
+          key={group.title}
+          className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6"
+        >
+          <Typography variant="subtitle" as="h2" className="mb-4">
+            {group.title}
+          </Typography>
+          <div className="space-y-4">
+            {group.items.map((item) => (
+              <div
+                key={item.key}
+                className="flex items-start justify-between gap-4"
+              >
+                <label htmlFor={`pref-${item.key}`} className="cursor-pointer">
+                  <span className="block text-sm font-medium text-foreground-primary">
+                    {item.label}
+                  </span>
+                  <span className="block text-sm text-foreground-muted">
+                    {item.description}
+                  </span>
+                </label>
+                <input
+                  id={`pref-${item.key}`}
+                  type="checkbox"
+                  checked={prefs[item.key]}
+                  onChange={() => toggle(item.key)}
+                  className="mt-1 h-5 w-5 flex-shrink-0 cursor-pointer accent-accent-primary"
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      {error && (
+        <div className="mt-3 flex items-center gap-2 text-red-500">
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-sm">{error}</span>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Validation state type
 type ValidationStatus = "idle" | "validating" | "valid" | "invalid";
@@ -49,6 +207,9 @@ interface LoaderData {
   settings: UserSettings;
   validationCache: ValidationCache;
   isOwner: boolean;
+  plexServer: { name: string; url: string } | null;
+  integrations: PublicIntegrationsConfig | null;
+  trakt: TraktConnectionStatus;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -56,20 +217,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const settings = await getUserSettings(user.id);
   const validationCache = await getValidationCache(user.id);
   const ownerStatus = await isServerOwner(request);
+  const config = getServerConfig();
 
   return json<LoaderData>({
     settings: settings ?? getDefaultSettings(),
     validationCache: validationCache ?? getDefaultValidationCache(),
     isOwner: ownerStatus,
+    plexServer:
+      config?.adminUserId === user.id
+        ? { name: config.serverName, url: config.serverUrl }
+        : null,
+    integrations: ownerStatus
+      ? toPublicIntegrations(await getIntegrations())
+      : null,
+    trakt: await getTraktConnectionStatus(user.id),
   });
 }
 
 type SaveStatus = "idle" | "saving" | "success" | "error";
 
-type ClearCacheStatus = "idle" | "confirming" | "clearing" | "success" | "error";
+type ClearCacheStatus =
+  | "idle"
+  | "confirming"
+  | "clearing"
+  | "success"
+  | "error";
 
 export default function SettingsPage() {
-  const { settings, validationCache, isOwner } = useLoaderData<typeof loader>();
+  const {
+    settings,
+    validationCache,
+    isOwner,
+    plexServer,
+    integrations,
+    trakt,
+  } = useLoaderData<typeof loader>();
 
   // Track the "saved" values to detect changes
   const savedTraktUsername = settings.traktUsername ?? "";
@@ -77,19 +259,23 @@ export default function SettingsPage() {
 
   // Form state
   const [traktUsername, setTraktUsername] = useState(savedTraktUsername);
-  const [imdbWatchlistIds, setImdbWatchlistIds] = useState(savedImdbWatchlistIds);
+  const [imdbWatchlistIds, setImdbWatchlistIds] = useState(
+    savedImdbWatchlistIds
+  );
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [errorMessage, setErrorMessage] = useState("");
 
   // Clear cache state
-  const [clearCacheStatus, setClearCacheStatus] = useState<ClearCacheStatus>("idle");
+  const [clearCacheStatus, setClearCacheStatus] =
+    useState<ClearCacheStatus>("idle");
   const [clearCacheMessage, setClearCacheMessage] = useState("");
 
   // Initialize Trakt validation from cache
   const initialTraktValidation = (): ValidationState => {
     if (!validationCache.trakt) return { status: "idle" };
     // Only use cached validation if it matches the current saved username
-    if (validationCache.trakt.username !== savedTraktUsername) return { status: "idle" };
+    if (validationCache.trakt.username !== savedTraktUsername)
+      return { status: "idle" };
     return {
       status: validationCache.trakt.status,
       itemCount: validationCache.trakt.itemCount,
@@ -122,8 +308,12 @@ export default function SettingsPage() {
   };
 
   // Validation state - initialized from cache
-  const [traktValidation, setTraktValidation] = useState<ValidationState>(initialTraktValidation);
-  const [imdbValidations, setImdbValidations] = useState<IMDBListValidation[]>(initialImdbValidations);
+  const [traktValidation, setTraktValidation] = useState<ValidationState>(
+    initialTraktValidation
+  );
+  const [imdbValidations, setImdbValidations] = useState<IMDBListValidation[]>(
+    initialImdbValidations
+  );
 
   // Debounce refs
   const traktDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -146,7 +336,9 @@ export default function SettingsPage() {
     setTraktValidation({ status: "validating" });
 
     try {
-      const response = await fetch(`/api/validate/trakt?username=${encodeURIComponent(username.trim())}`);
+      const response = await fetch(
+        `/api/validate/trakt?username=${encodeURIComponent(username.trim())}`
+      );
       const data = await response.json();
 
       if (data.valid) {
@@ -181,13 +373,17 @@ export default function SettingsPage() {
     }
 
     // Set all to validating
-    setImdbValidations(ids.map((id) => ({ listId: id, status: "validating" as const })));
+    setImdbValidations(
+      ids.map((id) => ({ listId: id, status: "validating" as const }))
+    );
 
     // Validate each ID
     const results = await Promise.all(
       ids.map(async (listId) => {
         try {
-          const response = await fetch(`/api/validate/imdb?listId=${encodeURIComponent(listId)}`);
+          const response = await fetch(
+            `/api/validate/imdb?listId=${encodeURIComponent(listId)}`
+          );
           const data = await response.json();
 
           if (data.valid) {
@@ -309,9 +505,12 @@ export default function SettingsPage() {
 
       setClearCacheStatus("success");
       setClearCacheMessage(`Cleared ${data.cleared} cached files`);
+      toast("Cache cleared");
     } catch (err) {
       setClearCacheStatus("error");
-      setClearCacheMessage(err instanceof Error ? err.message : "Failed to clear cache");
+      setClearCacheMessage(
+        err instanceof Error ? err.message : "Failed to clear cache"
+      );
     }
   };
 
@@ -343,17 +542,21 @@ export default function SettingsPage() {
 
       setSaveStatus("success");
       setHasChanges(false);
+      toast("Watchlist sources saved");
 
       // Update the "original" values so hasChanges stays false
       // This is handled by the form state matching the saved state
     } catch (err) {
       setSaveStatus("error");
-      setErrorMessage(err instanceof Error ? err.message : "Failed to save settings");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to save settings"
+      );
     }
   };
 
   return (
     <Container className="py-8 max-w-2xl">
+      <Toaster />
       {/* Header */}
       <div className="mb-8 flex items-center gap-3">
         <Settings className="h-8 w-8 text-foreground-secondary" />
@@ -369,8 +572,8 @@ export default function SettingsPage() {
             Watchlist Sources
           </Typography>
           <Typography variant="body" className="text-foreground-secondary">
-            Configure external watchlist sources to import. Your Trakt watchlist and IMDB
-            lists will be merged with your Plex watchlist.
+            Configure external watchlist sources to import. Your Trakt watchlist
+            and IMDB lists will be merged with your Plex watchlist.
           </Typography>
         </div>
 
@@ -406,16 +609,18 @@ export default function SettingsPage() {
               </div>
             </div>
             {/* Validation message */}
-            {traktValidation.status === "valid" && traktValidation.itemCount !== undefined && (
-              <p className="mt-1.5 text-sm text-green-500">
-                Valid ({traktValidation.itemCount} items in watchlist)
-              </p>
-            )}
-            {traktValidation.status === "invalid" && traktValidation.message && (
-              <p className="mt-1.5 text-sm text-red-500">
-                {traktValidation.message}
-              </p>
-            )}
+            {traktValidation.status === "valid" &&
+              traktValidation.itemCount !== undefined && (
+                <p className="mt-1.5 text-sm text-green-500">
+                  Valid ({traktValidation.itemCount} items in watchlist)
+                </p>
+              )}
+            {traktValidation.status === "invalid" &&
+              traktValidation.message && (
+                <p className="mt-1.5 text-sm text-red-500">
+                  {traktValidation.message}
+                </p>
+              )}
             {traktValidation.status === "idle" && (
               <p className="mt-1.5 text-sm text-foreground-muted">
                 Your public Trakt username to import your watchlist from.
@@ -442,9 +647,10 @@ export default function SettingsPage() {
               />
               {/* Overall validation indicator */}
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                {imdbValidations.length > 0 && imdbValidations.some((v) => v.status === "validating") && (
-                  <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
-                )}
+                {imdbValidations.length > 0 &&
+                  imdbValidations.some((v) => v.status === "validating") && (
+                    <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
+                  )}
                 {imdbValidations.length > 0 &&
                   imdbValidations.every((v) => v.status === "valid") && (
                     <CheckCircle className="h-5 w-5 text-green-500" />
@@ -460,11 +666,16 @@ export default function SettingsPage() {
             {imdbValidations.length > 0 ? (
               <div className="mt-1.5 space-y-1">
                 {imdbValidations.map((v) => (
-                  <div key={v.listId} className="flex items-center gap-2 text-sm">
+                  <div
+                    key={v.listId}
+                    className="flex items-center gap-2 text-sm"
+                  >
                     {v.status === "validating" && (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground-muted" />
-                        <span className="text-foreground-muted">{v.listId}: Validating...</span>
+                        <span className="text-foreground-muted">
+                          {v.listId}: Validating...
+                        </span>
                       </>
                     )}
                     {v.status === "valid" && (
@@ -488,8 +699,15 @@ export default function SettingsPage() {
               </div>
             ) : (
               <p className="mt-1.5 text-sm text-foreground-muted">
-                Enter IMDB list IDs separated by commas. Use <code className="rounded bg-background-primary px-1 py-0.5 text-xs">ur*</code> for
-                user watchlists or <code className="rounded bg-background-primary px-1 py-0.5 text-xs">ls*</code> for public lists.
+                Enter IMDB list IDs separated by commas. Use{" "}
+                <code className="rounded bg-background-primary px-1 py-0.5 text-xs">
+                  ur*
+                </code>{" "}
+                for user watchlists or{" "}
+                <code className="rounded bg-background-primary px-1 py-0.5 text-xs">
+                  ls*
+                </code>{" "}
+                for public lists.
               </p>
             )}
           </div>
@@ -532,6 +750,12 @@ export default function SettingsPage() {
         </form>
       </section>
 
+      <PreferencesSection initial={settings.preferences} />
+
+      <TraktConnectSection initial={trakt} />
+
+      {integrations && <IntegrationsSection initial={integrations} />}
+
       {/* Server Administration Section - Only for server owner */}
       {isOwner && (
         <section className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6">
@@ -544,15 +768,41 @@ export default function SettingsPage() {
             </Typography>
           </div>
 
+          {plexServer && (
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <Typography
+                  variant="body"
+                  className="font-medium text-foreground-primary"
+                >
+                  Plex Server
+                </Typography>
+                <Typography variant="caption" className="text-foreground-muted">
+                  {plexServer.name} at {plexServer.url}
+                </Typography>
+              </div>
+              <a
+                href="/setup"
+                className="rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated"
+              >
+                Change
+              </a>
+            </div>
+          )}
+
           {/* Clear Cache */}
           <div>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <Typography variant="body" className="font-medium text-foreground-primary">
+                <Typography
+                  variant="body"
+                  className="font-medium text-foreground-primary"
+                >
                   Clear Cache
                 </Typography>
                 <Typography variant="caption" className="text-foreground-muted">
-                  Remove all cached data to force fresh API requests. Use if content appears stale or missing.
+                  Remove all cached data to force fresh API requests. Use if
+                  content appears stale or missing.
                 </Typography>
               </div>
 
@@ -616,8 +866,8 @@ export default function SettingsPage() {
       {/* Info note */}
       <div className="mt-6 rounded-lg border border-border-subtle bg-background-elevated/50 p-4">
         <Typography variant="caption" className="text-foreground-muted">
-          Changes take effect immediately. Your watchlist page will show items from all
-          configured sources after refresh.
+          Changes take effect immediately. Your watchlist page will show items
+          from all configured sources after refresh.
         </Typography>
       </div>
     </Container>

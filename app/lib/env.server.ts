@@ -3,16 +3,11 @@
  * The .server.ts suffix ensures this file is never bundled for the client.
  */
 
-function getEnvVar(name: string, required = true): string {
-  const value = process.env[name];
-  if (required && !value) {
-    throw new Error(
-      `Missing required environment variable: ${name}. ` +
-        `Check .env.example for documentation.`
-    );
-  }
-  return value ?? "";
-}
+import {
+  getDataPath,
+  getSessionSecret,
+  requireServerConfig,
+} from "~/lib/config/server-config.server";
 
 function getEnvVarWithDefault(name: string, defaultValue: string): string {
   return process.env[name] ?? defaultValue;
@@ -24,15 +19,15 @@ function getEnvVarWithDefault(name: string, defaultValue: string): string {
  */
 export const env = {
   /**
-   * Plex server URL (e.g., http://192.168.1.100:32400)
-   * Defaults to http://plex:32400 for Docker deployments
+   * Plex server URL from the saved server config (set via /setup).
+   * Throws if no server is configured.
    */
   get PLEX_SERVER_URL(): string {
-    return getEnvVarWithDefault("PLEX_SERVER_URL", "http://plex:32400");
+    return requireServerConfig().serverUrl;
   },
 
   /**
-   * Plex server admin token for LIMITED operations only.
+   * Server owner token from the saved server config (set via /setup).
    *
    * SECURITY: This token has full access to the Plex server and should
    * NEVER be used for user-facing operations. It is only used for:
@@ -43,7 +38,7 @@ export const env = {
    * user operations would bypass per-user access controls.
    */
   get PLEX_TOKEN(): string {
-    return getEnvVar("PLEX_TOKEN");
+    return requireServerConfig().token;
   },
 
   /**
@@ -54,10 +49,10 @@ export const env = {
   },
 
   /**
-   * Session secret for cookie signing
+   * Session secret for cookie signing: SESSION_SECRET env or a generated, persisted secret
    */
   get SESSION_SECRET(): string {
-    return getEnvVar("SESSION_SECRET");
+    return getSessionSecret();
   },
 
   /**
@@ -99,20 +94,9 @@ export const env = {
    * Defaults to ./data in dev, /data in Docker/production
    */
   get DATA_PATH(): string {
-    return getEnvVarWithDefault(
-      "DATA_PATH",
-      this.isProduction ? "/data" : "./data"
-    );
+    return getDataPath();
   },
 
-  /**
-   * Trakt API client ID (required for Trakt integration)
-   * Get a client ID at: https://trakt.tv/oauth/applications
-   */
-  get TRAKT_CLIENT_ID(): string | null {
-    const value = process.env.TRAKT_CLIENT_ID;
-    return value && value.trim() ? value.trim() : null;
-  },
 } as const;
 
 export type Env = typeof env;

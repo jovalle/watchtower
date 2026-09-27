@@ -32,6 +32,7 @@ const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 export interface UnifiedWatchlistResult {
   items: UnifiedWatchlistItem[];
   counts: WatchlistCounts;
+  errors: string[];
 }
 
 /**
@@ -147,13 +148,12 @@ function mergeItems(
  */
 function getDedupeKey(item: UnifiedWatchlistItem): string {
   if (item.imdbId) {
-    return `imdb:${item.imdbId}`;
+    return `${item.type}:imdb:${item.imdbId}`;
   }
   if (item.tmdbId) {
-    return `tmdb:${item.tmdbId}`;
+    return `${item.type}:tmdb:${item.tmdbId}`;
   }
-  const normalizedTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return `title:${normalizedTitle}:${item.year || "unknown"}`;
+  return `${item.type}:${item.plexGuid || item.id}`;
 }
 
 /**
@@ -222,8 +222,8 @@ async function getTraktWatchlistWithPosters(
   const result = await traktClient.getPublicWatchlist(username);
 
   if (!result.success) {
-    console.error("[Watchlist] Failed to fetch Trakt watchlist:", result.error);
-    return [];
+    console.error("[Watchlist] Trakt refresh failed", { code: result.error.code });
+    throw new Error("Couldn't refresh the Trakt watchlist. Your saved lists have not been changed.");
   }
 
   const items = result.data.map(traktToUnified);
@@ -248,19 +248,9 @@ async function getTraktWatchlistWithPosters(
   return items;
 }
 
-/**
- * Normalize a title for matching (lowercase, remove special chars, trim).
- */
-function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** Local library item data type */
 interface LocalItemData {
+  type: "movie" | "show";
   ratingKey: string;
   thumb?: string;
   audienceRating?: number;
@@ -278,12 +268,12 @@ async function getPlexWatchlistWithRatings(
 ): Promise<UnifiedWatchlistItem[]> {
   const result = await plexClient.getWatchlist({ sort: "watchlistedAt", sortDir: "desc" });
   if (!result.success) {
-    console.error("[Watchlist] Failed to fetch Plex watchlist:", result.error);
-    return [];
+    console.error("[Watchlist] Plex refresh failed", { code: result.error.code, pagination: result.error.message.includes("pagination") });
+    throw new Error("Couldn't refresh the Plex watchlist. Your saved lists have not been changed.");
   }
 
   const items = result.data.map((item) => {
-    const localItem = localItemsByGuid.get(item.guid);
+    const localItem = localItemsByGuid.get(`${item.type}:${item.guid}`);
     const thumbUrl = localItem?.thumb
       ? buildPlexImageUrl(localItem.thumb, plexToken)
       : buildPlexImageUrl(item.thumb, plexToken);
@@ -322,7 +312,7 @@ async function getPlexWatchlistWithRatings(
           if (match.vote_average > 0 && !item.rating) {
             item.rating = match.vote_average;
           }
-          item.tmdbId = match.id;
+          // A title search can supply artwork, but cannot establish provider identity.
         }
       }
     }
@@ -343,7 +333,6 @@ export async function getUnifiedWatchlist(
   filter: WatchlistFilter = "all",
   buildPlexImageUrl: (thumb: string | undefined, token: string) => string,
   localItemsByGuid: Map<string, LocalItemData>,
-  localItemsByTitleYear?: Map<string, LocalItemData>,
   userSettings?: WatchlistUserSettings
 ): Promise<UnifiedWatchlistResult> {
   const counts: WatchlistCounts = { all: 0, plex: 0, trakt: 0, imdb: 0 };
@@ -355,7 +344,7 @@ export async function getUnifiedWatchlist(
   console.log(`[WatchlistService] Settings received: trakt=${traktUsername}, imdb=[${imdbWatchlistIds.join(',')}]`);
 
   // Fetch from all sources in parallel
-  const [plexItems, traktItems, imdbItems] = await Promise.all([
+  const sources = await Promise.allSettled([
     // Plex watchlist (with TMDB ratings)
     (async () => {
       if (filter !== "all" && filter !== "plex") return [];
@@ -378,6 +367,12 @@ export async function getUnifiedWatchlist(
       return getIMDBWatchlistWithPosters(tmdbClient, imdbWatchlistIds);
     })(),
   ]);
+
+  const names = ["Plex", "Trakt", "IMDb"];
+  const errors = sources.flatMap((result, index) => result.status === "rejected"
+    ? [`${names[index]} could not be refreshed. Check its connection and list access in Settings, then retry. Other available sources are shown; saved lists are unchanged.`]
+    : []);
+  const [plexItems, traktItems, imdbItems] = sources.map(result => result.status === "fulfilled" ? result.value : []);
 
   // Count items per source before deduplication
   counts.plex = plexItems.length;
@@ -415,14 +410,10 @@ export async function getUnifiedWatchlist(
 
       // First try matching by Plex GUID
       if (item.plexGuid) {
-        localItem = localItemsByGuid.get(item.plexGuid);
+        localItem = localItemsByGuid.get(`${item.type}:${item.plexGuid}`);
       }
-
-      // Fallback: match by normalized title + year
-      if (!localItem && localItemsByTitleYear && item.title && item.year) {
-        const titleYearKey = `${normalizeTitle(item.title)}:${item.year}`;
-        localItem = localItemsByTitleYear.get(titleYearKey);
-      }
+      if (!localItem && item.imdbId) localItem = localItemsByGuid.get(`${item.type}:imdb://${item.imdbId}`);
+      if (!localItem && item.tmdbId) localItem = localItemsByGuid.get(`${item.type}:tmdb://${item.tmdbId}`);
 
       if (localItem) {
         item.localRatingKey = localItem.ratingKey;
@@ -439,5 +430,5 @@ export async function getUnifiedWatchlist(
     }
   }
 
-  return { items, counts };
+  return { items, counts, errors };
 }

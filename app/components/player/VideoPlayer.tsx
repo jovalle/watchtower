@@ -13,8 +13,8 @@ import {
   VolumeX,
   Maximize,
   Minimize,
-  SkipBack,
-  SkipForward,
+  RotateCcw,
+  RotateCw,
   ArrowLeft,
   Settings,
   Check,
@@ -23,9 +23,13 @@ import {
   ListVideo,
   X,
   ChevronRight,
+  PictureInPicture2,
+  Cast,
 } from "lucide-react";
 import type { QualityProfile, PlaybackMethod } from "~/lib/plex/types";
 import { setClientPlaybackPref } from "~/lib/playback-prefs";
+import { findActiveMarker, type PlaybackMarker } from "~/lib/plex/markers";
+import { NextEpisodeCard, type NextEpisode } from "./NextEpisodeCard";
 
 interface AudioTrack {
   id: number;
@@ -44,6 +48,7 @@ interface SubtitleTrack {
   languageCode?: string;
   codec?: string;
   selected?: boolean;
+  sidecarUrl?: string;
 }
 
 interface EpisodeInfo {
@@ -62,6 +67,7 @@ const PROGRESS_REPORT_INTERVAL = 10000; // 10 seconds
 const SCROBBLE_THRESHOLD = 0.9; // Mark as watched at 90%
 const CONTROLS_HIDE_DELAY = 3000;
 const SKIP_DURATION = 10;
+const BUTTON_SKIP_DURATION = 30;
 
 // Webkit fullscreen types for iOS
 interface WebkitDocument extends Document {
@@ -73,9 +79,12 @@ interface WebkitHTMLVideoElement extends HTMLVideoElement {
   webkitEnterFullscreen?: () => void;
   webkitExitFullscreen?: () => void;
   webkitSupportsFullscreen?: boolean;
+  webkitShowPlaybackTargetPicker?: () => void;
+  webkitCurrentPlaybackTargetIsWireless?: boolean;
 }
 
 export interface VideoPlayerProps {
+  backTo?: string;
   src: string;
   title: string;
   subtitle?: string;
@@ -83,8 +92,6 @@ export interface VideoPlayerProps {
   durationMs?: number | null;
   resumePositionSeconds?: number;
   ratingKey: string;
-  serverUrl?: string;
-  token?: string;
   quality?: QualityProfile;
   availableQualities?: QualityProfile[];
   playbackMethod?: PlaybackMethod;
@@ -96,10 +103,17 @@ export interface VideoPlayerProps {
   };
   audioTracks?: AudioTrack[];
   subtitleTracks?: SubtitleTrack[];
+  partId?: number;
+  /** Subtitle stream Plex is burning into the current stream, if any. */
+  burnedSubtitleId?: number | null;
   episodes?: EpisodeInfo[];
   seasonTitle?: string;
   seasonNumber?: number;
   episodeNumber?: number;
+  markers?: PlaybackMarker[];
+  nextEpisode?: NextEpisode | null;
+  autoSkipIntro?: boolean;
+  autoPlayNextEpisode?: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -108,12 +122,15 @@ function formatTime(seconds: number): string {
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
   if (hrs > 0) {
-    return `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `${hrs}:${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
   }
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 export function VideoPlayer({
+  backTo = "/app",
   src,
   title,
   subtitle,
@@ -121,19 +138,26 @@ export function VideoPlayer({
   durationMs,
   resumePositionSeconds = 0,
   ratingKey,
-  serverUrl: _serverUrl,
-  token: _token,
   quality,
   availableQualities = [],
   playbackMethod = "direct_play",
   mediaInfo,
   audioTracks = [],
   subtitleTracks = [],
+  partId,
+  burnedSubtitleId = null,
   episodes = [],
   seasonTitle,
   seasonNumber,
+  markers = [],
+  nextEpisode = null,
+  autoSkipIntro = false,
+  autoPlayNextEpisode = true,
 }: VideoPlayerProps) {
   const navigate = useNavigate();
+  const playbackSession = new URL(src, "http://localhost").searchParams.get(
+    "session"
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -153,6 +177,8 @@ export function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [progressError, setProgressError] = useState(false);
+  const [watchedError, setWatchedError] = useState(false);
 
   // UI state
   const [isSeeking, setIsSeeking] = useState(false);
@@ -160,29 +186,111 @@ export function VideoPlayer({
   const [hoverPosition, setHoverPosition] = useState<number>(0);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [hasTriedTranscode, setHasTriedTranscode] = useState(playbackMethod === "transcode");
+  const [hasTriedTranscode, setHasTriedTranscode] = useState(
+    playbackMethod === "transcode"
+  );
   // Scrubber lock for transcoded streams - prevents seeking until stream is ready
-  const [scrubberReady, setScrubberReady] = useState(playbackMethod === "direct_play");
+  const [scrubberReady, setScrubberReady] = useState(
+    playbackMethod === "direct_play"
+  );
 
   // Track/Episode panel state
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"quality" | "audio" | "subtitles">("quality");
+  const [settingsTab, setSettingsTab] = useState<
+    "quality" | "audio" | "subtitles"
+  >("quality");
   const [showEpisodePanel, setShowEpisodePanel] = useState(false);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number | null>(
     audioTracks.find((t) => t.selected)?.id || null
   );
-  const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<number | null>(
-    subtitleTracks.find((t) => t.selected)?.id || null
-  );
+  const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<
+    number | null
+  >(subtitleTracks.find((t) => t.selected)?.id || null);
+  const [trackError, setTrackError] = useState<string | null>(null);
+  const sidecarId =
+    burnedSubtitleId === null
+      ? subtitleTracks.find(
+          (t) => t.id === selectedSubtitleTrack && t.sidecarUrl
+        )?.id
+      : undefined;
+  const sidecarTrack = subtitleTracks.find((t) => t.id === sidecarId);
+
+  // Markers / next episode / PiP state
+  const [hasEnded, setHasEnded] = useState(false);
+  const [nextUpDismissed, setNextUpDismissed] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+  const [isPip, setIsPip] = useState(false);
+  const [deliveredSize, setDeliveredSize] = useState<string | null>(null);
+  const [castAvailable, setCastAvailable] = useState(false);
+  const [isCasting, setIsCasting] = useState(false);
+  const [castError, setCastError] = useState<string | null>(null);
+  const autoSkippedRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    setHasEnded(false);
+    setNextUpDismissed(false);
+    autoSkippedRef.current.clear();
+  }, [ratingKey]);
+
+  useEffect(() => {
+    setPipSupported(
+      typeof document !== "undefined" &&
+        document.pictureInPictureEnabled === true
+    );
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current as WebkitHTMLVideoElement | null;
+    if (!video || (src.includes(".m3u8") && !video.canPlayType("application/vnd.apple.mpegurl"))) return;
+    let cancelled = false;
+    let availabilityId: number | undefined;
+    const remote = video.remote;
+    const changed = () => setIsCasting(video.webkitCurrentPlaybackTargetIsWireless === true || remote?.state === "connected");
+    const availability = (event: Event) => setCastAvailable((event as Event & { availability: string }).availability === "available");
+    if (video.webkitShowPlaybackTargetPicker) {
+      video.addEventListener("webkitplaybacktargetavailabilitychanged", availability);
+      video.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", changed);
+    } else if (remote?.watchAvailability) {
+      void remote.watchAvailability((available) => { if (!cancelled) setCastAvailable(available); }).then((id) => {
+        if (cancelled) void remote.cancelWatchAvailability(id).catch(() => {});
+        else availabilityId = id;
+      }).catch(() => {});
+      remote.addEventListener("connect", changed);
+      remote.addEventListener("disconnect", changed);
+    }
+    return () => {
+      cancelled = true;
+      video.removeEventListener("webkitplaybacktargetavailabilitychanged", availability);
+      video.removeEventListener("webkitcurrentplaybacktargetiswirelesschanged", changed);
+      remote?.removeEventListener("connect", changed);
+      remote?.removeEventListener("disconnect", changed);
+      if (availabilityId !== undefined) void remote.cancelWatchAvailability(availabilityId).catch(() => {});
+    };
+  }, [src]);
+
+  const chooseCastTarget = async () => {
+    const video = videoRef.current as WebkitHTMLVideoElement | null;
+    setCastError(null);
+    try {
+      if (video?.webkitShowPlaybackTargetPicker) video.webkitShowPlaybackTargetPicker();
+      else await video?.remote?.prompt();
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "NotAllowedError")) setCastError("Couldn't connect to the receiver. You can continue watching here.");
+    }
+  };
 
   // Refs for values that shouldn't trigger re-renders
   const hasScrobbledRef = useRef(false);
+  const scrobbleRetryAfterRef = useRef(0);
   const hasInitializedRef = useRef(false);
   const currentMethodRef = useRef(playbackMethod);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isNavigatingRef = useRef(false); // Prevents duplicate stream reloads
   const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSeekRef = useRef<number | null>(null); // Track pending seek position
+  const timelineSequenceRef = useRef(0);
+  const lastPositionRef = useRef(resumePositionSeconds);
+  const lastDurationRef = useRef(durationMs ? durationMs / 1000 : 0);
 
   // Update method ref when prop changes
   useEffect(() => {
@@ -198,6 +306,10 @@ export function VideoPlayer({
     // Clear error from previous stream
     setError(null);
     setIsLoading(true);
+    setIsPlaying(false);
+    setDuration(durationMs ? durationMs / 1000 : 0);
+    setCurrentTime(resumePositionSeconds);
+    setBuffered(0);
     // Lock scrubber for transcoded streams until ready
     setScrubberReady(playbackMethod === "direct_play");
     // Clear any pending debounce from previous stream
@@ -205,7 +317,7 @@ export function VideoPlayer({
       clearTimeout(seekDebounceRef.current);
       seekDebounceRef.current = null;
     }
-  }, [src, playbackMethod]);
+  }, [src, playbackMethod, durationMs, resumePositionSeconds]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -221,10 +333,15 @@ export function VideoPlayer({
     if (isLoading && !error) {
       const timeout = playbackMethod === "transcode" ? 30000 : 15000;
       loadingTimeoutRef.current = setTimeout(() => {
-        console.log("[VideoPlayer] Loading timeout - resetting navigation state");
+        console.log(
+          "[VideoPlayer] Loading timeout - resetting navigation state"
+        );
         // CRITICAL: Reset navigation ref so user can try again
         isNavigatingRef.current = false;
         pendingSeekRef.current = null;
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+        videoRef.current?.pause();
         setError("Loading is taking too long. The stream may be unavailable.");
         setIsLoading(false);
       }, timeout);
@@ -242,71 +359,63 @@ export function VideoPlayer({
     };
   }, [isLoading, error, playbackMethod]);
 
-  // Unlock scrubber for transcoded streams once enough buffer is available
-  // Requires 10 seconds of buffer ahead of current position
-  const MIN_BUFFER_FOR_SCRUB = 10; // seconds
-  useEffect(() => {
-    // Direct play always has scrubber ready
-    if (playbackMethod === "direct_play") {
-      setScrubberReady(true);
-      return;
-    }
-
-    // For transcoded streams, check buffer before enabling scrubber
-    if (!isLoading && !error && buffered > 0) {
-      const video = videoRef.current;
-      if (video) {
-        const bufferAhead = buffered - video.currentTime;
-        if (bufferAhead >= MIN_BUFFER_FOR_SCRUB) {
-          if (!scrubberReady) {
-            console.log(`[VideoPlayer] Scrubber ready (${bufferAhead.toFixed(1)}s buffered)`);
-            setScrubberReady(true);
-          }
-        }
-      }
-    }
-  }, [playbackMethod, isLoading, error, buffered, currentTime, scrubberReady]);
-
   /**
    * Report progress to Plex
    */
   const reportProgress = useCallback(
     async (state: "playing" | "paused" | "stopped") => {
       const video = videoRef.current;
-      if (!video || !ratingKey) return;
+      if (!video || !ratingKey || isNavigatingRef.current) return;
+      lastPositionRef.current = video.currentTime;
 
       const time = Math.round(video.currentTime * 1000);
-      const dur = Math.round(video.duration * 1000);
-      if (!dur || isNaN(dur)) return;
+      const dur = durationMs || Math.round(video.duration * 1000);
+      if (!Number.isFinite(dur) || dur <= 0) return;
 
       try {
-        await fetch("/api/plex/timeline", {
+        const response = await fetch("/api/plex/timeline", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ratingKey, state, time, duration: dur }),
+          body: JSON.stringify({
+            ratingKey,
+            state,
+            time,
+            duration: dur,
+            session: playbackSession,
+            sequence: ++timelineSequenceRef.current,
+          }),
+          keepalive: true,
         });
+        if (!response.ok) throw new Error(`Progress report failed (${response.status})`);
+        setProgressError(false);
       } catch (e) {
+        setProgressError(true);
         console.error("Failed to report progress:", e);
       }
     },
-    [ratingKey]
+    [ratingKey, playbackSession, durationMs]
   );
 
   /**
    * Mark as watched
    */
-  const markWatched = useCallback(async () => {
+  const markWatched = useCallback(async (force = false) => {
     if (!ratingKey || hasScrobbledRef.current) return;
+    if (!force && Date.now() < scrobbleRetryAfterRef.current) return;
     hasScrobbledRef.current = true;
     try {
-      await fetch("/api/plex/scrobble", {
+      const response = await fetch("/api/plex/scrobble", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ratingKey }),
       });
+      if (!response.ok) throw new Error(`Watched report failed (${response.status})`);
+      setWatchedError(false);
     } catch (e) {
       console.error("Failed to mark as watched:", e);
       hasScrobbledRef.current = false;
+      scrobbleRetryAfterRef.current = Date.now() + 10000;
+      setWatchedError(true);
     }
   }, [ratingKey]);
 
@@ -315,11 +424,11 @@ export function VideoPlayer({
    */
   const checkScrobble = useCallback(() => {
     const video = videoRef.current;
-    if (!video || hasScrobbledRef.current || !video.duration) return;
-    if (video.currentTime / video.duration >= SCROBBLE_THRESHOLD) {
+    if (!video || hasScrobbledRef.current || !duration) return;
+    if (video.currentTime / duration >= SCROBBLE_THRESHOLD) {
       markWatched();
     }
-  }, [markWatched]);
+  }, [markWatched, duration]);
 
   /**
    * Handle quality change
@@ -328,11 +437,14 @@ export function VideoPlayer({
     (newQuality: QualityProfile) => {
       setShowQualityMenu(false);
       const video = videoRef.current;
-      const currentPos = video && !isNaN(video.currentTime) && video.currentTime > 0
-        ? Math.floor(video.currentTime * 1000)
-        : Math.floor(resumePositionSeconds * 1000);
+      const currentPos =
+        video && hasInitializedRef.current && Number.isFinite(video.currentTime) && video.currentTime >= 0
+          ? Math.floor(video.currentTime * 1000)
+          : Math.floor(resumePositionSeconds * 1000);
 
       // Stop all media loading before navigation
+      lastPositionRef.current = currentPos / 1000;
+      isNavigatingRef.current = true;
       if (video) {
         video.pause();
         video.removeAttribute("src");
@@ -344,11 +456,13 @@ export function VideoPlayer({
       }
 
       const params = new URLSearchParams();
-      if (currentPos > 0) params.set("t", currentPos.toString());
+      params.set("t", currentPos.toString());
       params.set("quality", newQuality.id);
       if (!newQuality.isOriginal) params.set("transcode", "1");
 
-      navigate(`/app/watch/${ratingKey}?${params.toString()}`, { replace: true });
+      navigate(`/app/watch/${ratingKey}?${params.toString()}`, {
+        replace: true,
+      });
     },
     [navigate, ratingKey, resumePositionSeconds]
   );
@@ -363,11 +477,14 @@ export function VideoPlayer({
     setIsLoading(true);
 
     const video = videoRef.current;
-    const currentPos = video && !isNaN(video.currentTime) && video.currentTime > 0
-      ? Math.floor(video.currentTime * 1000)
-      : Math.floor(resumePositionSeconds * 1000);
+    const currentPos =
+      video && hasInitializedRef.current && Number.isFinite(video.currentTime) && video.currentTime >= 0
+        ? Math.floor(video.currentTime * 1000)
+        : Math.floor(resumePositionSeconds * 1000);
 
     // Stop all media loading before navigation
+    lastPositionRef.current = currentPos / 1000;
+    isNavigatingRef.current = true;
     if (video) {
       video.pause();
       video.removeAttribute("src");
@@ -379,7 +496,7 @@ export function VideoPlayer({
     }
 
     const params = new URLSearchParams();
-    if (currentPos > 0) params.set("t", currentPos.toString());
+    params.set("t", currentPos.toString());
     params.set("quality", "1080p-20");
     params.set("transcode", "1");
 
@@ -392,87 +509,146 @@ export function VideoPlayer({
    * This is the centralized function for handling out-of-buffer seeks.
    * It includes guards against duplicate calls and debouncing for rapid scrubs.
    */
-  const reloadStreamAtPosition = useCallback((targetSeconds: number, immediate = false) => {
-    // Guard against duplicate navigations - just update the pending target
-    if (isNavigatingRef.current) {
-      pendingSeekRef.current = targetSeconds;
-      return;
-    }
+  const reloadStreamAtPosition = useCallback(
+    (targetSeconds: number, immediate = false) => {
+      // Guard against duplicate navigations - just update the pending target
+      if (isNavigatingRef.current) {
+        pendingSeekRef.current = targetSeconds;
+        return;
+      }
 
-    const video = videoRef.current;
+      const video = videoRef.current;
 
-    const executeReload = (finalTargetSeconds: number) => {
-      // Double-check we're not already navigating
-      if (isNavigatingRef.current) return;
-      isNavigatingRef.current = true;
+      const executeReload = (finalTargetSeconds: number) => {
+        // Double-check we're not already navigating
+        if (isNavigatingRef.current) return;
+        isNavigatingRef.current = true;
+        lastPositionRef.current = finalTargetSeconds;
 
-      // Lock scrubber until new stream is ready
-      setScrubberReady(false);
+        // Lock scrubber until new stream is ready
+        setScrubberReady(false);
 
-      console.log(`[VideoPlayer] Reloading stream at ${finalTargetSeconds}s`);
+        console.log(`[VideoPlayer] Reloading stream at ${finalTargetSeconds}s`);
 
-      // Tell Plex to stop the current transcode session before starting a new one
-      // This prevents session buildup that causes Plex to fail on subsequent seeks
-      if (video && ratingKey) {
-        const dur = Math.round((video.duration || 0) * 1000);
-        if (dur && !isNaN(dur)) {
-          navigator.sendBeacon("/api/plex/timeline", JSON.stringify({
-            ratingKey,
-            state: "stopped",
-            time: Math.round(finalTargetSeconds * 1000),
-            duration: dur,
-          }));
+        // The src cleanup stops this exact session. An asynchronous stopped
+        // timeline here can arrive after the replacement stream starts and stop it.
+        // Stop all media loading before navigation
+        if (video && video.src) {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
         }
-      }
-
-      // Stop all media loading before navigation
-      if (video && video.src) {
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
-      }
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-
-      setIsLoading(true);
-
-      const params = new URLSearchParams();
-      params.set("t", Math.floor(finalTargetSeconds * 1000).toString());
-      if (quality) {
-        params.set("quality", quality.id);
-        if (!quality.isOriginal) {
-          params.set("transcode", "1");
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
         }
-      }
 
-      navigate(`/app/watch/${ratingKey}?${params.toString()}`, { replace: true });
-    };
+        setIsLoading(true);
 
-    // Clear any pending debounce
-    if (seekDebounceRef.current) {
-      clearTimeout(seekDebounceRef.current);
-      seekDebounceRef.current = null;
-    }
+        const params = new URLSearchParams();
+        params.set("t", Math.floor(finalTargetSeconds * 1000).toString());
+        if (quality) {
+          params.set("quality", quality.id);
+          if (!quality.isOriginal) {
+            params.set("transcode", "1");
+          }
+        }
 
-    if (immediate) {
-      // For immediate mode, use the target directly
-      pendingSeekRef.current = null;
-      executeReload(targetSeconds);
-    } else {
-      // Debounce: wait 500ms before reloading to allow for iOS native scrubbing
-      // Each call resets the timer and updates the pending target
-      pendingSeekRef.current = targetSeconds;
-      seekDebounceRef.current = setTimeout(() => {
-        // Use the most recent pending target (may have been updated by subsequent calls)
-        const finalTarget = pendingSeekRef.current ?? targetSeconds;
-        pendingSeekRef.current = null;
+        navigate(`/app/watch/${ratingKey}?${params.toString()}`, {
+          replace: true,
+        });
+      };
+
+      // Clear any pending debounce
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
         seekDebounceRef.current = null;
-        executeReload(finalTarget);
-      }, 500);
-    }
-  }, [navigate, quality, ratingKey]);
+      }
+
+      if (immediate) {
+        // For immediate mode, use the target directly
+        pendingSeekRef.current = null;
+        executeReload(targetSeconds);
+      } else {
+        // Debounce: wait 500ms before reloading to allow for iOS native scrubbing
+        // Each call resets the timer and updates the pending target
+        pendingSeekRef.current = targetSeconds;
+        seekDebounceRef.current = setTimeout(() => {
+          // Use the most recent pending target (may have been updated by subsequent calls)
+          const finalTarget = pendingSeekRef.current ?? targetSeconds;
+          pendingSeekRef.current = null;
+          seekDebounceRef.current = null;
+          executeReload(finalTarget);
+        }, 500);
+      }
+    },
+    [navigate, quality, ratingKey]
+  );
+
+  /** Saves the pick on Plex, then restarts the stream unless a sidecar subtitle can switch in place. */
+  const handleTrackSelect = useCallback(
+    async (kind: "audio" | "subtitle", id: number) => {
+      const previous =
+        kind === "audio" ? selectedAudioTrack : selectedSubtitleTrack;
+      if (!partId || id === (previous ?? 0)) return;
+      const setSelected =
+        kind === "audio" ? setSelectedAudioTrack : setSelectedSubtitleTrack;
+      setTrackError(null);
+      setSelected(id || null);
+
+      const response = await fetch("/api/plex/streams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partId,
+          [kind === "audio" ? "audioStreamID" : "subtitleStreamID"]: id,
+        }),
+      }).catch(() => null);
+      if (!response?.ok) {
+        setSelected(previous);
+        setTrackError("Couldn't change the track. Try again.");
+        return;
+      }
+
+      const next = subtitleTracks.find((t) => t.id === id);
+      if (
+        kind === "audio" ||
+        burnedSubtitleId !== null ||
+        (id !== 0 && !next?.sidecarUrl)
+      ) {
+        setShowSettingsPanel(false);
+        reloadStreamAtPosition(
+          videoRef.current?.currentTime || resumePositionSeconds,
+          true
+        );
+      }
+    },
+    [
+      partId,
+      selectedAudioTrack,
+      selectedSubtitleTrack,
+      subtitleTracks,
+      burnedSubtitleId,
+      reloadStreamAtPosition,
+      resumePositionSeconds,
+    ]
+  );
+
+  // Show only the chosen sidecar; hls.js can add text tracks of its own.
+  useEffect(() => {
+    const tracks = videoRef.current?.textTracks;
+    // jsdom's TextTrackList is not an EventTarget.
+    if (typeof tracks?.addEventListener !== "function") return;
+    const apply = () => {
+      for (const track of Array.from(tracks)) {
+        track.mode =
+          track.id === `sidecar-${sidecarId}` ? "showing" : "disabled";
+      }
+    };
+    apply();
+    tracks.addEventListener("addtrack", apply);
+    return () => tracks.removeEventListener("addtrack", apply);
+  }, [sidecarId]);
 
   /**
    * Check if a time position is within the buffered range.
@@ -496,32 +672,47 @@ export function VideoPlayer({
    * Seek to position - handles both buffered and unbuffered seeks.
    * For transcoded streams, seeking beyond buffer requires reloading with new offset.
    */
-  const seekToPosition = useCallback((targetTime: number, immediate = false) => {
-    const video = videoRef.current;
-    if (!video) return;
+  const seekToPosition = useCallback(
+    (targetTime: number, immediate = false) => {
+      const video = videoRef.current;
+      if (!video) return;
 
-    // Clamp to valid range
-    const clampedTime = Math.max(0, Math.min(targetTime, video.duration || duration));
+      // Clamp to valid range
+      const clampedTime = Math.max(
+        0,
+        Math.min(targetTime, duration || video.duration)
+      );
 
-    // For transcoded streams, check if we need to reload
-    const isTranscoding = playbackMethod === "transcode" || playbackMethod === "direct_stream";
+      // For transcoded streams, check if we need to reload
+      const isTranscoding =
+        playbackMethod === "transcode" || playbackMethod === "direct_stream";
 
-    // Block out-of-buffer seeks when scrubber is locked (transcoding not ready)
-    if (isTranscoding && !scrubberReady && !isTimeBuffered(clampedTime)) {
-      console.log("[VideoPlayer] Scrubber locked - ignoring out-of-buffer seek");
-      return;
-    }
+      // Block out-of-buffer seeks when scrubber is locked (transcoding not ready)
+      if (isTranscoding && !scrubberReady && !isTimeBuffered(clampedTime)) {
+        console.log(
+          "[VideoPlayer] Scrubber locked - ignoring out-of-buffer seek"
+        );
+        return;
+      }
 
-    // For direct play, always use native seeking (HLS segments are all available)
-    // For transcoded streams, only allow native seeking within buffer
-    if (!isTranscoding || isTimeBuffered(clampedTime)) {
-      video.currentTime = clampedTime;
-      setCurrentTime(clampedTime);
-    } else {
-      // Seek beyond buffer in transcode mode - use centralized reload
-      reloadStreamAtPosition(clampedTime, immediate);
-    }
-  }, [duration, playbackMethod, isTimeBuffered, reloadStreamAtPosition, scrubberReady]);
+      // For direct play, always use native seeking (HLS segments are all available)
+      // For transcoded streams, only allow native seeking within buffer
+      if (!isTranscoding || isTimeBuffered(clampedTime)) {
+        video.currentTime = clampedTime;
+        setCurrentTime(clampedTime);
+      } else {
+        // Seek beyond buffer in transcode mode - use centralized reload
+        reloadStreamAtPosition(clampedTime, immediate);
+      }
+    },
+    [
+      duration,
+      playbackMethod,
+      isTimeBuffered,
+      reloadStreamAtPosition,
+      scrubberReady,
+    ]
+  );
 
   /**
    * Initialize HLS.js or native playback
@@ -554,52 +745,65 @@ export function VideoPlayer({
     // HLS.js for other browsers - dynamically import for code-splitting
     let cancelled = false;
 
-    import("hls.js").then(({ default: HlsClass, Events, ErrorTypes }) => {
-      if (cancelled) return;
+    import("hls.js")
+      .then(({ default: HlsClass, Events, ErrorTypes }) => {
+        if (cancelled) return;
 
-      if (!HlsClass.isSupported()) {
-        setError("HLS streaming not supported in this browser");
-        return;
-      }
+        if (!HlsClass.isSupported()) {
+          setError("HLS streaming not supported in this browser");
+          return;
+        }
 
-      console.log("[VideoPlayer] Using HLS.js (dynamically loaded)");
-      const hls = new HlsClass({
-        enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 90,
-      });
+        console.log("[VideoPlayer] Using HLS.js (dynamically loaded)");
+        const hls = new HlsClass({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 90,
+        });
 
-      hlsRef.current = hls;
-      hls.attachMedia(video);
+        hlsRef.current = hls;
+        let mediaRecoveryAttempted = false;
+        hls.attachMedia(video);
 
-      hls.on(Events.MEDIA_ATTACHED, () => {
-        hls.loadSource(src);
-      });
+        hls.on(Events.MEDIA_ATTACHED, () => {
+          hls.loadSource(src);
+        });
 
-      hls.on(Events.ERROR, (_, data) => {
-        console.error("[VideoPlayer] HLS error:", data.type, data.details);
-        if (data.fatal) {
-          if (data.type === ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-          } else if (data.type === ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
-          } else {
-            hls.destroy();
-            if (playbackMethod === "direct_play" && !hasTriedTranscode) {
-              console.log("[VideoPlayer] Direct play failed, trying transcode");
-              retryWithTranscode();
+        hls.on(Events.ERROR, (_, data) => {
+          console.error("[VideoPlayer] HLS error:", data.type, data.details);
+          if (data.fatal) {
+            if (
+              data.type === ErrorTypes.MEDIA_ERROR &&
+              !mediaRecoveryAttempted
+            ) {
+              mediaRecoveryAttempted = true;
+              hls.recoverMediaError();
             } else {
-              setError("Failed to load video. Try a different quality.");
+              hls.destroy();
+              hlsRef.current = null;
+              if (
+                data.type === ErrorTypes.MEDIA_ERROR &&
+                playbackMethod !== "transcode" &&
+                !hasTriedTranscode
+              ) {
+                console.log(
+                  "[VideoPlayer] Direct play failed, trying transcode"
+                );
+                retryWithTranscode();
+              } else {
+                setError("Failed to load video. Try a different quality.");
+                setIsLoading(false);
+              }
             }
           }
+        });
+      })
+      .catch((err) => {
+        console.error("[VideoPlayer] Failed to load HLS.js:", err);
+        if (!cancelled) {
+          setError("Failed to load video player. Please refresh the page.");
         }
       });
-    }).catch((err) => {
-      console.error("[VideoPlayer] Failed to load HLS.js:", err);
-      if (!cancelled) {
-        setError("Failed to load video player. Please refresh the page.");
-      }
-    });
 
     return () => {
       cancelled = true;
@@ -610,6 +814,37 @@ export function VideoPlayer({
     };
   }, [src, playbackMethod, hasTriedTranscode, retryWithTranscode]);
 
+  // A stopped timeline only reports progress; explicitly release the Plex transcoder.
+  useEffect(() => {
+    if (error) return;
+    const stream = new URL(src, window.location.origin);
+    const session = stream.searchParams.get("session");
+    if (!session || !stream.pathname.startsWith("/api/plex/hls/")) return;
+    const stopUrl = `${stream.pathname.replace(
+      /start\.m3u8$/,
+      "stop"
+    )}?${new URLSearchParams({ session })}`;
+    const pingUrl = `${stream.pathname.replace(
+      /start\.m3u8$/,
+      "ping"
+    )}?${new URLSearchParams({ session })}`;
+    const keepalive = setInterval(() => {
+      void fetch(pingUrl).catch(() => {});
+    }, 30000);
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(keepalive);
+      void fetch(stopUrl, { keepalive: true }).catch(() => {});
+    };
+    window.addEventListener("pagehide", stop);
+    return () => {
+      window.removeEventListener("pagehide", stop);
+      stop();
+    };
+  }, [src, error]);
+
   /**
    * Video event handlers
    */
@@ -617,9 +852,15 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    const updateDeliveredSize = () => setDeliveredSize(video.videoWidth > 0 && video.videoHeight > 0 ? `${video.videoWidth}×${video.videoHeight}` : null);
     const onLoadedMetadata = () => {
+      updateDeliveredSize();
       console.log("[VideoPlayer] Metadata loaded, duration:", video.duration);
-      if (video.duration && !isNaN(video.duration)) {
+      if (
+        !durationMs &&
+        Number.isFinite(video.duration) &&
+        video.duration > 0
+      ) {
         setDuration(video.duration);
       }
     };
@@ -635,8 +876,13 @@ export function VideoPlayer({
 
         // Plex handles resume via offset parameter, but we verify position
         // If video starts at 0 and we expected a resume, seek to it
-        if (resumePositionSeconds > 0 && video.currentTime < resumePositionSeconds - 5) {
-          console.log(`[VideoPlayer] Seeking to resume position: ${resumePositionSeconds}s`);
+        if (
+          resumePositionSeconds > 0 &&
+          video.currentTime < resumePositionSeconds - 5
+        ) {
+          console.log(
+            `[VideoPlayer] Seeking to resume position: ${resumePositionSeconds}s`
+          );
           video.currentTime = resumePositionSeconds;
         }
 
@@ -669,7 +915,8 @@ export function VideoPlayer({
       // Don't handle seeking during initial load or if navigation is already in progress
       if (!hasInitializedRef.current || isNavigatingRef.current) return;
 
-      const isTranscoding = playbackMethod === "transcode" || playbackMethod === "direct_stream";
+      const isTranscoding =
+        playbackMethod === "transcode" || playbackMethod === "direct_stream";
       if (!isTranscoding) return;
 
       const seekTarget = video.currentTime;
@@ -704,6 +951,8 @@ export function VideoPlayer({
     };
 
     const onTimeUpdate = () => {
+      if (!isNavigatingRef.current) lastPositionRef.current = video.currentTime;
+      if (Number.isFinite(video.duration) && video.duration > 0) lastDurationRef.current = durationMs ? durationMs / 1000 : video.duration;
       if (!isSeeking) {
         setCurrentTime(video.currentTime);
       }
@@ -729,23 +978,29 @@ export function VideoPlayer({
     const onEnded = () => {
       setIsPlaying(false);
       setWantsToPlay(false);
+      setHasEnded(true);
       reportProgress("stopped");
-      markWatched();
+      markWatched(true);
       setShowControls(true);
     };
 
     const onWaiting = () => setIsLoading(true);
     const onPlaying = () => {
       setIsLoading(false);
+      setScrubberReady(true);
+      setHasEnded(false);
       // Sync intent with actual state when video starts playing
       setWantsToPlay(true);
     };
+
+    const onEnterPip = () => setIsPip(true);
+    const onLeavePip = () => setIsPip(false);
 
     const onError = () => {
       const err = video.error;
       console.error("[VideoPlayer] Video error:", err?.code, err?.message);
 
-      if (playbackMethod === "direct_play" && !hasTriedTranscode) {
+      if (playbackMethod !== "transcode" && !hasTriedTranscode) {
         console.log("[VideoPlayer] Direct play failed, trying transcode");
         retryWithTranscode();
         return;
@@ -769,6 +1024,7 @@ export function VideoPlayer({
       setIsLoading(false);
     };
 
+    video.addEventListener("resize", updateDeliveredSize);
     video.addEventListener("loadedmetadata", onLoadedMetadata);
     video.addEventListener("canplay", onCanPlay);
     video.addEventListener("timeupdate", onTimeUpdate);
@@ -780,8 +1036,11 @@ export function VideoPlayer({
     video.addEventListener("error", onError);
     video.addEventListener("seeking", onSeeking);
     video.addEventListener("seeked", onSeeked);
+    video.addEventListener("enterpictureinpicture", onEnterPip);
+    video.addEventListener("leavepictureinpicture", onLeavePip);
 
     return () => {
+      video.removeEventListener("resize", updateDeliveredSize);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("timeupdate", onTimeUpdate);
@@ -793,41 +1052,71 @@ export function VideoPlayer({
       video.removeEventListener("error", onError);
       video.removeEventListener("seeking", onSeeking);
       video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("enterpictureinpicture", onEnterPip);
+      video.removeEventListener("leavepictureinpicture", onLeavePip);
     };
-    }, [isSeeking, checkScrobble, reportProgress, markWatched, ratingKey, resumePositionSeconds, playbackMethod, hasTriedTranscode, retryWithTranscode, wantsToPlay, isTimeBuffered, reloadStreamAtPosition]);
+  }, [
+    isSeeking,
+    checkScrobble,
+    reportProgress,
+    markWatched,
+    ratingKey,
+    resumePositionSeconds,
+    durationMs,
+    playbackMethod,
+    hasTriedTranscode,
+    retryWithTranscode,
+    wantsToPlay,
+    isTimeBuffered,
+    reloadStreamAtPosition,
+  ]);
 
   // Progress reporting interval
   useEffect(() => {
     if (!isPlaying) return;
-    const interval = setInterval(() => reportProgress("playing"), PROGRESS_REPORT_INTERVAL);
+    const interval = setInterval(
+      () => reportProgress("playing"),
+      PROGRESS_REPORT_INTERVAL
+    );
     return () => clearInterval(interval);
   }, [isPlaying, reportProgress]);
 
-  // Report stopped on unmount
+  // Keep the last observed position: destroying a media source can reset currentTime to zero.
   useEffect(() => {
-    const video = videoRef.current;
-    return () => {
-      if (video && ratingKey) {
-        const time = Math.round(video.currentTime * 1000);
-        const dur = Math.round(video.duration * 1000);
-        if (dur && !isNaN(dur)) {
-          navigator.sendBeacon("/api/plex/timeline", JSON.stringify({
-            ratingKey,
-            state: "stopped",
-            time,
-            duration: dur,
-          }));
+    let reported = false;
+    const reportExit = () => {
+      if (!reported && ratingKey) {
+        const time = Math.round(lastPositionRef.current * 1000);
+        const dur = durationMs || Math.round(lastDurationRef.current * 1000);
+        if (Number.isFinite(dur) && dur > 0) {
+          reported = true;
+          navigator.sendBeacon(
+            "/api/plex/timeline",
+            JSON.stringify({
+              ratingKey,
+              state: "stopped",
+              time,
+              duration: dur,
+              session: playbackSession,
+              sequence: ++timelineSequenceRef.current,
+            })
+          );
         }
       }
     };
-  }, [ratingKey]);
+    window.addEventListener("pagehide", reportExit);
+    return () => { window.removeEventListener("pagehide", reportExit); reportExit(); };
+  }, [ratingKey, playbackSession, durationMs]);
 
   // Fullscreen listener - handle both standard and webkit (iOS) events
   useEffect(() => {
     const video = videoRef.current;
 
     const onFullscreenChange = () => {
-      const isFs = !!(document.fullscreenElement || (document as WebkitDocument).webkitFullscreenElement);
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as WebkitDocument).webkitFullscreenElement
+      );
       setIsFullscreen(isFs);
     };
 
@@ -842,8 +1131,14 @@ export function VideoPlayer({
 
     return () => {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", onWebkitEndFullscreen);
-      video?.removeEventListener("webkitbeginfullscreen", onWebkitBeginFullscreen);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        onFullscreenChange
+      );
+      video?.removeEventListener(
+        "webkitbeginfullscreen",
+        onWebkitBeginFullscreen
+      );
       video?.removeEventListener("webkitendfullscreen", onWebkitEndFullscreen);
     };
   }, []);
@@ -854,45 +1149,60 @@ export function VideoPlayer({
       clearTimeout(hideControlsTimeoutRef.current);
     }
     setShowControls(true);
-    if (wantsToPlay && !isSeeking && !showTooltip && !showSettingsPanel && !showEpisodePanel) {
-      hideControlsTimeoutRef.current = setTimeout(() => setShowControls(false), CONTROLS_HIDE_DELAY);
+    if (
+      wantsToPlay &&
+      !isSeeking &&
+      !showTooltip &&
+      !showSettingsPanel &&
+      !showEpisodePanel
+    ) {
+      hideControlsTimeoutRef.current = setTimeout(
+        () => { if (!containerRef.current?.contains(document.activeElement)) setShowControls(false); },
+        CONTROLS_HIDE_DELAY
+      );
     }
-  }, [wantsToPlay, isSeeking, showTooltip, showSettingsPanel, showEpisodePanel]);
+  }, [
+    wantsToPlay,
+    isSeeking,
+    showTooltip,
+    showSettingsPanel,
+    showEpisodePanel,
+  ]);
 
   // Toggle fullscreen - handles both standard and iOS webkit APIs
   const toggleFullscreen = useCallback(async () => {
     const video = videoRef.current as WebkitHTMLVideoElement | null;
+    const container = containerRef.current;
     const doc = document as WebkitDocument;
 
-    // Check current fullscreen state (standard or webkit)
-    const isCurrentlyFullscreen = !!(document.fullscreenElement || doc.webkitFullscreenElement);
-
-    if (!isCurrentlyFullscreen) {
-      // Try iOS video fullscreen first (works on iPhones)
-      if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
-        video.webkitEnterFullscreen();
+    try {
+      if (document.fullscreenElement || doc.webkitFullscreenElement) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
         return;
       }
-      // Standard fullscreen API
-      if (containerRef.current?.requestFullscreen) {
-        await containerRef.current.requestFullscreen();
+      // Container fullscreen keeps the custom controls; iPhone Safari only
+      // supports native video fullscreen.
+      if (document.fullscreenEnabled && container?.requestFullscreen) {
+        await container.requestFullscreen();
+      } else if (
+        video?.webkitSupportsFullscreen &&
+        video.webkitEnterFullscreen
+      ) {
+        video.webkitEnterFullscreen();
       }
-    } else {
-      // Exit fullscreen
-      if (document.exitFullscreen) {
-        await document.exitFullscreen();
-      } else if (doc.webkitExitFullscreen) {
-        await doc.webkitExitFullscreen();
-      } else if (video?.webkitExitFullscreen) {
-        video.webkitExitFullscreen();
-      }
+    } catch (e) {
+      console.warn("[VideoPlayer] Fullscreen request failed:", e);
     }
   }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.defaultPrevented || (e.target instanceof HTMLElement && e.target.closest("button, a, input, select, textarea, [contenteditable=true]"))) return;
       const video = videoRef.current;
       if (!video) return;
 
@@ -958,7 +1268,16 @@ export function VideoPlayer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    }, [resetHideControlsTimer, toggleFullscreen, seekToPosition, showEpisodePanel, showSettingsPanel, showQualityMenu, episodes.length, wantsToPlay]);
+  }, [
+    resetHideControlsTimer,
+    toggleFullscreen,
+    seekToPosition,
+    showEpisodePanel,
+    showSettingsPanel,
+    showQualityMenu,
+    episodes.length,
+    wantsToPlay,
+  ]);
 
   // Control handlers
   const togglePlay = () => {
@@ -996,12 +1315,12 @@ export function VideoPlayer({
 
   const skipForward = () => {
     const video = videoRef.current;
-    if (video) seekToPosition(video.currentTime + SKIP_DURATION);
+    if (video) seekToPosition(video.currentTime + BUTTON_SKIP_DURATION);
   };
 
   const skipBack = () => {
     const video = videoRef.current;
-    if (video) seekToPosition(video.currentTime - SKIP_DURATION);
+    if (video) seekToPosition(video.currentTime - BUTTON_SKIP_DURATION);
   };
 
   /**
@@ -1015,16 +1334,56 @@ export function VideoPlayer({
     [navigate]
   );
 
+  const activeMarker = findActiveMarker(markers, currentTime);
+  const showNextUp =
+    !!nextEpisode &&
+    !nextUpDismissed &&
+    (activeMarker?.type === "credits" || hasEnded);
+
+  useEffect(() => {
+    if (
+      !autoSkipIntro ||
+      isLoading ||
+      isSeeking ||
+      activeMarker?.type !== "intro"
+    )
+      return;
+    // Skip each intro once so seeking back into it is respected.
+    if (autoSkippedRef.current.has(activeMarker.start)) return;
+    autoSkippedRef.current.add(activeMarker.start);
+    seekToPosition(activeMarker.end, true);
+  }, [autoSkipIntro, isLoading, isSeeking, activeMarker, seekToPosition]);
+
+  const playNextEpisode = useCallback(() => {
+    if (nextEpisode) handleEpisodeSelect(nextEpisode.ratingKey);
+  }, [nextEpisode, handleEpisodeSelect]);
+
+  const cancelNextEpisode = useCallback(() => setNextUpDismissed(true), []);
+
+  const togglePip = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        await video.requestPictureInPicture();
+      }
+    } catch (e) {
+      console.error("[VideoPlayer] Picture-in-Picture failed:", e);
+    }
+  }, []);
+
   /**
    * Build thumbnail URL for episodes
    */
-  const buildThumbUrl = useCallback(
-    (thumbPath?: string) => {
-      if (!thumbPath) return undefined;
-      return `/api/plex/image?path=${encodeURIComponent(thumbPath)}&width=240&height=135`;
-    },
-    []
-  );
+  const buildThumbUrl = useCallback((thumbPath?: string) => {
+    if (!thumbPath) return undefined;
+    return `/api/plex/image?path=${encodeURIComponent(
+      thumbPath
+    )}&width=240&height=135`;
+  }, []);
 
   // Progress bar handlers
   const handleProgressBarMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1126,19 +1485,24 @@ export function VideoPlayer({
 
   const getMethodLabel = () => {
     switch (playbackMethod) {
-      case "direct_play": return "Direct Play";
-      case "direct_stream": return "Direct Stream";
-      case "transcode": return "Transcoding";
-      default: return "";
+      case "direct_play":
+        return "Direct Play";
+      case "direct_stream":
+        return "HLS";
+      case "transcode":
+        return "Transcoding";
+      default:
+        return "";
     }
   };
 
   return (
     <div
       ref={containerRef}
-      className="group relative flex h-full w-full items-center justify-center bg-black"
+      className="group relative flex h-full w-full items-center justify-center bg-black [&_button]:min-h-11 [&_button]:min-w-11"
+      onFocusCapture={() => setShowControls(true)}
       onMouseMove={resetHideControlsTimer}
-      onMouseLeave={() => wantsToPlay && !isSeeking && setShowControls(false)}
+      onMouseLeave={() => wantsToPlay && !isSeeking && !containerRef.current?.contains(document.activeElement) && setShowControls(false)}
     >
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
@@ -1149,15 +1513,30 @@ export function VideoPlayer({
         poster={posterUrl}
         onClick={togglePlay}
         aria-label={`Video player: ${title}`}
-      />
+      >
+        {sidecarTrack && (
+          <track
+            key={sidecarTrack.id}
+            id={`sidecar-${sidecarTrack.id}`}
+            kind="subtitles"
+            src={sidecarTrack.sidecarUrl}
+            srcLang={sidecarTrack.languageCode}
+            label={sidecarTrack.displayTitle}
+          />
+        )}
+      </video>
 
       {/* Loading spinner with back button */}
       {isLoading && !error && (
-        <div className="absolute inset-0 z-40 bg-black/50">
+        <div
+          className="absolute inset-0 z-40 bg-black"
+          role="status"
+          aria-label="Loading video"
+        >
           {/* Back button always accessible during loading */}
           <div className="absolute left-0 top-0 p-4">
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => navigate(backTo, { replace: true })}
               className="flex items-center gap-2 rounded-full bg-black/50 p-2 text-white transition-colors hover:bg-black/70"
             >
               <ArrowLeft className="h-6 w-6" />
@@ -1165,17 +1544,23 @@ export function VideoPlayer({
             </button>
           </div>
           {/* Centered spinner - absolutely positioned for true center */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className={`h-16 w-16 animate-spin rounded-full border-4 ${
-              playbackMethod === "transcode"
-                ? "border-mango/20 border-t-mango"
-                : "border-white/20 border-t-white"
-            }`} />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div
+              className={`h-16 w-16 animate-spin rounded-full border-4 ${
+                playbackMethod === "transcode"
+                  ? "border-mango/20 border-t-mango"
+                  : "border-white/20 border-t-white"
+              }`}
+            />
           </div>
         </div>
       )}
 
       {/* Error overlay */}
+      {(progressError || watchedError) && !error && <div role="alert" className="absolute inset-x-4 top-20 z-40 flex flex-wrap items-center gap-3 rounded-md bg-black/90 p-3 text-sm text-white">
+        <span>{watchedError ? "Couldn't save watched status." : "Couldn't save playback progress."}</span>
+        <button onClick={() => { if (watchedError) void markWatched(true); if (progressError) void reportProgress(isPlaying ? "playing" : "paused"); }} className="min-h-11 rounded border border-white/40 px-3">Retry saving</button>
+      </div>}
       {error && (
         <div className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80">
           <p className="text-lg text-white">{error}</p>
@@ -1186,7 +1571,7 @@ export function VideoPlayer({
             >
               Retry
             </button>
-            {!hasTriedTranscode && playbackMethod === "direct_play" && (
+            {!hasTriedTranscode && playbackMethod !== "transcode" && (
               <button
                 onClick={retryWithTranscode}
                 className="rounded bg-white/20 px-6 py-2 font-medium text-white transition-colors hover:bg-white/30"
@@ -1195,7 +1580,7 @@ export function VideoPlayer({
               </button>
             )}
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => navigate(backTo, { replace: true })}
               className="rounded bg-white px-6 py-2 font-medium text-black transition-colors hover:bg-white/90"
             >
               Go Back
@@ -1207,13 +1592,16 @@ export function VideoPlayer({
       {/* Controls overlay */}
       <div
         className={`absolute inset-0 z-30 flex flex-col justify-between transition-opacity duration-300 ${
-          (showControls || isSeeking) && !isLoading && !error ? "opacity-100" : "pointer-events-none opacity-0"
+          (showControls || isSeeking) && !isLoading && !error
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         }`}
       >
         {/* Top bar */}
         <div className="bg-gradient-to-b from-black/70 via-black/30 to-transparent p-4 pb-12">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => navigate(backTo, { replace: true })}
+            aria-label="Back"
             className="flex items-center gap-2 rounded-full p-2 text-white transition-colors hover:bg-white/10"
           >
             <ArrowLeft className="h-6 w-6" />
@@ -1270,8 +1658,12 @@ export function VideoPlayer({
                 } before:absolute before:-top-4 before:-bottom-4 before:left-0 before:right-0 before:content-[''] sm:before:-top-2 sm:before:-bottom-2`}
                 onMouseMove={handleProgressBarMouseMove}
                 onMouseLeave={handleProgressBarMouseLeave}
-                onMouseDown={scrubberReady ? handleProgressBarMouseDown : undefined}
-                onTouchStart={scrubberReady ? handleProgressBarTouchStart : undefined}
+                onMouseDown={
+                  scrubberReady ? handleProgressBarMouseDown : undefined
+                }
+                onTouchStart={
+                  scrubberReady ? handleProgressBarTouchStart : undefined
+                }
                 role="slider"
                 tabIndex={0}
                 aria-label="Video progress"
@@ -1317,10 +1709,16 @@ export function VideoPlayer({
                     aria-valuenow={currentTime}
                     aria-disabled={!scrubberReady}
                     className={`relative flex h-11 w-11 items-center justify-center ${
-                      scrubberReady ? "cursor-grab active:cursor-grabbing" : "cursor-not-allowed"
+                      scrubberReady
+                        ? "cursor-grab active:cursor-grabbing"
+                        : "cursor-not-allowed"
                     }`}
-                    onMouseDown={scrubberReady ? handleProgressBarMouseDown : undefined}
-                    onTouchStart={scrubberReady ? handleProgressBarTouchStart : undefined}
+                    onMouseDown={
+                      scrubberReady ? handleProgressBarMouseDown : undefined
+                    }
+                    onTouchStart={
+                      scrubberReady ? handleProgressBarTouchStart : undefined
+                    }
                   >
                     {/* Visual dot */}
                     <div
@@ -1329,7 +1727,9 @@ export function VideoPlayer({
                           ? "bg-mango active:scale-125"
                           : "bg-white/50"
                       } ${
-                        hoverTime !== null || isSeeking ? "opacity-100 scale-125" : "opacity-100 sm:opacity-0 sm:group-hover/progress:opacity-100"
+                        hoverTime !== null || isSeeking
+                          ? "opacity-100 scale-125"
+                          : "opacity-100 sm:opacity-0 sm:group-hover/progress:opacity-100"
                       }`}
                     >
                       {/* Loading ring when scrubber is locked */}
@@ -1348,30 +1748,46 @@ export function VideoPlayer({
           </div>
 
           {/* Control buttons */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
+              {(castAvailable || isCasting) && <button onClick={chooseCastTarget} aria-label={isCasting ? "Manage casting" : "Cast"} className={`flex h-11 w-11 items-center justify-center rounded ${isCasting ? "text-accent-primary" : "text-white"}`}><Cast className="h-5 w-5" /></button>}
+              {castError && <span role="alert" className="max-w-60 text-sm text-white">{castError}</span>}
               <button
                 onClick={togglePlay}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
                 aria-label={wantsToPlay ? "Pause" : "Play"}
               >
-                {wantsToPlay ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                {wantsToPlay ? (
+                  <Pause className="h-5 w-5" />
+                ) : (
+                  <Play className="h-5 w-5" />
+                )}
               </button>
 
               <button
                 onClick={skipBack}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
-                aria-label="Skip back 10 seconds"
+                aria-label={`Rewind ${BUTTON_SKIP_DURATION} seconds`}
               >
-                <SkipBack className="h-5 w-5" />
+                <span className="relative flex h-6 w-6 items-center justify-center">
+                  <RotateCcw className="h-6 w-6" />
+                  <span className="absolute text-[8px] font-bold leading-none">
+                    {BUTTON_SKIP_DURATION}
+                  </span>
+                </span>
               </button>
 
               <button
                 onClick={skipForward}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
-                aria-label="Skip forward 10 seconds"
+                aria-label={`Forward ${BUTTON_SKIP_DURATION} seconds`}
               >
-                <SkipForward className="h-5 w-5" />
+                <span className="relative flex h-6 w-6 items-center justify-center">
+                  <RotateCw className="h-6 w-6" />
+                  <span className="absolute text-[8px] font-bold leading-none">
+                    {BUTTON_SKIP_DURATION}
+                  </span>
+                </span>
               </button>
 
               <div className="flex items-center gap-1">
@@ -1380,7 +1796,11 @@ export function VideoPlayer({
                   className="rounded p-2 text-white transition-colors hover:bg-white/10"
                   aria-label={isMuted ? "Unmute" : "Mute"}
                 >
-                  {isMuted || volume === 0 ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="h-5 w-5" />
+                  ) : (
+                    <Volume2 className="h-5 w-5" />
+                  )}
                 </button>
                 <input
                   type="range"
@@ -1399,6 +1819,14 @@ export function VideoPlayer({
               {/* Playback status */}
               <div
                 className="relative hidden items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-xs text-white/70 sm:flex cursor-help"
+                tabIndex={0}
+                role="button"
+                aria-label="Stream information"
+                aria-expanded={showTooltip}
+                onClick={() => setShowTooltip((value) => !value)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setShowTooltip((value) => !value); } }}
+                onFocus={() => setShowTooltip(true)}
+                onBlur={() => setShowTooltip(false)}
                 onMouseEnter={() => setShowTooltip(true)}
                 onMouseLeave={() => setShowTooltip(false)}
               >
@@ -1408,11 +1836,17 @@ export function VideoPlayer({
                   <Zap className="h-3 w-3 text-green-400" />
                 )}
                 <span>{getMethodLabel()}</span>
-                {quality && <span className="text-white/50">• {quality.label}</span>}
+                {quality && (
+                  <span className="text-white/50">• Requested: {quality.label}</span>
+                )}
+
+                {deliveredSize && <span>• Delivered: {deliveredSize}</span>}
 
                 {showTooltip && mediaInfo && (
                   <div className="absolute bottom-full right-0 mb-2 w-56 rounded-lg bg-black/95 p-3 shadow-2xl ring-1 ring-white/20 text-left">
-                    <div className="mb-2 text-xs font-semibold text-white/90 uppercase tracking-wide">Stream Info</div>
+                    <div className="mb-2 text-xs font-semibold text-white/90 uppercase tracking-wide">
+                      Stream Info
+                    </div>
                     <div className="space-y-1 text-xs">
                       <div className="flex justify-between">
                         <span className="text-white/50">Method:</span>
@@ -1420,20 +1854,26 @@ export function VideoPlayer({
                       </div>
                       {mediaInfo.resolution && (
                         <div className="flex justify-between">
-                          <span className="text-white/50">Resolution:</span>
-                          <span className="text-white">{mediaInfo.resolution}</span>
+                          <span className="text-white/50">Source resolution:</span>
+                          <span className="text-white">
+                            {mediaInfo.resolution}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.videoCodec && (
                         <div className="flex justify-between">
-                          <span className="text-white/50">Video:</span>
-                          <span className="text-white">{mediaInfo.videoCodec.toUpperCase()}</span>
+                          <span className="text-white/50">Source video:</span>
+                          <span className="text-white">
+                            {mediaInfo.videoCodec.toUpperCase()}
+                          </span>
                         </div>
                       )}
                       {mediaInfo.audioCodec && (
                         <div className="flex justify-between">
-                          <span className="text-white/50">Audio:</span>
-                          <span className="text-white">{mediaInfo.audioCodec.toUpperCase()}</span>
+                          <span className="text-white/50">Source audio:</span>
+                          <span className="text-white">
+                            {mediaInfo.audioCodec.toUpperCase()}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1453,7 +1893,9 @@ export function VideoPlayer({
               )}
 
               {/* Settings button - Quality, Audio, Subtitles */}
-              {(availableQualities.length > 0 || audioTracks.length >= 1 || subtitleTracks.length > 0) && (
+              {(availableQualities.length > 0 ||
+                audioTracks.length >= 1 ||
+                subtitleTracks.length > 0) && (
                 <button
                   onClick={() => setShowSettingsPanel(!showSettingsPanel)}
                   className={`rounded p-2 transition-colors hover:bg-white/10 ${
@@ -1465,17 +1907,60 @@ export function VideoPlayer({
                 </button>
               )}
 
+              {/* Picture-in-Picture */}
+              {pipSupported && (
+                <button
+                  onClick={togglePip}
+                  className={`rounded p-2 transition-colors hover:bg-white/10 ${
+                    isPip ? "text-mango" : "text-white"
+                  }`}
+                  aria-label={
+                    isPip ? "Exit picture-in-picture" : "Picture-in-picture"
+                  }
+                >
+                  <PictureInPicture2 className="h-5 w-5" />
+                </button>
+              )}
+
               <button
                 onClick={toggleFullscreen}
                 className="rounded p-2 text-white transition-colors hover:bg-white/10"
                 aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
               >
-                {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+                {isFullscreen ? (
+                  <Minimize className="h-5 w-5" />
+                ) : (
+                  <Maximize className="h-5 w-5" />
+                )}
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Skip intro */}
+      {activeMarker?.type === "intro" &&
+        !isLoading &&
+        !error &&
+        !showSettingsPanel && (
+          <button
+            onClick={() => seekToPosition(activeMarker.end, true)}
+            className="absolute bottom-28 right-4 z-40 rounded border border-white/40 bg-black/70 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-white hover:text-black"
+          >
+            Skip Intro
+          </button>
+        )}
+
+      {/* Next episode countdown during credits or after the episode ends */}
+      {showNextUp && nextEpisode && !error && !showSettingsPanel && (
+        <NextEpisodeCard
+          key={nextEpisode.ratingKey}
+          episode={nextEpisode}
+          autoPlay={autoPlayNextEpisode}
+          onPlay={playNextEpisode}
+          onCancel={cancelNextEpisode}
+        />
+      )}
 
       {/* Settings Panel - Audio, Subtitles, Quality */}
       {showSettingsPanel && (
@@ -1486,7 +1971,9 @@ export function VideoPlayer({
               <button
                 onClick={() => setSettingsTab("quality")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
-                  settingsTab === "quality" ? "bg-white/10 text-white" : "text-white/50 hover:text-white/70"
+                  settingsTab === "quality"
+                    ? "bg-white/10 text-white"
+                    : "text-white/50 hover:text-white/70"
                 }`}
               >
                 Quality
@@ -1496,7 +1983,9 @@ export function VideoPlayer({
               <button
                 onClick={() => setSettingsTab("audio")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
-                  settingsTab === "audio" ? "bg-white/10 text-white" : "text-white/50 hover:text-white/70"
+                  settingsTab === "audio"
+                    ? "bg-white/10 text-white"
+                    : "text-white/50 hover:text-white/70"
                 }`}
               >
                 Audio
@@ -1506,7 +1995,9 @@ export function VideoPlayer({
               <button
                 onClick={() => setSettingsTab("subtitles")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
-                  settingsTab === "subtitles" ? "bg-white/10 text-white" : "text-white/50 hover:text-white/70"
+                  settingsTab === "subtitles"
+                    ? "bg-white/10 text-white"
+                    : "text-white/50 hover:text-white/70"
                 }`}
               >
                 Subtitles
@@ -1531,7 +2022,9 @@ export function VideoPlayer({
                     }`}
                   >
                     <span>{q.label}</span>
-                    {quality?.id === q.id && <Check className="h-4 w-4 text-mango" />}
+                    {quality?.id === q.id && (
+                      <Check className="h-4 w-4 text-mango" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -1543,13 +2036,11 @@ export function VideoPlayer({
                 {audioTracks.map((track) => (
                   <button
                     key={track.id}
-                    onClick={() => {
-                      setSelectedAudioTrack(track.id);
-                      // Note: Actually switching audio tracks requires re-requesting the stream with different parameters
-                      // For now, we track the selection locally
-                    }}
+                    onClick={() => handleTrackSelect("audio", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
-                      selectedAudioTrack === track.id ? "text-white" : "text-white/70"
+                      selectedAudioTrack === track.id
+                        ? "text-white"
+                        : "text-white/70"
                     }`}
                   >
                     <div className="flex flex-col items-start">
@@ -1561,7 +2052,9 @@ export function VideoPlayer({
                         </span>
                       )}
                     </div>
-                    {selectedAudioTrack === track.id && <Check className="h-4 w-4 text-mango" />}
+                    {selectedAudioTrack === track.id && (
+                      <Check className="h-4 w-4 text-mango" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -1571,37 +2064,52 @@ export function VideoPlayer({
             {settingsTab === "subtitles" && (
               <div>
                 <button
-                  onClick={() => setSelectedSubtitleTrack(null)}
+                  onClick={() => handleTrackSelect("subtitle", 0)}
                   className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
-                    selectedSubtitleTrack === null ? "text-white" : "text-white/70"
+                    selectedSubtitleTrack === null
+                      ? "text-white"
+                      : "text-white/70"
                   }`}
                 >
                   <span>Off</span>
-                  {selectedSubtitleTrack === null && <Check className="h-4 w-4 text-mango" />}
+                  {selectedSubtitleTrack === null && (
+                    <Check className="h-4 w-4 text-mango" />
+                  )}
                 </button>
                 {subtitleTracks.map((track) => (
                   <button
                     key={track.id}
-                    onClick={() => {
-                      setSelectedSubtitleTrack(track.id);
-                      // Note: Actually switching subtitles requires re-requesting the stream
-                    }}
+                    onClick={() => handleTrackSelect("subtitle", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
-                      selectedSubtitleTrack === track.id ? "text-white" : "text-white/70"
+                      selectedSubtitleTrack === track.id
+                        ? "text-white"
+                        : "text-white/70"
                     }`}
                   >
                     <div className="flex flex-col items-start">
                       <span>{track.displayTitle}</span>
                       {track.codec && (
-                        <span className="text-xs text-white/40">{track.codec.toUpperCase()}</span>
+                        <span className="text-xs text-white/40">
+                          {track.codec.toUpperCase()}
+                        </span>
                       )}
                     </div>
-                    {selectedSubtitleTrack === track.id && <Check className="h-4 w-4 text-mango" />}
+                    {selectedSubtitleTrack === track.id && (
+                      <Check className="h-4 w-4 text-mango" />
+                    )}
                   </button>
                 ))}
               </div>
             )}
           </div>
+          {trackError && (
+            <p
+              role="alert"
+              className="border-t border-white/10 px-3 py-2 text-xs text-red-400"
+            >
+              {trackError}
+            </p>
+          )}
         </div>
       )}
 
@@ -1630,18 +2138,19 @@ export function VideoPlayer({
           {episodes.map((episode) => {
             const isCurrentEpisode = episode.ratingKey === ratingKey;
             const isWatched = (episode.viewCount || 0) > 0;
-            const progress = episode.viewOffset && episode.duration
-              ? (episode.viewOffset / episode.duration) * 100
-              : 0;
+            const progress =
+              episode.viewOffset && episode.duration
+                ? (episode.viewOffset / episode.duration) * 100
+                : 0;
 
             return (
               <button
                 key={episode.ratingKey}
-                onClick={() => !isCurrentEpisode && handleEpisodeSelect(episode.ratingKey)}
+                onClick={() =>
+                  !isCurrentEpisode && handleEpisodeSelect(episode.ratingKey)
+                }
                 className={`flex w-full gap-3 p-3 text-left transition-colors ${
-                  isCurrentEpisode
-                    ? "bg-mango/20"
-                    : "hover:bg-white/5"
+                  isCurrentEpisode ? "bg-mango/20" : "hover:bg-white/5"
                 }`}
               >
                 {/* Thumbnail */}
@@ -1675,7 +2184,10 @@ export function VideoPlayer({
                   {/* Playing indicator */}
                   {isCurrentEpisode && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                      <Play className="h-8 w-8 text-mango" fill="currentColor" />
+                      <Play
+                        className="h-8 w-8 text-mango"
+                        fill="currentColor"
+                      />
                     </div>
                   )}
                 </div>
@@ -1683,10 +2195,18 @@ export function VideoPlayer({
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${isCurrentEpisode ? "text-mango" : "text-white"}`}>
+                    <span
+                      className={`text-sm font-medium ${
+                        isCurrentEpisode ? "text-mango" : "text-white"
+                      }`}
+                    >
                       {episode.index}
                     </span>
-                    <span className={`truncate text-sm font-medium ${isCurrentEpisode ? "text-mango" : "text-white"}`}>
+                    <span
+                      className={`truncate text-sm font-medium ${
+                        isCurrentEpisode ? "text-mango" : "text-white"
+                      }`}
+                    >
                       {episode.title}
                     </span>
                   </div>

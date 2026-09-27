@@ -97,6 +97,7 @@ export function MediaCard({
   const showLogo = logoUrl && logoLoaded && !logoError;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onClick?.();
@@ -171,7 +172,7 @@ export function MediaCard({
 
         {/* Gradient overlay - always visible when no logo, hover-only when logo present */}
         <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent transition-opacity duration-300 ${
-          showLogo ? "opacity-0 group-hover:opacity-100 group-focus:opacity-100" : "opacity-100"
+          showLogo ? "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" : "opacity-100"
         }`} />
 
         {/* Hidden image to preload logo and detect errors */}
@@ -214,7 +215,7 @@ export function MediaCard({
         )}
 
         {/* Hover content - action buttons only (title now always visible) */}
-        <div className="absolute inset-0 flex items-end justify-end p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus:opacity-100">
+        <div className="absolute inset-0 flex items-end justify-end p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
@@ -238,7 +239,7 @@ export function MediaCard({
                         onRemove();
                         setShowRemoveConfirm(false);
                       }}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-red-600 transition-transform duration-200 hover:scale-110 focus:scale-110"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-red-600 transition-transform duration-200 hover:scale-110 focus:scale-110"
                       aria-label="Confirm removal"
                     >
                       <Check className="h-5 w-5" />
@@ -284,13 +285,13 @@ export function MediaCard({
             )}
 
             {/* Play button */}
-            <button
+            {onPlay && <button
               onClick={handlePlayClick}
               className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-transform duration-200 hover:scale-110 focus:scale-110"
               aria-label={`Play ${title}`}
             >
               <Play className="h-5 w-5 fill-current" />
-            </button>
+            </button>}
           </div>
         </div>
 

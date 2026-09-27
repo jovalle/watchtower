@@ -82,6 +82,7 @@ export function UserMenu({ user }: UserMenuProps) {
             ? "scale-100 opacity-100"
             : "pointer-events-none scale-95 opacity-0"
         }`}
+        hidden={!isOpen}
         role="menu"
       >
         {/* User info */}
@@ -96,6 +97,20 @@ export function UserMenu({ user }: UserMenuProps) {
 
         {/* Menu items */}
         <div className="py-1">
+          {[
+            ["Requests", "/app/requests"],
+            ["Issues", "/app/issues"],
+          ].map(([label, to]) => (
+            <Link
+              key={to}
+              to={to}
+              role="menuitem"
+              onClick={() => setIsOpen(false)}
+              className="flex w-full items-center gap-3 px-4 py-2 text-sm text-foreground-secondary hover:bg-background-primary hover:text-foreground-primary"
+            >
+              {label}
+            </Link>
+          ))}
           <Link
             to="/app/settings"
             className="flex w-full items-center gap-3 px-4 py-2 text-sm text-foreground-secondary transition-colors hover:bg-background-primary hover:text-foreground-primary"

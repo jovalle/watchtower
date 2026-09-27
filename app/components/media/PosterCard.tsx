@@ -143,7 +143,6 @@ export function PosterCard({
     : viewCount > 0;
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition>("center");
-  const [hoveredRating, setHoveredRating] = useState<number | null>(null);
   const [listSelectorPosition, setListSelectorPosition] = useState<{ x: number; y: number } | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -178,10 +177,11 @@ export function PosterCard({
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
-    setShowTooltip(false);
+    if (!cardRef.current?.contains(document.activeElement)) setShowTooltip(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onClick?.();
@@ -225,6 +225,8 @@ export function PosterCard({
       tabIndex={0}
       aria-label={`${title}${year ? `, ${year}` : ""}${isWatched ? " (watched)" : ""}`}
       onClick={onClick}
+      onFocus={() => setShowTooltip(true)}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowTooltip(false); }}
       onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       className="group relative w-full cursor-pointer"
@@ -292,8 +294,8 @@ export function PosterCard({
         )}
 
         {/* Hover overlay with play button - hidden when tooltip has its own play */}
-        {!hideHoverPlay && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+        {!hideHoverPlay && onPlay && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
             <button
               onClick={handlePlayClick}
               className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-black shadow-lg transition-transform duration-200 hover:scale-110"
@@ -306,7 +308,7 @@ export function PosterCard({
 
         {/* External link overlay for items not in library (e.g., watchlist items) */}
         {hideHoverPlay && isAvailable === false && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">
               <ExternalLink className="h-6 w-6" />
             </div>
@@ -347,63 +349,11 @@ export function PosterCard({
               <span className="text-xs text-foreground-secondary">{sortIndicator}</span>
             )}
           </div>
-          {/* Star rating display (Plex-style with half-star support) - only show when showRating is true */}
-          {showRating && (
-            <div
-              className="mt-1 flex items-center gap-0.5"
-              onMouseLeave={() => setHoveredRating(null)}
-            >
-              {[1, 2, 3, 4, 5].map((star) => {
-                const fullRatingValue = star * 2;
-                const halfRatingValue = star * 2 - 1;
-                const displayRating = hoveredRating ?? rating ?? 0;
-                const filled = displayRating >= fullRatingValue;
-                const halfFilled = !filled && displayRating >= halfRatingValue;
-                const isHoveredFull = hoveredRating !== null && fullRatingValue <= hoveredRating;
-                const isHoveredHalf = hoveredRating !== null && halfRatingValue <= hoveredRating && !isHoveredFull;
-                const useMangoColor = displayRating >= 6;
-                return (
-                  <div key={star} className="relative h-3.5 w-3.5">
-                    {/* Half-star click zone (left half) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRatingChange?.(halfRatingValue);
-                      }}
-                      onMouseEnter={() => setHoveredRating(halfRatingValue)}
-                      className="absolute left-0 top-0 z-10 h-full w-1/2 cursor-pointer"
-                      aria-label={`Rate ${star - 0.5} stars`}
-                    />
-                    {/* Full-star click zone (right half) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRatingChange?.(fullRatingValue);
-                      }}
-                      onMouseEnter={() => setHoveredRating(fullRatingValue)}
-                      className="absolute right-0 top-0 z-10 h-full w-1/2 cursor-pointer"
-                      aria-label={`Rate ${star} stars`}
-                    />
-                    {/* Star icon */}
-                    <Star
-                      className={`h-3.5 w-3.5 transition-colors ${
-                        isHoveredFull || filled
-                          ? useMangoColor || isHoveredFull
-                            ? "fill-mango text-mango"
-                            : "fill-foreground-muted text-foreground-muted"
-                          : isHoveredHalf || halfFilled
-                          ? useMangoColor || isHoveredHalf
-                            ? "fill-mango/50 text-mango"
-                            : "fill-foreground-muted/50 text-foreground-muted"
-                          : "text-foreground-muted/30"
-                      }`}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+          {showRating && onRatingChange && (
+            <select aria-label={`Rate ${title}`} value={rating ?? 0} onClick={(event) => event.stopPropagation()} onChange={(event) => onRatingChange(Number(event.target.value))} className="mt-2 min-h-11 w-full rounded border border-border-subtle bg-background-elevated px-2 text-sm">
+              <option value={0}>Unrated</option>
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value / 2} stars</option>)}
+            </select>
           )}
         </div>
       )}
@@ -450,20 +400,20 @@ export function PosterCard({
 
               {/* Action buttons */}
               <div className="mb-3 flex items-center gap-2">
-                <button
+                {onPlay && <button
                   onClick={handlePlayClick}
-                  className="flex items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-white/90"
+                  className="flex min-h-11 items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-white/90"
                 >
                   <Play className="h-4 w-4 fill-current" />
                   Play
-                </button>
+                </button>}
                 {/* Spacer to push buttons to right */}
                 <div className="ml-auto flex items-center gap-2">
                   {/* Add to Playlist button */}
                   {ratingKey && (
                     <button
                       onClick={handleOpenListSelector}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white transition-colors hover:bg-white/30"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white transition-colors hover:bg-white/30"
                       aria-label="Add to Playlist"
                       title="Add to Playlist"
                     >
@@ -477,7 +427,7 @@ export function PosterCard({
                         e.stopPropagation();
                         onAddToWatchlist();
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                      className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
                         isInWatchlist
                           ? "bg-accent-primary text-black"
                           : "bg-mango text-black hover:bg-mango-hover"

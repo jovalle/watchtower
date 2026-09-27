@@ -16,29 +16,12 @@
         {"breaking": true, "release": "major"}
       ]
     }],
-    ["@semantic-release/release-notes-generator", {
-      "preset": "conventionalcommits",
-      "presetConfig": {
-        "types": [
-          {"type": "feat", "section": "🚀 Features"},
-          {"type": "fix", "section": "🐛 Bug Fixes"},
-          {"type": "perf", "section": "⚡ Performance"},
-          {"type": "refactor", "section": "♻️ Refactoring"},
-          {"type": "docs", "section": "📚 Documentation", "hidden": true},
-          {"type": "chore", "section": "🔧 Chores", "hidden": true},
-          {"type": "test", "section": "🧪 Tests", "hidden": true},
-          {"type": "ci", "section": "👷 CI", "hidden": true}
-        ]
-      }
-    }],
-    ["@semantic-release/changelog", {
-      "changelogFile": "CHANGELOG.md"
-    }],
     ["@semantic-release/npm", {
       "npmPublish": false
     }],
     ["@semantic-release/exec", {
-      "prepareCmd": "echo ${nextRelease.version} > .release-version"
+      "generateNotesCmd": "git-cliff --unreleased --strip header --tag v${nextRelease.version}",
+      "prepareCmd": "echo ${nextRelease.version} > .release-version && git-cliff --tag v${nextRelease.version} --output CHANGELOG.md"
     }],
     ["@semantic-release/git", {
       "assets": ["CHANGELOG.md", "package.json"],

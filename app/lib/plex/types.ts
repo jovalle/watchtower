@@ -82,12 +82,14 @@ export interface PlexLibrarySection {
  * Individual media item in a library (movie, show, episode, etc.)
  */
 export interface PlexMediaItem {
+  Guid?: Array<{ id: string }>;
   ratingKey: string;
   key: string;
   guid: string;
   type: "movie" | "show" | "season" | "episode" | "artist" | "album" | "track";
   title: string;
   originalTitle?: string;
+  titleSort?: string;
   year?: number;
   duration?: number;
   addedAt?: number;
@@ -133,6 +135,17 @@ export interface PlexTag {
 }
 
 /**
+ * Intro/credits marker; offsets are in milliseconds.
+ */
+export interface PlexMarker {
+  id?: number;
+  type: "intro" | "credits" | (string & {});
+  startTimeOffset: number;
+  endTimeOffset: number;
+  final?: boolean;
+}
+
+/**
  * Role/actor reference with optional character info.
  */
 export interface PlexRole {
@@ -156,6 +169,8 @@ export interface PlexMetadata extends PlexMediaItem {
   Similar?: Array<{ id?: number; tag: string; ratingKey?: string }>;
   // External IDs (IMDb, TMDB, TVDB, etc.)
   Guid?: Array<{ id: string }>;
+  // Intro/credits markers (only present with includeMarkers=1)
+  Marker?: PlexMarker[];
   // Media/stream info
   Media?: Array<{
     id: number;
@@ -243,6 +258,9 @@ export interface PlexMetadataResponse {
  * Query options for fetching library items.
  */
 export interface LibraryQueryOptions {
+  /** Read every page; limit is otherwise a single-page size. */
+  all?: boolean;
+  includeGuids?: boolean;
   sort?: string;
   genre?: string;
   year?: number;
@@ -272,12 +290,42 @@ export interface QualityProfile {
  */
 export const QUALITY_PROFILES: QualityProfile[] = [
   { id: "original", label: "Original", isOriginal: true },
-  { id: "1080p-20", label: "1080p (20 Mbps)", maxBitrate: 20000, resolution: "1080p" },
-  { id: "1080p-12", label: "1080p (12 Mbps)", maxBitrate: 12000, resolution: "1080p" },
-  { id: "1080p-8", label: "1080p (8 Mbps)", maxBitrate: 8000, resolution: "1080p" },
-  { id: "720p-4", label: "720p (4 Mbps)", maxBitrate: 4000, resolution: "720p" },
-  { id: "720p-2", label: "720p (2 Mbps)", maxBitrate: 2000, resolution: "720p" },
-  { id: "480p-1.5", label: "480p (1.5 Mbps)", maxBitrate: 1500, resolution: "480p" },
+  {
+    id: "1080p-20",
+    label: "1080p (20 Mbps)",
+    maxBitrate: 20000,
+    resolution: "1080p",
+  },
+  {
+    id: "1080p-12",
+    label: "1080p (12 Mbps)",
+    maxBitrate: 12000,
+    resolution: "1080p",
+  },
+  {
+    id: "1080p-8",
+    label: "1080p (8 Mbps)",
+    maxBitrate: 8000,
+    resolution: "1080p",
+  },
+  {
+    id: "720p-4",
+    label: "720p (4 Mbps)",
+    maxBitrate: 4000,
+    resolution: "720p",
+  },
+  {
+    id: "720p-2",
+    label: "720p (2 Mbps)",
+    maxBitrate: 2000,
+    resolution: "720p",
+  },
+  {
+    id: "480p-1.5",
+    label: "480p (1.5 Mbps)",
+    maxBitrate: 1500,
+    resolution: "480p",
+  },
 ];
 
 /**
@@ -318,6 +366,8 @@ export interface PlexStream {
   selected?: boolean;
   default?: boolean;
   bitrate?: number;
+  // Subtitle-specific: set for external subtitle files (/library/streams/{id})
+  key?: string;
   // Video-specific
   width?: number;
   height?: number;
@@ -325,6 +375,8 @@ export interface PlexStream {
   // Audio-specific
   channels?: number;
   samplingRate?: number;
+  // Dolby Vision (video streams)
+  DOVIProfile?: number;
 }
 
 // ============================================================================
@@ -537,11 +589,11 @@ export interface PlexHistoryItem {
   title: string;
   type: "movie" | "episode";
   thumb?: string;
-  parentTitle?: string;      // Show name for episodes
+  parentTitle?: string; // Show name for episodes
   grandparentTitle?: string; // Show name for episodes
-  index?: number;            // Episode number
-  parentIndex?: number;      // Season number
-  viewedAt: number;          // Unix timestamp
+  index?: number; // Episode number
+  parentIndex?: number; // Season number
+  viewedAt: number; // Unix timestamp
   accountID: number;
   deviceID: number;
 }

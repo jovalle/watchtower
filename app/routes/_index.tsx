@@ -1,33 +1,34 @@
-import { useState } from 'react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { redirect } from '@remix-run/node';
-import { Form, useNavigation } from '@remix-run/react';
-import { Play, Tv, Film, Users, Plus, X } from 'lucide-react';
-import { getPlexToken } from '~/lib/auth/session.server';
+import { useState } from "react";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
+import { Form, useNavigation } from "@remix-run/react";
+import { Play, Tv, Film, Users, Plus, X } from "lucide-react";
+import { getPlexToken } from "~/lib/auth/session.server";
+import { Logo } from "~/components/ui";
 
 const FAQ_ITEMS = [
   {
-    question: 'What is Watchtower?',
+    question: "What is Watchtower?",
     answer:
-      'Watchtower is a private streaming interface for our household media library. It provides a modern, Netflix-style experience for browsing and enjoying movies and TV shows.',
+      "Watchtower is a private streaming interface for our household media library. It provides a modern, Netflix-style experience for browsing and enjoying movies and TV shows.",
   },
   {
-    question: 'What is wrong with Netflix?',
+    question: "What is wrong with Netflix?",
     answer:
       "What's great about Netflix today? Prices keep going up, content quality keeps going down. With Watchtower, you get a curated collection without the ads or subscriptions.",
   },
   {
-    question: 'How do I sign in?',
+    question: "How do I sign in?",
     answer:
       "Sign in using your Plex account. If you need help getting set up with Plex, just ask and we'll get you sorted.",
   },
   {
-    question: 'What devices can I watch on?',
+    question: "What devices can I watch on?",
     answer:
-      'Stream on any device with a web browser — smart TVs, laptops, tablets, and phones. For the best TV experience, use the Plex app on Roku, Apple TV, or Fire TV.',
+      "Stream on any device with a web browser — smart TVs, laptops, tablets, and phones. For the best TV experience, use the Plex app on Roku, Apple TV, Android TV, or Fire TV.",
   },
   {
-    question: 'How do I request something to watch?',
+    question: "How do I request something to watch?",
     answer:
       "Have a movie or show you'd like to see? Just let us know and we'll look into adding it to the collection.",
   },
@@ -51,7 +52,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
       </button>
       <div
         className={`overflow-hidden bg-[#2d2d2d] transition-all duration-300 ${
-          isOpen ? 'max-h-96' : 'max-h-0'
+          isOpen ? "max-h-96" : "max-h-0"
         }`}
       >
         <p className="border-t border-background-primary px-6 py-5 text-lg text-foreground-primary md:text-xl">
@@ -64,8 +65,8 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'Watchtower' },
-    { name: 'description', content: 'Your personal streaming experience' },
+    { title: "Watchtower" },
+    { name: "description", content: "Your personal streaming experience" },
   ];
 };
 
@@ -78,7 +79,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // If logged in, redirect to the authenticated home
   if (userToken) {
-    return redirect('/app');
+    return redirect("/app");
   }
 
   return null;
@@ -86,7 +87,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function Index() {
   const navigation = useNavigation();
-  const isSubmitting = navigation.state === 'submitting';
+  const isSubmitting = navigation.state === "submitting";
 
   return (
     <div className="min-h-screen bg-background-primary">
@@ -106,11 +107,7 @@ export default function Index() {
         {/* Hero Content */}
         <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 text-center">
           <div className="max-w-3xl space-y-6">
-            <img
-              src="/watchtower-logo.png"
-              alt="Watchtower"
-              className="mx-auto h-12 md:h-16 lg:h-20"
-            />
+            <Logo className="mx-auto h-12 md:h-16 lg:h-20" />
             <p className="mx-auto max-w-xl text-lg text-foreground-secondary md:text-xl">
               Your very own movie theater. <br />
               Sit back, relax, and enjoy the collection.
@@ -161,7 +158,12 @@ export default function Index() {
         {/* Scroll indicator */}
         <div className="relative z-10 flex justify-center pb-8">
           <div className="animate-bounce text-foreground-muted">
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -182,10 +184,12 @@ export default function Index() {
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent-primary/10">
                 <Film className="h-8 w-8 text-accent-primary" />
               </div>
-              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">Movies & Shows</h3>
+              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">
+                Movies & Shows
+              </h3>
               <p className="text-foreground-secondary">
-                Browse the growing collection of films and series, all organized and ready to
-                stream.
+                Browse the growing collection of films and series, all organized
+                and ready to stream.
               </p>
             </div>
 
@@ -194,9 +198,12 @@ export default function Index() {
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent-primary/10">
                 <Tv className="h-8 w-8 text-accent-primary" />
               </div>
-              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">Watch Anywhere</h3>
+              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">
+                Watch Anywhere
+              </h3>
               <p className="text-foreground-secondary">
-                Stream on your TV, laptop, phone, or tablet — wherever you feel like watching.
+                Stream on your TV, laptop, phone, or tablet — wherever you feel
+                like watching.
               </p>
             </div>
 
@@ -205,9 +212,12 @@ export default function Index() {
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent-primary/10">
                 <Users className="h-8 w-8 text-accent-primary" />
               </div>
-              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">For the Family</h3>
+              <h3 className="mb-2 text-xl font-semibold text-foreground-primary">
+                For the Family
+              </h3>
               <p className="text-foreground-secondary">
-                A private collection curated for friends and family. No ads, no subscriptions.
+                A private collection curated for friends and family. No ads, no
+                subscriptions.
               </p>
             </div>
           </div>
@@ -222,7 +232,11 @@ export default function Index() {
           </h2>
           <div>
             {FAQ_ITEMS.map((item, index) => (
-              <FAQItem key={index} question={item.question} answer={item.answer} />
+              <FAQItem
+                key={index}
+                question={item.question}
+                answer={item.answer}
+              />
             ))}
           </div>
         </div>
