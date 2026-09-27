@@ -6,43 +6,62 @@
  * Uses stale-while-revalidate caching for fast loading.
  */
 
-import { useState, useCallback, useMemo, useRef, useEffect, Suspense } from 'react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json, defer } from '@remix-run/node';
-import { useLoaderData, useFetcher, useNavigate, Await } from '@remix-run/react';
 import {
-  ListVideo,
-  SortAsc,
-  RefreshCw,
-  Loader2,
-  Film,
-  Tv,
-} from 'lucide-react';
-import { Container } from '~/components/layout';
-import { PosterCard } from '~/components/media/PosterCard';
-import { Typography, FilterDropdown } from '~/components/ui';
-import type { FilterOption } from '~/components/ui';
-import { requireServerToken, requirePlexToken } from '~/lib/auth/session.server';
-import { requireUser } from '~/lib/auth/user.server';
-import { PlexClient } from '~/lib/plex/client.server';
-import { createTraktClient, isTraktAvailable } from '~/lib/trakt/client.server';
-import { createTMDBClient } from '~/lib/tmdb/client.server';
-import { getUnifiedWatchlist } from '~/lib/watchlist/service.server';
-import { getWatchlistCache, setWatchlistCache } from '~/lib/watchlist/cache.server';
-import { getUserSettings } from '~/lib/settings/storage.server';
-import { env } from '~/lib/env.server';
-import { PLEX_DISCOVER_URL } from '~/lib/plex/constants';
-import type { WatchlistSource, WatchlistCounts, UnifiedWatchlistItem } from '~/lib/watchlist/types';
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+  Suspense,
+} from "react";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json, defer, redirect } from "@remix-run/node";
+import {
+  useLoaderData,
+  useFetcher,
+  useNavigate,
+  useSearchParams,
+  Await,
+} from "@remix-run/react";
+import { ListVideo, SortAsc, RefreshCw, Loader2, Film, Tv } from "lucide-react";
+import { Container } from "~/components/layout";
+import { PosterCard } from "~/components/media/PosterCard";
+import { Typography, FilterDropdown } from "~/components/ui";
+import type { FilterOption } from "~/components/ui";
+import {
+  requireServerToken,
+  requirePlexToken,
+} from "~/lib/auth/session.server";
+import { requireUser } from "~/lib/auth/user.server";
+import { PlexClient } from "~/lib/plex/client.server";
+import { createTraktClient, isTraktAvailable } from "~/lib/trakt/client.server";
+import { createTMDBClient } from "~/lib/tmdb/client.server";
+import { getUnifiedWatchlist } from "~/lib/watchlist/service.server";
+import {
+  getWatchlistCache,
+  setWatchlistCache,
+} from "~/lib/watchlist/cache.server";
+import { getUserSettings } from "~/lib/settings/storage.server";
+import { env } from "~/lib/env.server";
+import type {
+  WatchlistSource,
+  WatchlistCounts,
+  UnifiedWatchlistItem,
+} from "~/lib/watchlist/types";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'Watchlist | Watchtower' },
-    { name: 'description', content: 'Your saved movies and shows from all sources' },
+    { title: "Watchlist | Watchtower" },
+    {
+      name: "description",
+      content: "Your saved movies and shows from all sources",
+    },
   ];
 };
 
 /** Data that may be deferred (loaded in background on first visit) */
 interface WatchlistData {
+  errors?: string[];
   items: UnifiedWatchlistItem[];
   counts: WatchlistCounts;
   isStale: boolean;
@@ -51,50 +70,50 @@ interface WatchlistData {
 
 /** Combined loader data - watchlistData may be a promise on first visit */
 type LoaderData = {
-  token: string;
   traktEnabled: boolean;
   imdbEnabled: boolean;
   watchlistData: WatchlistData;
 };
 
 type SortOption =
-  | 'addedAt:desc'
-  | 'addedAt:asc'
-  | 'title:asc'
-  | 'title:desc'
-  | 'score:desc'
-  | 'score:asc'
-  | 'year:desc'
-  | 'year:asc';
-type SourceFilterValue = 'all' | WatchlistSource;
-type TypeFilterValue = 'all' | 'movie' | 'show';
-type AvailabilityFilterValue = 'all' | 'available' | 'unavailable';
+  | "addedAt:desc"
+  | "addedAt:asc"
+  | "title:asc"
+  | "title:desc"
+  | "score:desc"
+  | "score:asc"
+  | "year:desc"
+  | "year:asc";
+type SourceFilterValue = "all" | WatchlistSource;
+type TypeFilterValue = "all" | "movie" | "show";
+type AvailabilityFilterValue = "all" | "available" | "unavailable";
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'addedAt:desc', label: 'Date Added' },
-  { value: 'title:asc', label: 'Alphabetical' },
-  { value: 'score:desc', label: 'Audience Score' },
-  { value: 'year:desc', label: 'Release Date' },
+  { value: "addedAt:desc", label: "Date Added" },
+  { value: "title:asc", label: "Alphabetical" },
+  { value: "score:desc", label: "Audience Score" },
+  { value: "year:desc", label: "Release Date" },
 ];
 
 /**
  * Build image URL for Plex items with proper sizing for crisp display.
- * For relative paths, uses Plex Discover API directly.
+ * For relative paths, uses the server-side Plex Discover image proxy.
  * For absolute URLs (including HTTP with IP addresses), uses the local proxy
  * to avoid mixed content issues when serving over HTTPS.
  */
-function buildPlexImageUrl(thumb: string | undefined, token: string): string {
-  if (!thumb) return '';
+function buildPlexImageUrl(thumb: string | undefined): string {
+  if (!thumb) return "";
   // Standard poster dimensions (400x600 for 2:3 aspect ratio)
   const width = 400;
   const height = 600;
-  // Relative paths starting with / go to Plex Discover API
-  if (thumb.startsWith('/')) {
-    return `${PLEX_DISCOVER_URL}${thumb}?X-Plex-Token=${token}&width=${width}&height=${height}`;
+  if (thumb.startsWith("/")) {
+    return `/api/plex/discover-image?path=${encodeURIComponent(
+      thumb
+    )}&width=${width}&height=${height}`;
   }
   // Absolute URLs (http:// or https://) should be proxied to avoid mixed content
-  if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
-    const separator = thumb.includes('?') ? '&' : '?';
+  if (thumb.startsWith("http://") || thumb.startsWith("https://")) {
+    const separator = thumb.includes("?") ? "&" : "?";
     const pathWithDims = `${thumb}${separator}width=${width}&height=${height}`;
     return `/api/plex/image?path=${encodeURIComponent(pathWithDims)}`;
   }
@@ -106,9 +125,11 @@ function buildPlexImageUrl(thumb: string | undefined, token: string): string {
  * Get earliest addedAt timestamp from an item.
  */
 function getEarliestAddedAt(item: UnifiedWatchlistItem): number {
-  const timestamps = [item.addedAt.plex, item.addedAt.trakt, item.addedAt.imdb].filter(
-    (t): t is number => t !== undefined,
-  );
+  const timestamps = [
+    item.addedAt.plex,
+    item.addedAt.trakt,
+    item.addedAt.imdb,
+  ].filter((t): t is number => t !== undefined);
   return timestamps.length > 0 ? Math.min(...timestamps) : 0;
 }
 
@@ -120,15 +141,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const plexToken = await requirePlexToken(request);
   const user = await requireUser(request);
   const url = new URL(request.url);
-  const forceRefresh = url.searchParams.get('refresh') === 'true';
+  if (url.pathname === "/app/watchlist") throw redirect(`/app/stuff/watchlist${url.search}`);
+  const forceRefresh = url.searchParams.get("refresh") === "true";
 
   // Fetch per-user settings for Trakt/IMDB sources
   const userSettings = await getUserSettings(user.id);
   const traktUsername = userSettings?.traktUsername || null;
   const imdbWatchlistIds = userSettings?.imdbWatchlistIds || [];
 
-  console.log(`[Watchlist] User ${user.id} settings: trakt=${traktUsername}, imdb=${imdbWatchlistIds.join(',') || 'none'}, forceRefresh=${forceRefresh}`);
-  console.log(`[Watchlist] Token types - serverToken: ${serverToken?.substring(0, 8)}..., plexToken: ${plexToken?.substring(0, 8)}...`);
+  console.log(
+    `[Watchlist] User ${user.id} settings: trakt=${traktUsername}, imdb=${
+      imdbWatchlistIds.join(",") || "none"
+    }, forceRefresh=${forceRefresh}`
+  );
 
   // OPTIMIZATION: Check cache FIRST before expensive library lookups
   // If we have cached data, return it immediately for fast initial load
@@ -136,7 +161,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cached = !forceRefresh ? await getWatchlistCache(plexToken) : null;
 
   // Trakt is enabled if client ID is configured AND user has set a username
-  const traktEnabled = isTraktAvailable() && !!traktUsername;
+  const traktEnabled = (await isTraktAvailable()) && !!traktUsername;
   // IMDB is enabled if user has configured watchlist IDs
   const imdbEnabled = imdbWatchlistIds.length > 0;
 
@@ -150,7 +175,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return json({
-      token: plexToken,
       traktEnabled,
       imdbEnabled,
       watchlistData: {
@@ -179,39 +203,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
       clientId: env.PLEX_CLIENT_ID,
     });
 
-    // Normalize title for matching (lowercase, remove special chars)
-    const normalizeTitle = (title: string) =>
-      title
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
     // Build maps of local library items for quick lookup
     // Include watched status to determine if items can be removed from watchlist
     interface LocalItemData {
       ratingKey: string;
       thumb?: string;
       isWatched: boolean;
-      type: 'movie' | 'show';
+      type: "movie" | "show";
       audienceRating?: number; // Fallback rating from local Plex library
     }
     const localItemsByGuid = new Map<string, LocalItemData>();
-    const localItemsByTitleYear = new Map<string, LocalItemData>();
 
     const librariesResult = await client.getLibraries();
+    if (!librariesResult.success) throw new Error("Couldn't check your library. Try refreshing.");
     if (librariesResult.success) {
       for (const library of librariesResult.data) {
-        if (library.type === 'movie' || library.type === 'show') {
-          const itemsResult = await client.getLibraryItems(library.key, { limit: 1000 });
+        if (library.type === "movie" || library.type === "show") {
+          const itemsResult = await client.getLibraryItems(library.key, {
+            all: true,
+            includeGuids: true,
+          });
+          if (!itemsResult.success) throw new Error("Couldn't finish checking your library. Try refreshing.");
           if (itemsResult.success) {
             for (const item of itemsResult.data) {
               // Determine watched status:
               // - Movies: viewCount > 0 means watched
               // - Shows: viewedLeafCount >= leafCount means fully watched
-              const isMovieWatched = library.type === 'movie' && (item.viewCount ?? 0) > 0;
+              const isMovieWatched =
+                library.type === "movie" && (item.viewCount ?? 0) > 0;
               const isShowWatched =
-                library.type === 'show' &&
+                library.type === "show" &&
                 (item.leafCount ?? 0) > 0 &&
                 (item.viewedLeafCount ?? 0) >= (item.leafCount ?? 0);
 
@@ -219,14 +240,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 ratingKey: item.ratingKey,
                 thumb: item.thumb,
                 isWatched: isMovieWatched || isShowWatched,
-                type: library.type as 'movie' | 'show',
+                type: library.type as "movie" | "show",
                 audienceRating: item.audienceRating,
               };
-              localItemsByGuid.set(item.guid, itemData);
-              if (item.title && item.year) {
-                const titleYearKey = `${normalizeTitle(item.title)}:${item.year}`;
-                localItemsByTitleYear.set(titleYearKey, itemData);
-              }
+              localItemsByGuid.set(`${item.type}:${item.guid}`, itemData);
+              for (const guid of item.Guid ?? []) localItemsByGuid.set(`${item.type}:${guid.id}`, itemData);
+
             }
           }
         }
@@ -234,7 +253,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // Fetch fresh data from all sources
-    const traktClient = createTraktClient();
+    const traktClient = await createTraktClient();
     const tmdbClient = createTMDBClient();
 
     // Use discoverClient (with plexToken) for Discover API, client (with serverToken) for local library
@@ -243,25 +262,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       plexToken,
       traktClient,
       tmdbClient,
-      'all',
-      (thumb, t) => {
+      "all",
+      (thumb) => {
         // Local library items use the image proxy
-        if (thumb?.startsWith('/library/')) {
-          return `/api/plex/image?path=${encodeURIComponent(thumb)}&width=400&height=600`;
+        if (thumb?.startsWith("/library/")) {
+          return `/api/plex/image?path=${encodeURIComponent(
+            thumb
+          )}&width=400&height=600`;
         }
-        // Remote Plex Discover items use the public API directly
-        return buildPlexImageUrl(thumb, t);
+        return buildPlexImageUrl(thumb);
       },
       localItemsByGuid,
-      localItemsByTitleYear,
-      { traktUsername, imdbWatchlistIds },
+      { traktUsername, imdbWatchlistIds }
     );
     const rawItems = result.items;
     const counts = result.counts;
     const cachedAt = Math.floor(Date.now() / 1000);
 
     // Cache the result (user-specific, keyed by plexToken)
-    await setWatchlistCache(plexToken, rawItems, counts);
+    if (!result.errors.length) await setWatchlistCache(plexToken, rawItems, counts);
 
     // Sort by addedAt descending by default
     const items = [...rawItems].sort((a, b) => {
@@ -275,12 +294,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       counts,
       isStale: false, // Fresh data is never stale
       cachedAt,
+      errors: result.errors,
     };
   };
 
   // Return deferred response - page loads immediately, data streams in
   return defer({
-    token: plexToken,
     traktEnabled,
     imdbEnabled,
     watchlistData: fetchWatchlistData(),
@@ -322,12 +341,10 @@ function WatchlistSkeleton() {
 /** Main watchlist content - receives resolved data */
 function WatchlistContent({
   watchlistData,
-  token: _token,
   traktEnabled,
   imdbEnabled,
 }: {
   watchlistData: WatchlistData;
-  token: string;
   traktEnabled: boolean;
   imdbEnabled: boolean;
 }) {
@@ -337,7 +354,9 @@ function WatchlistContent({
   const { items, counts: _counts, isStale, cachedAt } = watchlistData;
 
   // Track refresh state from fetcher
-  const isRefreshing = fetcher.state === 'loading';
+  const isRefreshing = fetcher.state === "loading";
+  const refreshedData = fetcher.data?.watchlistData;
+  const refreshErrors = refreshedData && "errors" in refreshedData ? refreshedData.errors : watchlistData.errors;
 
   // Use fetcher data if available AND has items, otherwise use props
   // This prevents visual emptying if refresh returns empty results temporarily
@@ -348,7 +367,7 @@ function WatchlistContent({
     }
     // After refresh completes, prefer fetcher data if it has items
     const fetcherData = fetcher.data?.watchlistData;
-    if (fetcherData && 'items' in fetcherData && fetcherData.items?.length) {
+    if (fetcherData && "items" in fetcherData && fetcherData.items?.length) {
       return fetcherData.items;
     }
     // Fall back to props data
@@ -357,7 +376,7 @@ function WatchlistContent({
 
   const effectiveIsStale = useMemo(() => {
     const fetcherData = fetcher.data?.watchlistData;
-    if (fetcherData && 'isStale' in fetcherData) {
+    if (fetcherData && "isStale" in fetcherData) {
       return fetcherData.isStale;
     }
     return isStale;
@@ -365,17 +384,34 @@ function WatchlistContent({
 
   const effectiveCachedAt = useMemo(() => {
     const fetcherData = fetcher.data?.watchlistData;
-    if (fetcherData && 'cachedAt' in fetcherData) {
+    if (fetcherData && "cachedAt" in fetcherData) {
       return fetcherData.cachedAt;
     }
     return cachedAt;
   }, [fetcher.data, cachedAt]);
 
-  // Client-side filters and sorting state (arrays for multi-select)
-  const [sourceFilters, setSourceFilters] = useState<SourceFilterValue[]>(['all']);
-  const [typeFilters, setTypeFilters] = useState<TypeFilterValue[]>(['all']);
-  const [availabilityFilters, setAvailabilityFilters] = useState<AvailabilityFilterValue[]>(['all']);
-  const [sortOption, setSortOption] = useState<SortOption>('addedAt:desc');
+  // URL state survives detail navigation, browser Back, reloads, and old-link redirects.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sourceFilters = useMemo(() => {
+    const values = searchParams.getAll("source").filter((value): value is SourceFilterValue => ["all", "plex", "trakt", "imdb"].includes(value));
+    return values.length ? values : ["all" as const];
+  }, [searchParams]);
+  const typeFilters = useMemo(() => {
+    const values = searchParams.getAll("type").filter((value): value is TypeFilterValue => ["all", "movie", "show"].includes(value));
+    return values.length ? values : ["all" as const];
+  }, [searchParams]);
+  const availabilityFilters = useMemo(() => {
+    const values = searchParams.getAll("availability").filter((value): value is AvailabilityFilterValue => ["all", "available", "unavailable"].includes(value));
+    return values.length ? values : ["all" as const];
+  }, [searchParams]);
+  const requestedSort = searchParams.get("sort") || "addedAt:desc";
+  const sortOption: SortOption = /^(addedAt|title|score|year):(asc|desc)$/.test(requestedSort) ? requestedSort as SortOption : "addedAt:desc";
+  const setFilter = (key: string, values: string[]) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    for (const value of values) next.append(key, value);
+    setSearchParams(next, { preventScrollReset: true });
+  };
 
   // Progressive loading - show limited items initially for faster render
   const INITIAL_DISPLAY_COUNT = 24; // 4-6 rows depending on screen size
@@ -399,7 +435,7 @@ function WatchlistContent({
           setDisplayedCount((prev) => prev + LOAD_MORE_COUNT);
         }
       },
-      { rootMargin: '200px' } // Start loading before user reaches the bottom
+      { rootMargin: "200px" } // Start loading before user reaches the bottom
     );
 
     observer.observe(sentinel);
@@ -408,7 +444,7 @@ function WatchlistContent({
 
   // Handle manual refresh - use fetcher to load in background without navigation
   const handleRefresh = useCallback(() => {
-    fetcher.load('/app/watchlist?refresh=true');
+    fetcher.load("/app/stuff/watchlist?refresh=true");
   }, [fetcher]);
 
   // Get addedAt with cachedAt as fallback
@@ -417,7 +453,7 @@ function WatchlistContent({
       const earliest = getEarliestAddedAt(item);
       return earliest || effectiveCachedAt;
     },
-    [effectiveCachedAt],
+    [effectiveCachedAt]
   );
 
   // Client-side filtering and sorting
@@ -425,85 +461,111 @@ function WatchlistContent({
     let result = [...effectiveItems];
 
     // Filter by source (if not "all")
-    if (!sourceFilters.includes('all')) {
+    if (!sourceFilters.includes("all")) {
       result = result.filter((item) =>
-        sourceFilters.some((source) => item.sources.includes(source as WatchlistSource)),
+        sourceFilters.some((source) =>
+          item.sources.includes(source as WatchlistSource)
+        )
       );
     }
 
     // Filter by type (if not "all")
-    if (!typeFilters.includes('all')) {
-      result = result.filter((item) => typeFilters.includes(item.type as TypeFilterValue));
+    if (!typeFilters.includes("all")) {
+      result = result.filter((item) =>
+        typeFilters.includes(item.type as TypeFilterValue)
+      );
     }
 
     // Filter by availability (if not "all")
-    if (!availabilityFilters.includes('all')) {
+    if (!availabilityFilters.includes("all")) {
       result = result.filter((item) => {
-        if (availabilityFilters.includes('available') && item.isLocal) return true;
-        if (availabilityFilters.includes('unavailable') && !item.isLocal) return true;
+        if (availabilityFilters.includes("available") && item.isLocal)
+          return true;
+        if (availabilityFilters.includes("unavailable") && !item.isLocal)
+          return true;
         return false;
       });
     }
 
     // Sort
-    const [sortField, sortDir] = sortOption.split(':') as [string, 'asc' | 'desc'];
+    const [sortField, sortDir] = sortOption.split(":") as [
+      string,
+      "asc" | "desc"
+    ];
     result.sort((a, b) => {
-      if (sortField === 'title') {
+      if (sortField === "title") {
         const cmp = a.title.localeCompare(b.title);
-        return sortDir === 'asc' ? cmp : -cmp;
+        return sortDir === "asc" ? cmp : -cmp;
       }
-      if (sortField === 'score') {
+      if (sortField === "score") {
         const aScore = a.rating ?? 0;
         const bScore = b.rating ?? 0;
-        return sortDir === 'asc' ? aScore - bScore : bScore - aScore;
+        return sortDir === "asc" ? aScore - bScore : bScore - aScore;
       }
-      if (sortField === 'year') {
+      if (sortField === "year") {
         const aYear = a.year ?? 0;
         const bYear = b.year ?? 0;
-        return sortDir === 'asc' ? aYear - bYear : bYear - aYear;
+        return sortDir === "asc" ? aYear - bYear : bYear - aYear;
       }
       // Default: sort by addedAt
       const aTime = getItemAddedAt(a);
       const bTime = getItemAddedAt(b);
-      return sortDir === 'asc' ? aTime - bTime : bTime - aTime;
+      return sortDir === "asc" ? aTime - bTime : bTime - aTime;
     });
 
     return result;
-  }, [effectiveItems, sourceFilters, typeFilters, availabilityFilters, sortOption, getItemAddedAt]);
+  }, [
+    effectiveItems,
+    sourceFilters,
+    typeFilters,
+    availabilityFilters,
+    sortOption,
+    getItemAddedAt,
+  ]);
 
   // Calculate dynamic counts for all filter groups based on current filter state
   // Each count shows how many items would match if that option were selected (given other filters)
   const dynamicCounts = useMemo(() => {
     // Helper to apply filters except the one we're calculating counts for
     const applyFilters = (
-      skipFilter: 'source' | 'type' | 'availability',
+      skipFilter: "source" | "type" | "availability",
       overrideSource?: SourceFilterValue[],
       overrideType?: TypeFilterValue[],
-      overrideAvailability?: AvailabilityFilterValue[],
+      overrideAvailability?: AvailabilityFilterValue[]
     ) => {
       let result = [...effectiveItems];
 
       // Apply source filter
-      const effectiveSources = skipFilter === 'source' ? (overrideSource ?? ['all']) : sourceFilters;
-      if (!effectiveSources.includes('all')) {
+      const effectiveSources =
+        skipFilter === "source" ? overrideSource ?? ["all"] : sourceFilters;
+      if (!effectiveSources.includes("all")) {
         result = result.filter((item) =>
-          effectiveSources.some((source) => item.sources.includes(source as WatchlistSource)),
+          effectiveSources.some((source) =>
+            item.sources.includes(source as WatchlistSource)
+          )
         );
       }
 
       // Apply type filter
-      const effectiveTypes = skipFilter === 'type' ? (overrideType ?? ['all']) : typeFilters;
-      if (!effectiveTypes.includes('all')) {
-        result = result.filter((item) => effectiveTypes.includes(item.type as TypeFilterValue));
+      const effectiveTypes =
+        skipFilter === "type" ? overrideType ?? ["all"] : typeFilters;
+      if (!effectiveTypes.includes("all")) {
+        result = result.filter((item) =>
+          effectiveTypes.includes(item.type as TypeFilterValue)
+        );
       }
 
       // Apply availability filter
       const effectiveAvailability =
-        skipFilter === 'availability' ? (overrideAvailability ?? ['all']) : availabilityFilters;
-      if (!effectiveAvailability.includes('all')) {
+        skipFilter === "availability"
+          ? overrideAvailability ?? ["all"]
+          : availabilityFilters;
+      if (!effectiveAvailability.includes("all")) {
         result = result.filter((item) => {
-          if (effectiveAvailability.includes('available') && item.isLocal) return true;
-          if (effectiveAvailability.includes('unavailable') && !item.isLocal) return true;
+          if (effectiveAvailability.includes("available") && item.isLocal)
+            return true;
+          if (effectiveAvailability.includes("unavailable") && !item.isLocal)
+            return true;
           return false;
         });
       }
@@ -512,38 +574,51 @@ function WatchlistContent({
     };
 
     // Source filter counts (apply type and availability filters, vary source)
-    const sourceBase = applyFilters('source', ['all']);
+    const sourceBase = applyFilters("source", ["all"]);
     const sourceCounts = {
       all: sourceBase.length,
-      plex: applyFilters('source', ['plex']).length,
-      trakt: applyFilters('source', ['trakt']).length,
-      imdb: applyFilters('source', ['imdb']).length,
+      plex: applyFilters("source", ["plex"]).length,
+      trakt: applyFilters("source", ["trakt"]).length,
+      imdb: applyFilters("source", ["imdb"]).length,
     };
 
     // Type filter counts (apply source and availability filters, vary type)
-    const typeBase = applyFilters('type', undefined, ['all']);
+    const typeBase = applyFilters("type", undefined, ["all"]);
     const typeCounts = {
       all: typeBase.length,
-      movies: applyFilters('type', undefined, ['movie']).length,
-      shows: applyFilters('type', undefined, ['show']).length,
+      movies: applyFilters("type", undefined, ["movie"]).length,
+      shows: applyFilters("type", undefined, ["show"]).length,
     };
 
     // Availability filter counts (apply source and type filters, vary availability)
-    const availabilityBase = applyFilters('availability', undefined, undefined, ['all']);
+    const availabilityBase = applyFilters(
+      "availability",
+      undefined,
+      undefined,
+      ["all"]
+    );
     const availabilityCounts = {
       all: availabilityBase.length,
-      available: applyFilters('availability', undefined, undefined, ['available']).length,
-      unavailable: applyFilters('availability', undefined, undefined, ['unavailable']).length,
+      available: applyFilters("availability", undefined, undefined, [
+        "available",
+      ]).length,
+      unavailable: applyFilters("availability", undefined, undefined, [
+        "unavailable",
+      ]).length,
     };
 
-    return { source: sourceCounts, type: typeCounts, availability: availabilityCounts };
+    return {
+      source: sourceCounts,
+      type: typeCounts,
+      availability: availabilityCounts,
+    };
   }, [effectiveItems, sourceFilters, typeFilters, availabilityFilters]);
 
   const handlePlay = (item: UnifiedWatchlistItem) => {
     if (!item.isLocal || !item.localRatingKey) {
       return;
     }
-    if (item.type === 'movie') {
+    if (item.type === "movie") {
       navigate(`/app/watch/${item.localRatingKey}`);
     } else {
       navigate(`/app/media/${item.type}/${item.localRatingKey}`);
@@ -554,41 +629,38 @@ function WatchlistContent({
     if (item.isLocal && item.localRatingKey) {
       navigate(`/app/media/${item.type}/${item.localRatingKey}`);
     } else if (item.tmdbId) {
-      // Open TMDB page for items not in the local library
-      const tmdbType = item.type === 'movie' ? 'movie' : 'tv';
-      window.open(`https://www.themoviedb.org/${tmdbType}/${item.tmdbId}`, '_blank');
+      navigate(`/app/media/${item.type}/tmdb-${item.tmdbId}`);
     } else if (item.imdbId) {
-      // Fallback to IMDB
-      window.open(`https://www.imdb.com/title/${item.imdbId}`, '_blank');
+      navigate(`/app/media/${item.type}/imdb-${item.imdbId}`);
     }
   };
 
   // Show score badges when sorting by score
-  const showScoreBadges = sortOption === 'score:desc';
+  const showScoreBadges = sortOption === "score:desc";
 
   // Build filter options with dynamic counts
   const sourceOptions = useMemo((): FilterOption<SourceFilterValue>[] => {
     const options: FilterOption<SourceFilterValue>[] = [
-      { value: 'all', label: 'All', count: dynamicCounts.source.all },
+      { value: "all", label: "All", count: dynamicCounts.source.all },
       {
-        value: 'plex',
-        label: 'Plex',
+        value: "plex",
+        label: "Plex",
         count: dynamicCounts.source.plex,
         icon: <span className="font-semibold text-mango">P</span>,
       },
     ];
     if (traktEnabled) {
       options.push({
-        value: 'trakt',
-        label: 'Trakt',
+        value: "trakt",
+        label: "Trakt",
         count: dynamicCounts.source.trakt,
         icon: <span className="font-semibold text-red-500">T</span>,
       });
     }
     if (imdbEnabled) {
       options.push({
-        value: 'imdb',
-        label: 'IMDb',
+        value: "imdb",
+        label: "IMDb",
         count: dynamicCounts.source.imdb,
         icon: <span className="font-semibold text-yellow-400">I</span>,
       });
@@ -598,50 +670,51 @@ function WatchlistContent({
 
   const typeOptions = useMemo(
     (): FilterOption<TypeFilterValue>[] => [
-      { value: 'all', label: 'All', count: dynamicCounts.type.all },
+      { value: "all", label: "All", count: dynamicCounts.type.all },
       {
-        value: 'movie',
-        label: 'Movies',
+        value: "movie",
+        label: "Movies",
         count: dynamicCounts.type.movies,
         icon: <Film className="h-3.5 w-3.5" />,
       },
       {
-        value: 'show',
-        label: 'Shows',
+        value: "show",
+        label: "Shows",
         count: dynamicCounts.type.shows,
         icon: <Tv className="h-3.5 w-3.5" />,
       },
     ],
-    [dynamicCounts.type],
+    [dynamicCounts.type]
   );
 
   const availabilityOptions = useMemo(
     (): FilterOption<AvailabilityFilterValue>[] => [
-      { value: 'all', label: 'All', count: dynamicCounts.availability.all },
+      { value: "all", label: "All", count: dynamicCounts.availability.all },
       {
-        value: 'available',
-        label: 'In Library',
+        value: "available",
+        label: "In Library",
         count: dynamicCounts.availability.available,
         icon: <span className="h-2 w-2 rounded-full bg-green-500" />,
       },
       {
-        value: 'unavailable',
-        label: 'Not in Library',
+        value: "unavailable",
+        label: "Not in Library",
         count: dynamicCounts.availability.unavailable,
         icon: <span className="h-2 w-2 rounded-full bg-red-500" />,
       },
     ],
-    [dynamicCounts.availability],
+    [dynamicCounts.availability]
   );
 
   // Check if any filters are active (not "all")
   const hasActiveFilters =
-    !sourceFilters.includes('all') ||
-    !typeFilters.includes('all') ||
-    !availabilityFilters.includes('all');
+    !sourceFilters.includes("all") ||
+    !typeFilters.includes("all") ||
+    !availabilityFilters.includes("all");
 
   return (
     <Container size="wide" className="py-8">
+      {refreshErrors?.map(error => <p key={error} role="alert" className="mb-4 rounded border border-foreground-muted p-4 text-foreground-primary">{error}</p>)}
       {/* Header with title and controls */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -653,7 +726,7 @@ function WatchlistContent({
             onClick={handleRefresh}
             disabled={isRefreshing}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-border-subtle bg-background-elevated text-foreground-secondary transition-colors hover:bg-background-hover hover:text-foreground-primary disabled:opacity-50"
-            title={isRefreshing ? 'Refreshing...' : 'Refresh watchlist'}
+            title={isRefreshing ? "Refreshing..." : "Refresh watchlist"}
           >
             {isRefreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -669,7 +742,7 @@ function WatchlistContent({
             label="Source"
             options={sourceOptions}
             selected={sourceFilters}
-            onChange={setSourceFilters}
+            onChange={(values) => setFilter("source", values)}
             allValue="all"
           />
 
@@ -678,7 +751,7 @@ function WatchlistContent({
             label="Type"
             options={typeOptions}
             selected={typeFilters}
-            onChange={setTypeFilters}
+            onChange={(values) => setFilter("type", values)}
             allValue="all"
           />
 
@@ -687,7 +760,7 @@ function WatchlistContent({
             label="Availability"
             options={availabilityOptions}
             selected={availabilityFilters}
-            onChange={setAvailabilityFilters}
+            onChange={(values) => setFilter("availability", values)}
             allValue="all"
           />
 
@@ -697,7 +770,7 @@ function WatchlistContent({
               <SortAsc className="h-4 w-4 text-foreground-secondary" />
               <select
                 value={sortOption}
-                onChange={(e) => setSortOption(e.target.value as SortOption)}
+                onChange={(e) => setFilter("sort", [e.target.value])}
                 className="rounded-md border border-border-subtle bg-background-elevated px-3 py-1.5 text-sm text-foreground-primary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
               >
                 {SORT_OPTIONS.map((option) => (
@@ -715,20 +788,25 @@ function WatchlistContent({
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <ListVideo className="mb-4 h-16 w-16 text-foreground-muted" />
           <Typography variant="subtitle" className="mb-2">
-            {effectiveItems.length === 0 ? 'Your watchlist is empty' : 'No items match your filters'}
-          </Typography>
-          <Typography variant="body" className="max-w-md text-foreground-secondary">
             {effectiveItems.length === 0
-              ? 'Click the + button on any movie or show to add it to your watchlist.'
-              : 'Try adjusting your filters to see more items.'}
+              ? "Your watchlist is empty"
+              : "No items match your filters"}
+          </Typography>
+          <Typography
+            variant="body"
+            className="max-w-md text-foreground-secondary"
+          >
+            {effectiveItems.length === 0
+              ? "Click the + button on any movie or show to add it to your watchlist."
+              : "Try adjusting your filters to see more items."}
           </Typography>
         </div>
       ) : (
         <>
           <div className="mb-4 flex items-center gap-2">
             <Typography variant="caption" className="text-foreground-muted">
-              {filteredAndSortedItems.length}{' '}
-              {filteredAndSortedItems.length === 1 ? 'item' : 'items'}
+              {filteredAndSortedItems.length}{" "}
+              {filteredAndSortedItems.length === 1 ? "item" : "items"}
               {hasActiveFilters && ` (filtered from ${effectiveItems.length})`}
             </Typography>
             {effectiveIsStale && !isRefreshing && (
@@ -769,13 +847,13 @@ function WatchlistContent({
             >
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
               <span className="ml-3 text-sm text-foreground-muted">
-                Loading more ({filteredAndSortedItems.length - displayedCount} remaining)
+                Loading more ({filteredAndSortedItems.length - displayedCount}{" "}
+                remaining)
               </span>
             </div>
           )}
         </>
       )}
-
     </Container>
   );
 }
@@ -784,8 +862,7 @@ function WatchlistContent({
 export default function WatchlistPage() {
   const data = useLoaderData<typeof loader>();
   // Cast to the expected shape - loader returns either json or defer with same structure
-  const { token, traktEnabled, imdbEnabled, watchlistData } = data as unknown as {
-    token: string;
+  const { traktEnabled, imdbEnabled, watchlistData } = data as unknown as {
     traktEnabled: boolean;
     imdbEnabled: boolean;
     watchlistData: WatchlistData | Promise<WatchlistData>;
@@ -793,11 +870,10 @@ export default function WatchlistPage() {
 
   return (
     <Suspense fallback={<WatchlistSkeleton />}>
-      <Await resolve={watchlistData}>
+      <Await resolve={watchlistData} errorElement={<Container className="py-8"><p role="alert">Could not refresh your watchlist. Your saved lists have not been changed.</p><button className="mt-4 min-h-11 rounded border px-4" onClick={() => window.location.reload()}>Retry</button></Container>}>
         {(resolvedData) => (
           <WatchlistContent
             watchlistData={resolvedData}
-            token={token}
             traktEnabled={traktEnabled}
             imdbEnabled={imdbEnabled}
           />

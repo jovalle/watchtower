@@ -127,7 +127,7 @@ export async function invalidateCache(key: string): Promise<void> {
  * Uses first 12 chars of SHA-256 hash for uniqueness while keeping filenames short.
  */
 function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+  return crypto.createHash("sha256").update(`${env.PLEX_SERVER_URL}:${token}`).digest("hex").slice(0, 12);
 }
 
 /**
@@ -143,7 +143,7 @@ export function getUserCacheKey(baseKey: string, token: string): string {
  * Useful when user data changes (e.g., after scrobble, timeline update).
  */
 export async function invalidateUserCaches(token: string): Promise<void> {
-  const userKeys = ["home", "new-popular"];
+  const userKeys = ["home", "new-popular-v2"];
   await Promise.all(
     userKeys.map((key) => invalidateCache(getUserCacheKey(key, token)))
   );

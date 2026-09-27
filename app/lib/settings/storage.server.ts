@@ -7,10 +7,26 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { env } from "~/lib/env.server";
-import type { UserSettings, ValidationCache, TraktValidationCache, IMDBValidationCache } from "./types";
+import type {
+  UserSettings,
+  UserPreferences,
+  ValidationCache,
+  TraktValidationCache,
+  IMDBValidationCache,
+} from "./types";
 
 // Storage configuration
 const SETTINGS_DIR = "settings";
+
+export const DEFAULT_PREFERENCES: UserPreferences = {
+  autoSkipIntro: false,
+  autoPlayNextEpisode: true,
+  showContinueWatching: true,
+  showRecentlyAdded: true,
+  showTrending: true,
+  showCollections: true,
+  discoveryDisabled: false,
+};
 
 /**
  * Get the settings directory path.
@@ -41,6 +57,7 @@ export function getDefaultSettings(): UserSettings {
     version: 1,
     traktUsername: null,
     imdbWatchlistIds: [],
+    preferences: { ...DEFAULT_PREFERENCES },
     updatedAt: Date.now(),
   };
 }
@@ -49,18 +66,27 @@ export function getDefaultSettings(): UserSettings {
  * Load user settings from storage.
  * Returns null if settings file doesn't exist or is invalid.
  */
-export async function getUserSettings(userId: number): Promise<UserSettings | null> {
+export async function getUserSettings(
+  userId: number
+): Promise<UserSettings | null> {
   try {
     const data = await fs.readFile(getSettingsPath(userId), "utf-8");
     const settings = JSON.parse(data) as UserSettings;
 
     if (settings.version !== 1) {
-      console.log(`[UserSettings] Version mismatch for user ${userId}, returning null`);
+      console.log(
+        `[UserSettings] Version mismatch for user ${userId}, returning null`
+      );
       return null;
     }
 
     console.log(`[UserSettings] Loaded settings for user ${userId}`);
-    return settings;
+    // Older files predate preferences; fill any missing keys with defaults.
+    return {
+      ...getDefaultSettings(),
+      ...settings,
+      preferences: { ...DEFAULT_PREFERENCES, ...settings.preferences },
+    };
   } catch {
     // File doesn't exist or is invalid
     return null;
@@ -89,10 +115,16 @@ export async function setUserSettings(
       updatedAt: Date.now(),
     };
 
-    await fs.writeFile(getSettingsPath(userId), JSON.stringify(updated, null, 2));
+    await fs.writeFile(
+      getSettingsPath(userId),
+      JSON.stringify(updated, null, 2)
+    );
     console.log(`[UserSettings] Saved settings for user ${userId}`);
   } catch (error) {
-    console.error(`[UserSettings] Failed to save settings for user ${userId}:`, error);
+    console.error(
+      `[UserSettings] Failed to save settings for user ${userId}:`,
+      error
+    );
     throw error;
   }
 }
@@ -131,7 +163,9 @@ export function getDefaultValidationCache(): ValidationCache {
 /**
  * Load validation cache for a user.
  */
-export async function getValidationCache(userId: number): Promise<ValidationCache> {
+export async function getValidationCache(
+  userId: number
+): Promise<ValidationCache> {
   try {
     const data = await fs.readFile(getValidationCachePath(userId), "utf-8");
     const cache = JSON.parse(data) as ValidationCache;
@@ -150,9 +184,15 @@ export async function setValidationCache(
 ): Promise<void> {
   try {
     await ensureSettingsDir();
-    await fs.writeFile(getValidationCachePath(userId), JSON.stringify(cache, null, 2));
+    await fs.writeFile(
+      getValidationCachePath(userId),
+      JSON.stringify(cache, null, 2)
+    );
   } catch (error) {
-    console.error(`[ValidationCache] Failed to save for user ${userId}:`, error);
+    console.error(
+      `[ValidationCache] Failed to save for user ${userId}:`,
+      error
+    );
   }
 }
 

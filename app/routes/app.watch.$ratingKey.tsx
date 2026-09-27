@@ -9,14 +9,30 @@
 
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useOutletContext } from "@remix-run/react";
 import { VideoPlayer } from "~/components/player";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { QUALITY_PROFILES } from "~/lib/plex/types";
-import type { QualityProfile, PlaybackMethod, PlexStream } from "~/lib/plex/types";
+import type {
+  QualityProfile,
+  PlaybackMethod,
+  PlexStream,
+} from "~/lib/plex/types";
 import { getPlaybackPref } from "~/lib/playback-prefs";
+import { parsePlaybackCaps, canDirectPlay } from "~/lib/playback-caps";
+import { canSidecar, selectedTrackNeeds } from "~/lib/plex/tracks";
+import {
+  toPlaybackMarkers,
+  findNextEpisode,
+  type PlaybackMarker,
+} from "~/lib/plex/markers";
+import { getCurrentUser } from "~/lib/auth/user.server";
+import {
+  getUserSettings,
+  DEFAULT_PREFERENCES,
+} from "~/lib/settings/storage.server";
 
 interface AudioTrack {
   id: number;
@@ -35,6 +51,7 @@ interface SubtitleTrack {
   languageCode?: string;
   codec?: string;
   selected?: boolean;
+  sidecarUrl?: string;
 }
 
 interface EpisodeInfo {
@@ -61,8 +78,6 @@ interface LoaderData {
   parentRatingKey?: string;
   parentIndex?: number;
   index?: number;
-  serverUrl: string;
-  token: string;
   quality: QualityProfile;
   availableQualities: QualityProfile[];
   playbackMethod: PlaybackMethod;
@@ -74,7 +89,20 @@ interface LoaderData {
   };
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  partId?: number;
+  burnedSubtitleId: number | null;
   episodes?: EpisodeInfo[];
+  markers: PlaybackMarker[];
+  nextEpisode: NextEpisodeInfo | null;
+  autoSkipIntro: boolean;
+  autoPlayNextEpisode: boolean;
+}
+
+interface NextEpisodeInfo {
+  ratingKey: string;
+  title: string;
+  label: string;
+  thumbUrl?: string;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -121,11 +149,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
 
   // Fetch metadata
-  const metadataResult = await client.getMetadata(ratingKey);
+  const [metadataResult, user] = await Promise.all([
+    client.getMetadata(ratingKey, { includeMarkers: true }),
+    getCurrentUser(request),
+  ]);
   if (!metadataResult.success) {
     throw new Response("Media not found", { status: 404 });
   }
   const metadata = metadataResult.data;
+  const preferences = user
+    ? (await getUserSettings(user.id))?.preferences ?? DEFAULT_PREFERENCES
+    : DEFAULT_PREFERENCES;
 
   // Detect mobile device for automatic transcoding
   const userAgent = request.headers.get("User-Agent") || "";
@@ -133,7 +167,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Parse URL parameters
   const url = new URL(request.url);
-  const queryTimeMs = parseInt(url.searchParams.get("t") || "0", 10);
+  const queryTime = url.searchParams.get("t");
+  const queryTimeMs = queryTime !== null && /^\d+$/.test(queryTime)
+    ? Number(queryTime)
+    : NaN;
   const qualityId = url.searchParams.get("quality") || "original";
   const forceTranscodeParam = url.searchParams.get("transcode") === "1";
 
@@ -142,7 +179,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let resumeMs = 0;
   let resumeSource = "none";
 
-  if (!isNaN(queryTimeMs) && queryTimeMs > 0) {
+  if (Number.isSafeInteger(queryTimeMs) && queryTimeMs >= 0) {
     resumeMs = queryTimeMs;
     resumeSource = "query";
   } else if (metadata.viewOffset && metadata.viewOffset > 0) {
@@ -156,26 +193,58 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Check stored playback preference
   const cookieHeader = request.headers.get("Cookie");
   const storedPref = getPlaybackPref(cookieHeader, ratingKey);
-  const useStoredTranscode = storedPref === "transcode" && !forceTranscodeParam && qualityId === "original";
+  const useStoredTranscode =
+    storedPref === "transcode" &&
+    !forceTranscodeParam &&
+    qualityId === "original";
+
+  // Play the file as-is when the browser reported it can decode the container and codecs
+  const media = metadata.Media?.[0];
+  const caps = parsePlaybackCaps(cookieHeader);
+  const videoStream = media?.Part?.[0]?.Stream?.find((s) => s.streamType === 1);
+  // Browsers can't burn in subtitles or pick a non-default audio track from a file, so those need HLS.
+  const trackNeeds = selectedTrackNeeds(media?.Part?.[0]?.Stream ?? []);
+  const directFile =
+    !!caps &&
+    !!media &&
+    qualityId === "original" &&
+    !forceTranscodeParam &&
+    !useStoredTranscode &&
+    trackNeeds.burnSubtitleId === null &&
+    !trackNeeds.nonDefaultAudio &&
+    canDirectPlay(media, caps, videoStream?.DOVIProfile);
 
   // Force transcoding for mobile devices to ensure compatible H.264/AAC format
   // Mobile browsers (especially iOS Safari) have limited codec support
-  const forceTranscode = forceTranscodeParam || useStoredTranscode || isMobile;
+  const forceTranscode =
+    forceTranscodeParam || useStoredTranscode || (isMobile && !directFile);
 
   // Select quality profile - use 1080p transcoding for mobile or stored preference
-  const effectiveQualityId = (useStoredTranscode || (isMobile && qualityId === "original")) ? "1080p-20" : qualityId;
-  const selectedQuality = QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) || QUALITY_PROFILES[0];
+  const effectiveQualityId =
+    useStoredTranscode || (isMobile && !directFile && qualityId === "original")
+      ? "1080p-20"
+      : qualityId;
+  const selectedQuality =
+    QUALITY_PROFILES.find((q) => q.id === effectiveQualityId) ||
+    QUALITY_PROFILES[0];
 
   // Get stream URL - offset is in SECONDS
   const playbackInfo = client.getPlaybackInfo(ratingKey, {
     offsetSeconds: resumeSeconds,
     quality: selectedQuality,
     forceTranscode,
+    subtitles: trackNeeds.burnSubtitleId !== null ? "burn" : "none",
   });
 
   // Logging
-  console.log(`[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`);
-  console.log(`[Watch] Quality: ${selectedQuality.id}, Method: ${playbackInfo.method}, Mobile: ${isMobile}`);
+  console.log(
+    `[Watch] Media: ${ratingKey}, Resume: ${resumeSeconds}s (from ${resumeSource})`
+  );
+  console.log(
+    `[Watch] Quality: ${selectedQuality.id}, Method: ${
+      directFile ? "direct_file" : playbackInfo.method
+    }, Mobile: ${isMobile}`
+  );
 
   // Build display title
   let displayTitle = metadata.title;
@@ -188,7 +257,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Extract media info
-  const media = metadata.Media?.[0];
   const part = media?.Part?.[0];
   const streams = part?.Stream || [];
 
@@ -215,6 +283,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       languageCode: s.languageCode,
       codec: s.codec,
       selected: s.selected,
+      sidecarUrl: canSidecar(s) ? `/api/plex/subtitles/${s.id}` : undefined,
     }));
 
   // Fetch episodes if this is a TV episode
@@ -235,9 +304,44 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // Build proxy URL - extract query params from Plex URL and use our HLS proxy
+  let nextEpisode: NextEpisodeInfo | null = null;
+  if (metadata.type === "episode") {
+    let next = episodes ? findNextEpisode(episodes, ratingKey) : null;
+    let nextSeason = metadata.parentIndex;
+    if (!next && metadata.grandparentRatingKey) {
+      const leaves = await client.getAllLeaves(metadata.grandparentRatingKey);
+      const leaf = leaves.success
+        ? findNextEpisode(leaves.data, ratingKey)
+        : null;
+      if (leaf) {
+        next = {
+          ratingKey: leaf.ratingKey,
+          title: leaf.title,
+          index: leaf.index || 0,
+          thumb: leaf.thumb,
+        };
+        nextSeason = leaf.parentIndex;
+      }
+    }
+    if (next) {
+      nextEpisode = {
+        ratingKey: next.ratingKey,
+        title: next.title,
+        label:
+          nextSeason !== undefined
+            ? `S${nextSeason}:E${next.index}`
+            : `Episode ${next.index}`,
+        thumbUrl: next.thumb ? buildBackdropUrl(next.thumb) : undefined,
+      };
+    }
+  }
+
+  // Direct files go through the range-request proxy; everything else through the HLS proxy
   const plexUrl = new URL(playbackInfo.streamUrl);
-  const proxyStreamUrl = `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
+  plexUrl.searchParams.delete("X-Plex-Token");
+  const proxyStreamUrl = directFile
+    ? `/api/plex/stream/${ratingKey}?session=${plexUrl.searchParams.get("session")}`
+    : `/api/plex/hls/${ratingKey}/start.m3u8${plexUrl.search}`;
 
   return json<LoaderData>({
     streamUrl: proxyStreamUrl,
@@ -252,11 +356,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     parentRatingKey: metadata.parentRatingKey,
     parentIndex: metadata.parentIndex,
     index: metadata.index,
-    serverUrl: env.PLEX_SERVER_URL,
-    token,
     quality: playbackInfo.quality,
     availableQualities: playbackInfo.availableQualities,
-    playbackMethod: playbackInfo.method,
+    playbackMethod: directFile ? "direct_play" : playbackInfo.method,
     mediaInfo: {
       videoCodec: media?.videoCodec,
       audioCodec: media?.audioCodec,
@@ -265,11 +367,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
     audioTracks,
     subtitleTracks,
+    partId: part?.id,
+    burnedSubtitleId: trackNeeds.burnSubtitleId,
     episodes,
+    markers: toPlaybackMarkers(metadata.Marker),
+    nextEpisode,
+    autoSkipIntro: preferences.autoSkipIntro,
+    autoPlayNextEpisode: preferences.autoPlayNextEpisode,
   });
 }
 
 export default function WatchPage() {
+  const { playbackBackTo } = useOutletContext<{ playbackBackTo: string }>();
   const {
     streamUrl,
     title,
@@ -282,15 +391,19 @@ export default function WatchPage() {
     parentTitle,
     parentIndex,
     index,
-    serverUrl,
-    token,
     quality,
     availableQualities,
     playbackMethod,
     mediaInfo,
     audioTracks,
     subtitleTracks,
+    partId,
+    burnedSubtitleId,
     episodes,
+    markers,
+    nextEpisode,
+    autoSkipIntro,
+    autoPlayNextEpisode,
   } = useLoaderData<typeof loader>();
 
   // Build title/subtitle for episodes
@@ -304,6 +417,8 @@ export default function WatchPage() {
   return (
     <div className="fixed inset-0 z-50 bg-black">
       <VideoPlayer
+        key={streamUrl}
+        backTo={playbackBackTo}
         src={streamUrl}
         title={mainTitle}
         subtitle={subtitle}
@@ -311,18 +426,22 @@ export default function WatchPage() {
         durationMs={durationMs}
         resumePositionSeconds={resumePositionSeconds}
         ratingKey={ratingKey}
-        serverUrl={serverUrl}
-        token={token}
         quality={quality}
         availableQualities={availableQualities}
         playbackMethod={playbackMethod}
         mediaInfo={mediaInfo}
         audioTracks={audioTracks}
         subtitleTracks={subtitleTracks}
+        partId={partId}
+        burnedSubtitleId={burnedSubtitleId}
         episodes={episodes}
         seasonTitle={parentTitle}
         seasonNumber={parentIndex}
         episodeNumber={index}
+        markers={markers}
+        nextEpisode={nextEpisode}
+        autoSkipIntro={autoSkipIntro}
+        autoPlayNextEpisode={autoPlayNextEpisode}
       />
     </div>
   );

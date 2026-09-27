@@ -7,7 +7,7 @@
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { requirePlexToken } from "~/lib/auth/session.server";
+import { isServerOwner, requirePlexToken } from "~/lib/auth/session.server";
 import { PLEX_HEADERS } from "~/lib/plex/constants";
 import { env } from "~/lib/env.server";
 
@@ -57,7 +57,13 @@ async function testEndpoint(
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  if (!env.isDevelopment) {
+    throw new Response("Not Found", { status: 404 });
+  }
   const token = await requirePlexToken(request);
+  if (!(await isServerOwner(request))) {
+    throw new Response("Forbidden", { status: 403 });
+  }
 
   // Test 1: metadata.provider.plex.tv (old endpoint)
   const metadataUrl = `https://metadata.provider.plex.tv/library/sections/watchlist/all?X-Plex-Token=${token}`;
@@ -86,10 +92,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Run all tests in parallel
   const [test1, test2, test3, test4] = await Promise.all([
-    testEndpoint(metadataUrl, baseHeaders, "metadata.provider (old) - token in URL"),
-    testEndpoint(discoverUrl, baseHeaders, "discover.provider - token in URL only"),
-    testEndpoint(discoverUrl, headersWithToken, "discover.provider - token in URL + header"),
-    testEndpoint(discoverFullUrl, headersWithToken, "discover.provider - full params"),
+    testEndpoint(
+      metadataUrl,
+      baseHeaders,
+      "metadata.provider (old) - token in URL"
+    ),
+    testEndpoint(
+      discoverUrl,
+      baseHeaders,
+      "discover.provider - token in URL only"
+    ),
+    testEndpoint(
+      discoverUrl,
+      headersWithToken,
+      "discover.provider - token in URL + header"
+    ),
+    testEndpoint(
+      discoverFullUrl,
+      headersWithToken,
+      "discover.provider - full params"
+    ),
   ]);
 
   // Also test if token is valid by checking plex.tv user info
@@ -99,7 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       headers: {
         ...baseHeaders,
         "X-Plex-Token": token,
-        "Accept": "application/json",
+        Accept: "application/json",
       },
     });
     if (userResponse.ok) {
@@ -113,13 +135,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userInfo = { error: `${userResponse.status} ${userResponse.statusText}` };
     }
   } catch (error) {
-    userInfo = { error: error instanceof Error ? error.message : "Unknown error" };
+    userInfo = {
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 
   return json({
     tokenInfo: {
       length: token.length,
-      prefix: token.substring(0, 10) + "...",
     },
     userInfo,
     tests: [test1, test2, test3, test4],

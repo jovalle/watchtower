@@ -2,10 +2,22 @@
  * User settings types for per-user configuration storage.
  */
 
+export interface UserPreferences {
+  autoSkipIntro: boolean;
+  autoPlayNextEpisode: boolean;
+  showContinueWatching: boolean;
+  showRecentlyAdded: boolean;
+  showTrending: boolean;
+  showCollections: boolean;
+  /** Hides everything sourced from outside the library: TMDB trending, search results, and recommendations. */
+  discoveryDisabled: boolean;
+}
+
 export interface UserSettings {
   version: 1;
   traktUsername: string | null;
   imdbWatchlistIds: string[]; // Format: ur12345678 or ls12345678
+  preferences: UserPreferences;
   updatedAt: number; // Unix timestamp
 }
 

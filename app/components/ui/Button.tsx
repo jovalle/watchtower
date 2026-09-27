@@ -54,7 +54,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const baseStyles =
-    "inline-flex items-center justify-center align-middle font-medium rounded-md origin-center will-change-transform transition-[transform,background-color,box-shadow] duration-200";
+    "inline-flex min-h-11 min-w-11 items-center justify-center align-middle font-medium rounded-md origin-center will-change-transform transition-[transform,background-color,box-shadow] duration-200";
   const variantClasses = variantStyles[variant];
   const sizeClasses = sizeStyles[size];
 

@@ -11,10 +11,24 @@
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useLocation } from "@remix-run/react";
+import { useEffect, useRef } from "react";
 import { Header } from "~/components/layout";
-import { requirePlexToken, clearSession, getServerToken, getSession, commitSession } from "~/lib/auth/session.server";
-import { getPlexUser, verifyServerAccess, type PlexUser } from "~/lib/auth/plex.server";
+import {
+  requirePlexToken,
+  clearSession,
+  getSession,
+  commitSession,
+} from "~/lib/auth/session.server";
+import {
+  getPlexUser,
+  verifyServerAccess,
+  type PlexUser,
+} from "~/lib/auth/plex.server";
+import { getServerConfig } from "~/lib/config/server-config.server";
+import { getUserSettings } from "~/lib/settings/storage.server";
+import { useRouteFocus } from "~/hooks/useRouteFocus";
+import { useRemoteNavigation } from "~/hooks/useRemoteNavigation";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // Require authentication - redirects to Plex login if no token
@@ -30,11 +44,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw await clearSession(request);
   }
 
-  // Check if we already have a server token
-  let serverToken = await getServerToken(request);
+  const config = getServerConfig();
+  if (!config) {
+    throw redirect("/setup");
+  }
 
-  // If no server token, verify access and get one
-  if (!serverToken) {
+  const session = await getSession(request);
+  let serverToken = session.get("serverToken");
+
+  // Verify access if we have no server token or it was issued for a previously configured server
+  if (
+    !serverToken ||
+    session.get("serverMachineId") !== config.machineIdentifier
+  ) {
     // SECURITY CHECK: Verify user has access to THIS Plex server's libraries
     const serverAccess = await verifyServerAccess(token);
 
@@ -48,9 +70,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Store server token and owner status in session
     serverToken = serverAccess.serverToken || token;
-    const session = await getSession(request);
     session.set("serverToken", serverToken);
     session.set("isOwner", serverAccess.isOwner === true);
+    session.set("serverMachineId", config.machineIdentifier);
 
     // Redirect to same URL with updated session
     const url = new URL(request.url);
@@ -61,21 +83,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-
-  return json({ user });
+  return json({ user, discoveryDisabled: (await getUserSettings(user.id))?.preferences.discoveryDisabled ?? false });
 }
 
 export default function AppLayout() {
-  const { user } = useLoaderData<typeof loader>();
+  useRemoteNavigation();
+  const main = useRef<HTMLElement>(null);
+  useRouteFocus(main);
+  const { user, discoveryDisabled } = useLoaderData<typeof loader>();
+  const location = useLocation();
+  const playbackBackTo = useRef("/app");
+  useEffect(() => {
+    const isLibrary = /^\/app\/watch\/(movies|series|recent)\/?$/.test(location.pathname);
+    if (isLibrary || !location.pathname.startsWith("/app/watch/")) {
+      playbackBackTo.current = location.pathname + location.search + location.hash;
+    }
+  }, [location]);
 
   return (
     <div className="min-h-screen">
       {/* Header with navigation */}
-      <Header user={user} />
+      <Header user={user} discoveryDisabled={discoveryDisabled} />
 
       {/* Main content - add top padding to account for fixed header */}
-      <main className="pt-16">
-        <Outlet context={{ user }} />
+      <main ref={main} tabIndex={-1} className="pt-16">
+        <Outlet context={{ user, playbackBackTo: playbackBackTo.current }} />
       </main>
     </div>
   );
