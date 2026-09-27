@@ -2,6 +2,32 @@
 
 All notable changes to Watchtower are documented here. Versions follow [Semantic Versioning](https://semver.org) and notes are generated from [Conventional Commits](https://www.conventionalcommits.org).
 
+## [1.8.1](https://github.com/jovalle/watchtower/compare/v1.8.0...v1.8.1) (2026-09-27)
+
+### 🐛 Bug Fixes
+
+- **release:** Build Docker images from the release tag ([`2970654`](https://github.com/jovalle/watchtower/commit/297065454577d39f69bff53179b28f06f432cf45))
+
+  The docker-publish job checked out the workflow_run head SHA, which predates semantic-release's version bump, so images tagged 1.8.0 shipped package.json 1.7.0 and npm's start banner reported watchtower@1.7.0. Check out the new release tag instead.
+
+<details>
+<summary><strong>🔧 Maintenance</strong> (2)</summary>
+
+- **hooks:** Run the Vitest suite in pre-commit ([`7ff246a`](https://github.com/jovalle/watchtower/commit/7ff246a931f1114a21076261d863713c653c4099))
+- **release:** Format .releaserc.json ([`8578769`](https://github.com/jovalle/watchtower/commit/8578769ae3273a5918910b769053d494c56c7ae6))
+
+</details>
+
+### 🐳 Upgrade
+
+```sh
+docker pull ghcr.io/jovalle/watchtower:1.8.1
+```
+
+**Full Changelog**: [`v1.8.0...v1.8.1`](https://github.com/jovalle/watchtower/compare/v1.8.0...v1.8.1)
+
+<sub>3 commits</sub>
+
 ## [1.8.0](https://github.com/jovalle/watchtower/compare/v1.7.0...v1.8.0) (2026-09-27)
 
 ### 🚀 Features
