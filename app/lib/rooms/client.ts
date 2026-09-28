@@ -68,6 +68,13 @@ type ClientOptions = {
 };
 
 const AUTH_TERMINAL_STATUSES = new Set([401, 403, 404, 410]);
+// Command rejections that end the membership; any other answered rejection only drops that intent.
+const COMMAND_TERMINAL_CODES = new Set<RoomErrorCode | null>([
+  "removed",
+  "forbidden",
+  "room_ended",
+  "membership_ended",
+]);
 const MUTATION_EXPIRY_MS = 30_000;
 const mutationBodies = new Map<string, object>();
 
@@ -541,6 +548,21 @@ export class BrowserRoomClient {
         if (error instanceof RoomApiError && error.status === 409) {
           if (error.snapshot) this.applySnapshot(error.snapshot);
           this.update({ lastErrorCode: error.code });
+          return false;
+        }
+        if (
+          error instanceof RoomApiError &&
+          error.status !== 401 &&
+          !COMMAND_TERMINAL_CODES.has(error.code)
+        ) {
+          if (error.snapshot) this.applySnapshot(error.snapshot);
+          this.update({ lastErrorCode: error.code });
+          // "No next episode" and a missing room share not_found; ask the room which one it is.
+          if (error.code === "not_found") {
+            void this.recover().catch((recoverError) =>
+              this.handleRequestFailure(recoverError)
+            );
+          }
           return false;
         }
         if (!this.handleRequestFailure(error)) this.beginReconnect();
