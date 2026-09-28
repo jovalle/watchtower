@@ -107,6 +107,7 @@ async function start() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       build: build as any,
       mode: process.env.NODE_ENV,
+      getLoadContext: (req) => ({ clientIp: req.ip }),
     }),
   );
 
