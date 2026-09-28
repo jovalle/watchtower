@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import coil3.ImageLoader
 import coil3.disk.DiskCache
@@ -16,6 +17,8 @@ import io.github.jovalle.watchtower.tv.api.WatchtowerApi
 import io.github.jovalle.watchtower.tv.auth.CredentialStore
 import io.github.jovalle.watchtower.tv.auth.DeviceInfo
 import io.github.jovalle.watchtower.tv.auth.SessionManager
+import io.github.jovalle.watchtower.tv.rooms.RoomApi
+import io.github.jovalle.watchtower.tv.rooms.RoomManager
 import io.github.jovalle.watchtower.tv.settings.LocalPlaybackPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,14 @@ class AppGraph(private val app: Application) {
         device = device,
         allowCleartext = BuildConfig.ALLOW_CLEARTEXT,
     )
+    val rooms = RoomManager(
+        transport = RoomApi(http),
+        appScope = appScope,
+        currentIdentity = session::current,
+        roomsEnabled = { session.currentMe()?.features?.rooms == true },
+        identityChanges = session.identityChanges,
+        nowMs = SystemClock::elapsedRealtime,
+    )
 
     private val _deepLinks = MutableStateFlow<Uri?>(null)
 
@@ -57,7 +68,7 @@ class AppGraph(private val app: Application) {
 
     fun acceptDeepLink(intent: Intent?) {
         val uri = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return
-        if (uri.scheme == "watchtower" && uri.host == "media") _deepLinks.value = uri
+        if (uri.scheme == "watchtower" && uri.host in setOf("media", "join")) _deepLinks.value = uri
     }
 
     fun consumeDeepLink(uri: Uri) {

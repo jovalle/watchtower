@@ -16,6 +16,7 @@ sealed interface PlaybackIntent {
 
 sealed interface AuthorityDecision {
     data object Allow : AuthorityDecision
+    data object Handled : AuthorityDecision
     data class Deny(val reason: String) : AuthorityDecision
     data class Redirect(val intent: PlaybackIntent) : AuthorityDecision
 }
@@ -42,6 +43,7 @@ class PlaybackIntentGate(
     private fun dispatch(intent: PlaybackIntent, decision: AuthorityDecision): AuthorityDecision {
         when (decision) {
             AuthorityDecision.Allow -> execute(intent)
+            AuthorityDecision.Handled -> Unit
             is AuthorityDecision.Redirect -> execute(decision.intent)
             is AuthorityDecision.Deny -> Unit
         }
