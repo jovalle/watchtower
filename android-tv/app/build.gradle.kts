@@ -6,6 +6,18 @@ plugins {
 
 // Release signing is configured only from the environment; nothing secret lives in the repository.
 val releaseKeystore = providers.environmentVariable("WATCHTOWER_TV_KEYSTORE").orNull
+val configuredVersionCode = providers.gradleProperty("watchtower.tv.versionCode")
+    .orElse(providers.environmentVariable("WATCHTOWER_TV_VERSION_CODE"))
+    .orNull
+val tvVersionCode = configuredVersionCode?.let { value ->
+    value.toIntOrNull()?.takeIf { it in 1..2_100_000_000 }
+        ?: throw GradleException(
+            "watchtower.tv.versionCode/WATCHTOWER_TV_VERSION_CODE must be a positive integer no greater than 2100000000 (received '$value').",
+        )
+} ?: 1
+val tvVersionName = providers.gradleProperty("watchtower.tv.versionName")
+    .orElse(providers.environmentVariable("WATCHTOWER_TV_VERSION_NAME"))
+    .getOrElse("0.1.0")
 
 android {
     namespace = "io.github.jovalle.watchtower.tv"
@@ -17,8 +29,8 @@ android {
         applicationId = "io.github.jovalle.watchtower.tv"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = tvVersionCode
+        versionName = tvVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Harness-only credential hook; scripts/tv-e2e/room-e2e.ts invokes it directly with `am instrument -e class`.
         testInstrumentationRunnerArguments["notClass"] = "io.github.jovalle.watchtower.tv.e2e.SeedCredentialTest"
