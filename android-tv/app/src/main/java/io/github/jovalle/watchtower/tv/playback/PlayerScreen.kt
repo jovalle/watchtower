@@ -51,6 +51,7 @@ import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 import io.github.jovalle.watchtower.tv.rooms.RoomConnectionStatus
 import io.github.jovalle.watchtower.tv.rooms.RoomInvitationQr
+import io.github.jovalle.watchtower.tv.rooms.localizedRoomMessage
 
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -133,7 +134,10 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 				fontSize = 20.sp,
 			)
 		}
-		state.roomMessage?.let {
+		val renderedRoomMessage = state.room?.let {
+			localizedRoomMessage(it.errorCode, it.endedReason, state.roomMessage ?: it.message)
+		} ?: state.roomMessage
+		renderedRoomMessage?.let {
 			Text(
 				text = it,
 				modifier = Modifier.align(Alignment.TopStart).padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite },
@@ -261,7 +265,8 @@ private fun RoomPanel(state: PlaybackUiState, controller: PlaybackController, mo
 				when (room.status) {
 					RoomConnectionStatus.CONNECTED -> snapshot?.phase ?: ""
 					RoomConnectionStatus.RECONNECTING -> stringResource(R.string.room_reconnecting)
-					RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR -> room.message.orEmpty()
+					RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR ->
+						localizedRoomMessage(room.errorCode, room.endedReason, room.message)
 					else -> stringResource(R.string.room_preparing)
 				},
 				color = Color(0xFFCCCCCC),

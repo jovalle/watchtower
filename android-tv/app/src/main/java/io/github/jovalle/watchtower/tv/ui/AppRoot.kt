@@ -38,7 +38,13 @@ import io.github.jovalle.watchtower.tv.AppGraph
 import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.auth.AuthState
 import io.github.jovalle.watchtower.tv.catalog.ApiCatalogDataSource
+import io.github.jovalle.watchtower.tv.catalog.CollectionRoute
+import io.github.jovalle.watchtower.tv.catalog.CollectionScreen
+import io.github.jovalle.watchtower.tv.catalog.CollectionsRoute
+import io.github.jovalle.watchtower.tv.catalog.CollectionsScreen
 import io.github.jovalle.watchtower.tv.catalog.DetailsRoute
+import io.github.jovalle.watchtower.tv.catalog.ExternalDetailsRoute
+import io.github.jovalle.watchtower.tv.catalog.ExternalDetailsScreen
 import io.github.jovalle.watchtower.tv.catalog.HomeRoute
 import io.github.jovalle.watchtower.tv.catalog.HomeScreen
 import io.github.jovalle.watchtower.tv.catalog.LibraryRoute
@@ -50,6 +56,8 @@ import io.github.jovalle.watchtower.tv.catalog.MediaDetailsScreen
 import io.github.jovalle.watchtower.tv.catalog.NavigationViewModel
 import io.github.jovalle.watchtower.tv.catalog.SearchRoute
 import io.github.jovalle.watchtower.tv.catalog.SearchScreen
+import io.github.jovalle.watchtower.tv.catalog.PlaylistRoute
+import io.github.jovalle.watchtower.tv.catalog.PlaylistScreen
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 import io.github.jovalle.watchtower.tv.pairing.PairingScreen
 import io.github.jovalle.watchtower.tv.pairing.ProfileChooser
@@ -128,6 +136,10 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
     val libraries by navigation.state.collectAsStateWithLifecycle()
     val backStack by navController.currentBackStackEntryAsState()
     val roomsEnabled = graph.session.currentMe()?.features?.rooms == true
+    val invalidRoomInvitation = stringResource(R.string.room_invalid_invite)
+    val roomsUnavailable = stringResource(R.string.room_unavailable_profile)
+    val roomJoinFailed = stringResource(R.string.room_join_failed)
+    val roomCreateFailed = stringResource(R.string.room_create_failed)
 
     LaunchedEffect(graph) {
         graph.session.identityChanges.collect {
@@ -142,14 +154,14 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
         if (uri.host == "join") {
             val secret = InviteParser.parse(uri.toString())
             if (!roomsEnabled || secret == null) {
-                notice = if (roomsEnabled) "This Watch Together invitation is invalid." else "Watch Together is unavailable for this profile."
+                notice = if (roomsEnabled) invalidRoomInvitation else roomsUnavailable
                 navController.navigate(HomeRoute)
             } else {
                 try {
                     val room = graph.rooms.join(secret)
                     navController.navigate(RoomLobbyRoute(room.roomId))
                 } catch (error: Exception) {
-                    notice = error.message ?: "Could not join this room."
+                    notice = error.message ?: roomJoinFailed
                     navController.navigate(HomeRoute)
                 }
             }
@@ -192,13 +204,57 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
                 HomeScreen(graph, data, watchNext, onDetails = { navController.navigate(DetailsRoute(it)) }, onPlay = { navController.navigate(it) })
             }
             composable<LibraryRoute> { entry ->
-                LibraryScreen(graph, data, entry.toRoute(), onOpen = { navController.navigate(DetailsRoute(it)) })
+                val route = entry.toRoute<LibraryRoute>()
+                LibraryScreen(
+                    graph,
+                    data,
+                    route,
+                    onOpen = { navController.navigate(DetailsRoute(it)) },
+                    onCollections = { navController.navigate(CollectionsRoute(route.sectionId, route.title)) },
+                )
+            }
+            composable<CollectionsRoute> { entry ->
+                CollectionsScreen(graph, data, entry.toRoute()) { navController.navigate(it) }
+            }
+            composable<CollectionRoute> { entry ->
+                CollectionScreen(graph, data, entry.toRoute(), onOpen = { navController.navigate(DetailsRoute(it)) })
             }
             composable<SearchRoute> {
-                SearchScreen(graph, data, onOpen = { navController.navigate(DetailsRoute(it)) })
+                SearchScreen(graph, data) { item ->
+                    val key = item.ratingKey
+                    val external = item.external
+                    when {
+                        key != null -> navController.navigate(DetailsRoute(key))
+                        external != null -> navController.navigate(
+                            ExternalDetailsRoute(
+                                external.provider,
+                                external.id,
+                                external.type,
+                                item.title,
+                                item.year,
+                                item.posterUrl,
+                                item.backdropUrl,
+                            ),
+                        )
+                    }
+                }
             }
             composable<ListsRoute> {
-                ListsScreen(graph, data, onOpen = { navController.navigate(DetailsRoute(it)) })
+                ListsScreen(
+                    graph,
+                    data,
+                    onOpen = { navController.navigate(DetailsRoute(it)) },
+                    onPlaylist = { navController.navigate(it) },
+                )
+            }
+            composable<PlaylistRoute> { entry ->
+                PlaylistScreen(
+                    graph,
+                    data,
+                    entry.toRoute(),
+                    onOpen = { navController.navigate(DetailsRoute(it)) },
+                    onPlay = { navController.navigate(it) },
+                )
             }
             composable<DetailsRoute> { entry ->
                 MediaDetailsScreen(
@@ -224,13 +280,16 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
                                         )
                                         navController.navigate(RoomLobbyRoute(room.roomId))
                                     } catch (error: Exception) {
-                                        notice = error.message ?: "Could not create a Watch Together room."
+                                        notice = error.message ?: roomCreateFailed
                                     }
                                 }
                             }
                         }
                     } else null,
                 )
+            }
+            composable<ExternalDetailsRoute> { entry ->
+                ExternalDetailsScreen(graph, data, entry.toRoute())
             }
             composable<JoinRoomRoute> {
                 JoinRoomScreen(graph) { roomId -> navController.navigate(RoomLobbyRoute(roomId)) }
@@ -304,6 +363,6 @@ private fun DrawerButton(label: String, expanded: Boolean, selected: Boolean, on
         modifier = Modifier.padding(vertical = 4.dp).width(if (expanded) 226.dp else 58.dp),
     ) {
         Text(if (expanded) label else label.take(1), maxLines = 1)
-        if (selected && expanded) Text(" •")
+        if (selected && expanded) Text(stringResource(R.string.selected_marker))
     }
 }

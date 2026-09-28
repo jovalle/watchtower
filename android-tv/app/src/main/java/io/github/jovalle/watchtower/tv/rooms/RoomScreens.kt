@@ -119,6 +119,7 @@ fun JoinRoomForm(
     onJoin: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val invitationDescription = stringResource(R.string.room_invitation_description)
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(52.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -131,7 +132,7 @@ fun JoinRoomForm(
             modifier = Modifier.fillMaxWidth().background(Color.White)
                 .border(if (focused) 4.dp else 2.dp, MaterialTheme.colorScheme.primary)
                 .onFocusChanged { focused = it.isFocused }.padding(16.dp).focusable()
-                .semantics { contentDescription = "Watch Together invitation" },
+                .semantics { contentDescription = invitationDescription },
             textStyle = TextStyle(color = Color.Black, fontSize = 20.sp),
             singleLine = true,
         )
@@ -251,6 +252,11 @@ fun roomInvitationUrl(base: HttpUrl, secret: String): String? {
 
 @Composable
 private fun roomStatus(state: RoomUiState): String = when {
+    state.errorCode != null || state.endedReason != null -> localizedRoomMessage(
+        state.errorCode,
+        state.endedReason,
+        state.message,
+    )
     state.message != null -> state.message
     state.status == RoomConnectionStatus.RECONNECTING -> stringResource(R.string.room_reconnecting)
     state.snapshot?.reason == "host_transferred" -> stringResource(R.string.room_host_transferred)
@@ -258,4 +264,25 @@ private fun roomStatus(state: RoomUiState): String = when {
     state.snapshot?.phase == "preparing" -> stringResource(R.string.room_preparing)
     state.snapshot?.phase == "playing" -> stringResource(R.string.room_playing)
     else -> stringResource(R.string.room_waiting_for_start)
+}
+
+@Composable
+fun localizedRoomMessage(errorCode: String?, endedReason: String?, fallback: String?): String = when {
+    errorCode == "not_host" -> stringResource(R.string.room_error_not_host)
+    errorCode == "participants_not_ready" -> stringResource(R.string.room_error_participants_not_ready)
+    errorCode == "stale_revision" -> stringResource(R.string.room_error_stale_revision)
+    errorCode == "stale_epoch" || endedReason == "server_restarted" -> stringResource(R.string.room_ended_server_restarted)
+    errorCode == "removed" || endedReason == "removed" -> stringResource(R.string.room_ended_removed)
+    errorCode == "access_denied" || errorCode == "media_forbidden" || endedReason == "access_denied" ->
+        stringResource(R.string.room_error_access_denied)
+    errorCode == "room_ended" || errorCode == "membership_ended" -> stringResource(R.string.room_ended_generic)
+    errorCode == "identity_version_mismatch" || errorCode == "unauthenticated" || endedReason == "identity_changed" ->
+        stringResource(R.string.room_ended_identity_changed)
+    errorCode == "feature_disabled" -> stringResource(R.string.room_error_feature_disabled)
+    errorCode == "upstream_unavailable" -> stringResource(R.string.room_error_upstream_unavailable)
+    endedReason == "host_ended" -> stringResource(R.string.room_ended_by_host)
+    endedReason == "host_lost" -> stringResource(R.string.room_ended_host_lost)
+    endedReason == "left" -> stringResource(R.string.room_left)
+    fallback != null -> fallback
+    else -> stringResource(R.string.room_ended_generic)
 }
