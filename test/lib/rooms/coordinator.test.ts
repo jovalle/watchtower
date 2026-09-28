@@ -656,6 +656,22 @@ describe("RoomCoordinator", () => {
     expect(snapshot(coordinator.get(host, room.snapshot.roomId)).participants).toHaveLength(1);
   });
 
+  it("starts and resumes from the held position regardless of how long the room waited", async () => {
+    const room = await created();
+    await presence(room, host, 1);
+    now += 60_000;
+    const started = await coordinator.command(host, room.snapshot.roomId, command(room, 1, 1, "play", {}));
+    expect(snapshot(started).anchor).toEqual({ positionMs: 500, effectiveAtMs: now + ROOM_POLICY.startLeadMs, rate: 1 });
+
+    now += ROOM_POLICY.startLeadMs + 10_000;
+    const paused = await coordinator.command(host, room.snapshot.roomId, command(room, 2, snapshot(started).revision, "pause", {}));
+    expect(snapshot(paused).anchor.positionMs).toBe(10_500);
+
+    now += 45_000;
+    const resumed = await coordinator.command(host, room.snapshot.roomId, command(room, 3, snapshot(paused).revision, "play", {}));
+    expect(snapshot(resumed).anchor.positionMs).toBe(10_500);
+  });
+
   it("returns a cached command result to an identical retry after the room ended", async () => {
     const room = await created();
     const end = command(room, 1, 1, "end", {});
