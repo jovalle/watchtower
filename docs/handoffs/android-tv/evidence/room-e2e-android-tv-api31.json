@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-28T05:49:52.213Z",
+  "at": "2026-09-28T06:15:07.092Z",
   "results": [
     {
       "id": "TVR-00 combined server advertises rooms",
@@ -43,7 +43,7 @@
       "pass": true,
       "detail": {
         "tv": {
-          "participantId": "02b9cf65-aabe-4a44-8772-b4c1f12f044b",
+          "participantId": "7f7d31bc-fd2e-47a4-a78f-4a01947f0ec6",
           "displayName": "Test Owner",
           "connected": true,
           "ready": true,
@@ -65,21 +65,21 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 9165,
-        "targetMs": 9413,
-        "skewMs": -248,
+        "tvMs": 3031,
+        "targetMs": 3046,
+        "skewMs": -15,
         "speed": 1
       }
     },
     {
       "id": "TVR-A6 TV stays within 500 ms while playing (loopback)",
-      "pass": false,
+      "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 14813,
-        "targetMs": 15449,
-        "skewMs": -636,
-        "speed": 1.01298
+        "tvMs": 8840,
+        "targetMs": 9078,
+        "skewMs": -238,
+        "speed": 1.00474
       }
     },
     {
@@ -87,10 +87,10 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 17550,
-        "targetMs": 18548,
-        "skewMs": -998,
-        "speed": 1.0201,
+        "tvMs": 11948,
+        "targetMs": 12177,
+        "skewMs": -229,
+        "speed": 1.00426,
         "phase": "playing",
         "path": "key_event"
       }
@@ -100,10 +100,12 @@
       "pass": true,
       "detail": {
         "status": 200,
+        "resumed": true,
+        "resumeMs": 1213,
         "tvState": 3,
-        "tvMs": 32008,
-        "targetMs": 32031,
-        "skewMs": -23,
+        "tvMs": 31030,
+        "targetMs": 31048,
+        "skewMs": -18,
         "speed": 1
       }
     },
@@ -113,9 +115,9 @@
       "detail": {
         "status": 200,
         "tvState": 2,
-        "tvMs": 31908,
-        "targetMs": 32032,
-        "skewMs": -124,
+        "tvMs": 30956,
+        "targetMs": 31049,
+        "skewMs": -93,
         "speed": 0
       }
     },
@@ -130,7 +132,11 @@
     {
       "id": "TVR-B0 details offers Watch together for a rooms-enabled profile",
       "pass": false,
-      "detail": {}
+      "detail": {
+        "lastFocus": [
+          "Retry"
+        ]
+      }
     }
   ]
 }
