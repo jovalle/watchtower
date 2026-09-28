@@ -787,6 +787,70 @@ it("acknowledges source replacement before quality navigation and preserves room
   ).toBeLessThan(navigate.mock.invocationCallOrder[0]);
 });
 
+it("restores readiness when the room does not acknowledge a source replacement", async () => {
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "paused",
+    anchor: { positionMs: 0, effectiveAtMs: 0, rate: 1 },
+  });
+  vi.mocked(room.prepareSourceReplacement).mockResolvedValue(false);
+  renderPlayer(room, {
+    quality: { id: "original", label: "Original", isOriginal: true },
+    availableQualities: [
+      { id: "original", label: "Original", isOriginal: true },
+      { id: "720p-4", label: "720p", isOriginal: false },
+    ],
+  });
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "readyState", { configurable: true, value: HTMLMediaElement.HAVE_FUTURE_DATA });
+  fireEvent.canPlay(video);
+  await waitFor(() =>
+    expect(room.reportPresence).toHaveBeenLastCalledWith(expect.objectContaining({ ready: true }))
+  );
+  vi.mocked(room.reportPresence).mockClear();
+
+  fireEvent.click(screen.getByLabelText("Settings"));
+  fireEvent.click(screen.getByText("720p"));
+  await waitFor(() => expect(room.prepareSourceReplacement).toHaveBeenCalledOnce());
+  await act(async () => Promise.resolve());
+
+  expect(navigate).not.toHaveBeenCalled();
+  expect(room.observePresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, replacingSource: false })
+  );
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, replacingSource: false })
+  );
+});
+
+it("drops a pending coalesced seek when the room media generation changes", () => {
+  vi.useFakeTimers();
+  const room = controller(true);
+  const view = renderPlayer(room);
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+
+  const nextGeneration = controller(true, {
+    ...baseSnapshot,
+    mediaGeneration: baseSnapshot.mediaGeneration + 1,
+  });
+  view.rerender(
+    <VideoPlayer
+      src={`/api/plex/stream/42?session=${session}`}
+      title="Example"
+      ratingKey="42"
+      durationMs={100_000}
+      room={nextGeneration}
+    />
+  );
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+
+  expect(room.sendIntent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
+  expect(nextGeneration.sendIntent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
+});
+
 it("disables automatic intro and next actions but lets the host share Skip Intro", async () => {
   const room = controller(true);
   renderPlayer(room, {
