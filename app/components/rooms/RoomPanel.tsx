@@ -89,6 +89,19 @@ export function RoomPanel({
     return () => clearInterval(timer);
   }, [snapshot.nextCountdown]);
 
+  // Collapse while playing so the panel never sits over player menus; reopen when the room needs attention.
+  useEffect(() => {
+    setExpanded(snapshot.phase !== "playing");
+  }, [snapshot.phase]);
+
+  const status =
+    controller.status === "reconnecting"
+      ? "Reconnecting. Playback is paused."
+      : message ??
+        (snapshot.phase === "lobby"
+          ? "Waiting for everyone to get ready."
+          : `Room is ${snapshot.phase}.`);
+
   const copyInvite = async () => {
     if (!inviteUrl) return;
     try {
@@ -100,7 +113,7 @@ export function RoomPanel({
   };
 
   return (
-    <aside className="absolute right-3 top-3 z-[60] w-[min(24rem,calc(100vw-1.5rem))] rounded-md border border-white/20 bg-black/90 text-white shadow-xl">
+    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] rounded-md border border-white/20 bg-black/90 text-white shadow-xl">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -115,39 +128,48 @@ export function RoomPanel({
           <ChevronDown className="h-5 w-5" />
         )}
       </button>
+      <div aria-live="polite" className="min-h-5 px-3 pb-2 text-sm text-white/80">
+        {status}
+      </div>
+
+      {countdownSeconds !== null && (
+        <div className="mx-3 mb-3 rounded border border-mango/40 bg-mango/10 p-3 text-sm">
+          Next episode in <span aria-hidden="true">{countdownSeconds}s</span>
+          <span className="sr-only">a few seconds</span>
+          {controller.isHost && (
+            <button
+              type="button"
+              className="ml-3 min-h-11 underline"
+              onClick={() =>
+                void controller.sendIntent({
+                  type: "cancel-next",
+                  payload: {},
+                })
+              }
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+
+      {!self?.ready && controller.status === "connected" && (
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            onClick={onReady}
+            className="min-h-11 w-full rounded bg-mango px-3 font-semibold text-black"
+          >
+            {self?.error === "autoplay_blocked"
+              ? "Tap to start playback"
+              : "I'm ready"}
+          </button>
+        </div>
+      )}
 
       {expanded && (
-        <div className="max-h-[70vh] overflow-y-auto border-t border-white/10 p-3">
+        <div className="max-h-[calc(100vh-18rem)] overflow-y-auto border-t border-white/10 p-3">
           <p className="truncate text-sm font-semibold">{title}</p>
-          <div aria-live="polite" className="min-h-5 text-sm text-white/80">
-            {controller.status === "reconnecting"
-              ? "Reconnecting. Playback is paused."
-              : message ??
-                (snapshot.phase === "lobby"
-                  ? "Waiting for everyone to get ready."
-                  : `Room is ${snapshot.phase}.`)}
-          </div>
-
-          {countdownSeconds !== null && (
-            <div className="mt-3 rounded border border-mango/40 bg-mango/10 p-3 text-sm">
-              Next episode in <span aria-hidden="true">{countdownSeconds}s</span>
-              <span className="sr-only">a few seconds</span>
-              {controller.isHost && (
-                <button
-                  type="button"
-                  className="ml-3 min-h-11 underline"
-                  onClick={() =>
-                    void controller.sendIntent({
-                      type: "cancel-next",
-                      payload: {},
-                    })
-                  }
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          )}
 
           <ul className="mt-3 space-y-2" aria-label="Room members">
             {snapshot.participants.map((participant) => (
@@ -218,18 +240,6 @@ export function RoomPanel({
                 Also rotate invite link
               </button>
             </div>
-          )}
-
-          {!self?.ready && controller.status === "connected" && (
-            <button
-              type="button"
-              onClick={onReady}
-              className="mt-3 min-h-11 w-full rounded bg-mango px-3 font-semibold text-black"
-            >
-              {self?.error === "autoplay_blocked"
-                ? "Tap to start playback"
-                : "I'm ready"}
-            </button>
           )}
 
           {controller.isHost &&

@@ -560,7 +560,9 @@ export default function WatchPage() {
           onTakeover={() => void watchRoom.takeover()}
         />
       )}
-      {watchRoom.controller && (
+      {watchRoom.controller &&
+        watchRoom.state.status !== "ended" &&
+        watchRoom.state.status !== "error" && (
         <RoomPanel
           controller={watchRoom.controller}
           title={title}
