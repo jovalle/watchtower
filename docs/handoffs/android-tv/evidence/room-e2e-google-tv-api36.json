@@ -1,0 +1,233 @@
+{
+  "at": "2026-09-28T05:48:13.353Z",
+  "results": [
+    {
+      "id": "TVR-00 combined server advertises rooms",
+      "pass": true,
+      "detail": {
+        "features": {
+          "pairing": true,
+          "profiles": false,
+          "rooms": true
+        }
+      }
+    },
+    {
+      "id": "TVR-01 harness credential stored on the emulator",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-A0 web host creates a room",
+      "pass": true,
+      "detail": {
+        "status": 201
+      }
+    },
+    {
+      "id": "TVR-A1 web host registers a room-scoped playback session",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-A2 TV joins through a watchtower://join invite link",
+      "pass": true,
+      "detail": {
+        "participants": 2
+      }
+    },
+    {
+      "id": "TVR-A3 TV player claims readiness at the room target",
+      "pass": true,
+      "detail": {
+        "tv": {
+          "participantId": "f89c7acc-b8ed-4f2c-8de4-82d223925f61",
+          "displayName": "Test Owner",
+          "connected": true,
+          "ready": true,
+          "buffering": false,
+          "blocking": true,
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "TVR-A4 web host play accepted",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-A5 TV follows host play",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 7940,
+        "targetMs": 8130,
+        "skewMs": -190,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-A6 TV stays within 500 ms while playing (loopback)",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 13922,
+        "targetMs": 14171,
+        "skewMs": -249,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-A7 guest TV media key cannot pause the room",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 16988,
+        "targetMs": 17247,
+        "skewMs": -259,
+        "speed": 1,
+        "phase": "playing",
+        "path": "media_session"
+      }
+    },
+    {
+      "id": "TVR-A8 TV follows host seek",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "tvState": 3,
+        "tvMs": 30606,
+        "targetMs": 30619,
+        "skewMs": -13,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-A9 TV follows host pause",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "tvState": 2,
+        "tvMs": 30603,
+        "targetMs": 30620,
+        "skewMs": -17,
+        "speed": 0
+      }
+    },
+    {
+      "id": "TVR-A10 host End reaches the TV",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "messageShown": true
+      }
+    },
+    {
+      "id": "TVR-B0 details offers Watch together for a rooms-enabled profile",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-B1 TV host lobby shows a fragment-only invite link",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-B2 web guest joins the TV-hosted room",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-B3 a second TV identity (bearer) joins the same room",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-B4 presence cannot claim another device's playback session",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "ready": false
+      }
+    },
+    {
+      "id": "TVR-B5 native presence with its own playback session is accepted",
+      "pass": true,
+      "detail": {
+        "playbackStatus": 201,
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-B6 TV host player claims readiness",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-B7 TV host media key play becomes a room command",
+      "pass": true,
+      "detail": {
+        "phase": "playing",
+        "reason": "host_played",
+        "path": "media_session"
+      }
+    },
+    {
+      "id": "TVR-B8 the bearer participant receives the host's play over SSE",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-B9 TV host plays at the room target (loopback)",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 18739,
+        "targetMs": 18877,
+        "skewMs": -138,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-B10 guest transport command is rejected (not_host)",
+      "pass": true,
+      "detail": {
+        "status": 403,
+        "code": "not_host"
+      }
+    },
+    {
+      "id": "TVR-B11 TV host media key pause becomes a room command",
+      "pass": true,
+      "detail": {
+        "phase": "paused",
+        "reason": "host_paused",
+        "path": "media_session"
+      }
+    },
+    {
+      "id": "TVR-B12 signing the TV out ends its membership and transfers host",
+      "pass": true,
+      "detail": {
+        "status": 204,
+        "reason": "host_left"
+      }
+    },
+    {
+      "id": "TVR-B13 the signed-out TV stops room playback",
+      "pass": true,
+      "detail": {
+        "tvState": null
+      }
+    }
+  ]
+}
