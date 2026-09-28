@@ -314,10 +314,16 @@ async function uiXml(): Promise<string> {
 }
 
 /** TV components react to D-pad keys, not touch: move focus until the focused control shows `label`, then select it. */
-async function focusAndSelect(label: string, key: string, timeoutMs: number): Promise<boolean> {
+async function focusAndSelect(label: string, key: string, timeoutMs: number): Promise<{ selected: boolean; lastFocus: string[] }> {
   const deadline = Date.now() + timeoutMs;
+  let lastFocus: string[] = [];
   for (let moves = 0; Date.now() < deadline && moves < 12;) {
-    const xml = await uiXml().catch(() => "");
+    const xml = await uiXml().catch(() => null);
+    if (!xml || !xml.includes("<hierarchy")) {
+      // The dump failed (e.g. UI not idle yet); never move focus blindly.
+      await sleep(1_000);
+      continue;
+    }
     const focused = /focused="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
     if (!focused) {
       // Nothing focused yet: the first D-pad key assigns focus.
@@ -330,16 +336,17 @@ async function focusAndSelect(label: string, key: string, timeoutMs: number): Pr
     const labels = [...xml.matchAll(/text="([^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)]
       .filter((match) => Number(match[2]) >= x1 && Number(match[3]) >= y1 && Number(match[4]) <= x2 && Number(match[5]) <= y2)
       .map((match) => match[1]);
+    lastFocus = labels;
     if (TRACE) console.log(`TRACE focus ${JSON.stringify(labels)} [${x1},${y1}][${x2},${y2}]`);
     if (labels.includes(label)) {
       await adb("shell", "input", "keyevent", "KEYCODE_DPAD_CENTER");
-      return true;
+      return { selected: true, lastFocus };
     }
     await adb("shell", "input", "keyevent", key);
     moves += 1;
     await sleep(600);
   }
-  return false;
+  return { selected: false, lastFocus };
 }
 
 async function uiMatch(pattern: RegExp, timeoutMs: number): Promise<RegExpExecArray | null> {
@@ -419,9 +426,13 @@ async function webHostTvGuest(cookie: string) {
   record("TVR-A7 guest TV media key cannot pause the room", host.control.revision === revision && host.control.phase === "playing" && guestKey.tvState === 3, { ...guestKey, phase: host.control.phase, path: guestPath });
 
   const seek = await host.command("seek", { positionMs: 30_000 });
-  await sleep(4_000);
+  // A seek re-prepares the room (every blocking participant must be ready again), so wait for it to resume.
+  const seekAt = Date.now();
+  const resumed = await host.waitFor((member) => member.control.phase === "playing" && member.control.anchor.positionMs >= 30_000, 20_000);
+  const resumeMs = Date.now() - seekAt;
+  await sleep(2_000);
   const afterSeek = await skew(host);
-  record("TVR-A8 TV follows host seek", seek.status === 200 && afterSeek.tvState === 3 && Math.abs(afterSeek.skewMs ?? Infinity) < 750, { status: seek.status, ...afterSeek });
+  record("TVR-A8 TV follows host seek", seek.status === 200 && resumed && afterSeek.tvState === 3 && Math.abs(afterSeek.skewMs ?? Infinity) < 750, { status: seek.status, resumed, resumeMs, ...afterSeek });
 
   const pause = await host.command("pause");
   await sleep(3_000);
@@ -439,9 +450,10 @@ async function webHostTvGuest(cookie: string) {
 
 async function tvHostWithGuests(cookie: string, denToken: string, tvToken: string) {
   await launch("watchtower://media/1?server=fake-machine&action=details");
-  await uiMatch(/text="Start over"/, 30_000);
-  const tapped = await focusAndSelect("Watch together", "KEYCODE_DPAD_RIGHT", 30_000);
-  record("TVR-B0 details offers Watch together for a rooms-enabled profile", tapped);
+  await uiMatch(/text="Start over"/, 45_000);
+  const selection = await focusAndSelect("Watch together", "KEYCODE_DPAD_RIGHT", 45_000);
+  const tapped = selection.selected;
+  record("TVR-B0 details offers Watch together for a rooms-enabled profile", tapped, { lastFocus: selection.lastFocus });
   if (!tapped) return;
   const invite = await uiMatch(/#i=([A-Za-z0-9_-]{43})/, 20_000);
   record("TVR-B1 TV host lobby shows a fragment-only invite link", invite !== null && !/[?&]i=/.test(invite[0]));
