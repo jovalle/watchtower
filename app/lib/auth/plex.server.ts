@@ -196,30 +196,28 @@ export async function listOwnedServers(token: string): Promise<OwnedServer[]> {
 /**
  * Result from checking user's server access via plex.tv resources.
  */
-interface UserServerAccessResult {
-  hasAccess: boolean;
-  serverName?: string;
-  accessToken?: string; // Server-specific token for shared users
-  isOwner?: boolean; // Whether this user owns the server
-}
+export type DetailedServerAccessResult =
+  | {
+      status: "granted";
+      serverName: string;
+      serverToken: string;
+      isOwner: boolean;
+    }
+  | { status: "denied" }
+  | { status: "unavailable" };
 
 /**
  * Check if a user has access to a specific server via plex.tv resources API.
  * This works for both server owners and shared users.
  * Returns the server-specific access token which is needed for API calls.
  */
-async function checkUserServerAccess(
+async function checkUserServerAccessDetailed(
   token: string,
   targetMachineId: string
-): Promise<UserServerAccessResult> {
+): Promise<DetailedServerAccessResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PLEX_REQUEST_TIMEOUT);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      PLEX_REQUEST_TIMEOUT
-    );
-
-    // Query plex.tv for user's available resources (servers)
     const response = await fetch(
       `${PLEX_TV_URL}/api/v2/resources?includeHttps=1&includeRelay=1`,
       {
@@ -231,41 +229,53 @@ async function checkUserServerAccess(
         signal: controller.signal,
       }
     );
-
-    clearTimeout(timeoutId);
-
     if (!response.ok) {
-      console.error(
-        `[Server Access] Failed to get user resources: ${response.status}`
-      );
-      return { hasAccess: false };
+      return response.status === 401 || response.status === 403
+        ? { status: "denied" }
+        : { status: "unavailable" };
     }
-
-    const resources = await response.json();
-
-    // Find if user has access to the target server
+    const resources: unknown = await response.json();
+    if (!Array.isArray(resources)) return { status: "unavailable" };
     for (const resource of resources) {
       if (
+        resource &&
+        typeof resource === "object" &&
+        "provides" in resource &&
+        "clientIdentifier" in resource &&
         resource.provides === "server" &&
         resource.clientIdentifier === targetMachineId
       ) {
-        console.log(
-          `[Server Access] Found server: ${resource.name} (owned: ${resource.owned})`
-        );
+        if (
+          !("name" in resource) ||
+          typeof resource.name !== "string" ||
+          !("accessToken" in resource) ||
+          typeof resource.accessToken !== "string" ||
+          !resource.accessToken
+        ) {
+          return { status: "unavailable" };
+        }
         return {
-          hasAccess: true,
+          status: "granted",
           serverName: resource.name,
-          accessToken: resource.accessToken || token, // Use server token if available, else user token
+          serverToken: resource.accessToken,
           isOwner: Boolean(resource.owned),
         };
       }
     }
-
-    return { hasAccess: false };
-  } catch (error) {
-    console.error(`[Server Access] Error checking user resources:`, error);
-    return { hasAccess: false };
+    return { status: "denied" };
+  } catch {
+    return { status: "unavailable" };
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+export async function checkServerAccessDetailed(
+  token: string
+): Promise<DetailedServerAccessResult> {
+  const machineId = getServerConfig()?.machineIdentifier;
+  if (!machineId) return { status: "denied" };
+  return checkUserServerAccessDetailed(token, machineId);
 }
 
 /**
@@ -291,28 +301,18 @@ export async function verifyServerAccess(
         "No Plex server is configured yet. The server owner must complete setup.",
     };
   }
-  console.log(`[Server Access] Target server machine ID: ${machineId}`);
+  const accessCheck = await checkServerAccessDetailed(token);
 
-  // Check if user has this server in their plex.tv resources
-  const accessCheck = await checkUserServerAccess(token, machineId);
-
-  if (!accessCheck.hasAccess) {
-    console.log(
-      `[Server Access] DENIED - User does not have access to this server`
-    );
+  if (accessCheck.status !== "granted") {
     return {
       hasAccess: false,
       error: "You do not have access to this Plex server.",
     };
   }
-
-  console.log(
-    `[Server Access] GRANTED - ${accessCheck.serverName} (owner: ${accessCheck.isOwner})`
-  );
   return {
     hasAccess: true,
     serverName: accessCheck.serverName,
-    serverToken: accessCheck.accessToken,
+    serverToken: accessCheck.serverToken,
     isOwner: accessCheck.isOwner,
   };
 }

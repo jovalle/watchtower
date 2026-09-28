@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remi
 import { json } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { Check, Link2, Trash2, X } from "lucide-react";
-import { getPlexUser, verifyServerAccess } from "~/lib/auth/plex.server";
+import { checkServerAccessDetailed, getPlexUser } from "~/lib/auth/plex.server";
 import { getPlexToken } from "~/lib/auth/session.server";
 import { getServerConfig } from "~/lib/config/server-config.server";
 import { listAccountDevices, revokeDeviceSession, toDeviceSummary } from "~/lib/native/device-store.server";
@@ -70,8 +70,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
       return json({ ok: true, message: "Link request denied.", authorization: null });
     }
     if (intent !== "approve") throw new NativeError(400, "invalid_request", "Unknown action.");
-    const access = await verifyServerAccess(plexToken);
-    if (!access.hasAccess || !access.serverToken) {
+    const access = await checkServerAccessDetailed(plexToken);
+    if (access.status === "unavailable") {
+      throw new NativeError(503, "upstream_unavailable", "Plex is temporarily unavailable. Try again.", true, 60);
+    }
+    if (access.status === "denied") {
       throw new NativeError(403, "forbidden", "You no longer have access to this Plex server.");
     }
     const approved = approveAuthorization(code, {
@@ -113,7 +116,7 @@ export default function LinkDevicePage() {
           <input type="hidden" name="intent" value="lookup" />
           <label htmlFor="code" className="sr-only">TV link code</label>
           <input id="code" name="code" defaultValue={data.code} autoComplete="one-time-code" maxLength={9} required className="min-w-0 flex-1 rounded-md border border-border-subtle bg-background-elevated px-4 py-3 uppercase text-foreground-primary" />
-          <button type="submit" className="rounded-md bg-accent-primary px-5 py-3 font-medium text-white">Continue</button>
+          <button type="submit" className="rounded-md bg-accent-primary px-5 py-3 font-medium text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2">Continue</button>
         </Form>
         {actionData?.message && <p role="status" className="mt-3 text-sm text-foreground-muted">{actionData.message}</p>}
         {authorization && (
@@ -132,7 +135,7 @@ export default function LinkDevicePage() {
                   <input type="hidden" name="csrf" value={data.csrf} />
                   <input type="hidden" name="intent" value={intent} />
                   <input type="hidden" name="code" value={authorization.code} />
-                  <button type="submit" className={intent === "approve" ? "flex items-center gap-2 rounded-md bg-accent-primary px-4 py-2 text-white" : "flex items-center gap-2 rounded-md border border-border-subtle px-4 py-2 text-foreground-primary"}>
+                  <button type="submit" className={intent === "approve" ? "flex items-center gap-2 rounded-md bg-accent-primary px-4 py-2 text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2" : "flex items-center gap-2 rounded-md border border-border-subtle px-4 py-2 text-foreground-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2"}>
                     {intent === "approve" ? <Check aria-hidden className="h-4 w-4" /> : <X aria-hidden className="h-4 w-4" />}
                     {intent === "approve" ? "Approve" : "Deny"}
                   </button>
@@ -148,7 +151,7 @@ export default function LinkDevicePage() {
           <ul className="divide-y divide-border-subtle">
             {data.devices.map((device) => (
               <li key={device.deviceSessionId} className="flex items-center justify-between gap-4 py-4">
-                <div><p className="font-medium text-foreground-primary">{device.name}</p><p className="text-sm text-foreground-muted">{device.model ?? "Android TV"} · linked {new Date(device.createdAtMs).toLocaleDateString()}</p></div>
+                <div><p className="font-medium text-foreground-primary">{device.name}</p><p className="text-sm text-foreground-muted">{device.model ?? "Android TV"} · linked {new Date(device.createdAtMs).toLocaleDateString()} · last seen {device.lastSeenAtMs ? new Date(device.lastSeenAtMs).toLocaleString() : "never"} · expires {new Date(device.expiresAtMs).toLocaleDateString()}</p></div>
                 <Form method="post">
                   <input type="hidden" name="csrf" value={data.csrf} /><input type="hidden" name="intent" value="revoke" /><input type="hidden" name="deviceSessionId" value={device.deviceSessionId} />
                   <button type="submit" aria-label={`Revoke ${device.name}`} className="rounded-md p-2 text-red-500 hover:bg-red-500/10"><Trash2 aria-hidden className="h-5 w-5" /></button>

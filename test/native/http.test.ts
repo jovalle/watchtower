@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { NativeError, nativeErrorResponse, readJsonObject } from "~/lib/native/http.server";
+import { NativeError, nativeErrorResponse, nativeMethodNotAllowed, readJsonObject } from "~/lib/native/http.server";
+import { loader as nativeNotFound } from "~/routes/api.v1.$";
 
 describe("native HTTP boundaries", () => {
   it("rejects non-JSON and oversized bodies with the contract envelope", async () => {
@@ -23,6 +24,26 @@ describe("native HTTP boundaries", () => {
     expect(response.headers.get("Retry-After")).toBe("5");
     expect(await response.json()).toEqual({
       error: { code: "slow_down", message: "Polling too quickly.", retryable: false, requestId: "request-1" },
+    });
+  });
+
+  it("returns native JSON envelopes for unsupported and unknown routes", async () => {
+    const unsupported = await nativeMethodNotAllowed({
+      request: new Request("http://test/api/v1/playback"),
+    });
+    expect(unsupported.status).toBe(405);
+    expect(await unsupported.json()).toMatchObject({
+      error: { code: "method_not_allowed", retryable: false },
+    });
+
+    const missing = await nativeNotFound({
+      request: new Request("http://test/api/v1/unknown"),
+      params: { "*": "unknown" },
+      context: {},
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      error: { code: "not_found", retryable: false },
     });
   });
 });

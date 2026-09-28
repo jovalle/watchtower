@@ -1,3 +1,5 @@
+
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { nativeJson, readJsonObject, requireMethod, withNativeErrors } from "~/lib/native/http.server";
 import { recheckPrincipal, requireNativePrincipal } from "~/lib/native/principal.server";

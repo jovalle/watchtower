@@ -3,7 +3,14 @@ import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { resetNativeCryptoForTests } from "~/lib/native/crypto.server";
 import { resetDeviceStoreForTests } from "~/lib/native/device-store.server";
-import { approveAuthorization, createAuthorization, parseCreateAuthorization, pollAuthorization, resetPairingForTests } from "~/lib/native/pairing.server";
+import {
+  approveAuthorization,
+  createAuthorization,
+  lookupAuthorization,
+  parseCreateAuthorization,
+  pollAuthorization,
+  resetPairingForTests,
+} from "~/lib/native/pairing.server";
 import { resetNativeRateLimitsForTests } from "~/lib/native/rate-limit.server";
 
 const dataPath = path.resolve("tmp/native-pairing-test");
@@ -39,6 +46,16 @@ afterEach(async () => {
 });
 
 describe("native pairing", () => {
+  it("does not reveal unknown or incorrect polling secrets", async () => {
+    await expect(
+      pollAuthorization(`wtp_${"A".repeat(43)}`),
+    ).rejects.toMatchObject({ status: 404, code: "authorization_not_found" });
+    await expect(pollAuthorization("not-a-secret")).rejects.toMatchObject({
+      status: 404,
+      code: "authorization_not_found",
+    });
+  });
+
   it("validates create input and slows fast polling", async () => {
     expect(() => parseCreateAuthorization({ deviceName: "TV", platform: "phone", model: null, appVersion: null }))
       .toThrowError(expect.objectContaining({ code: "invalid_request" }));
@@ -80,5 +97,51 @@ describe("native pairing", () => {
     );
     resetPairingForTests();
     await expect(pollAuthorization(created.pollingSecret)).rejects.toMatchObject({ code: "authorization_not_found" });
+  });
+
+  it("returns terminal states once and prunes expired authorizations", async () => {
+    const denied = createAuthorization(
+      { deviceName: "Denied", platform: "android-tv", model: null, appVersion: null },
+      "https://watchtower.test",
+      "denied-ip",
+    );
+    const expired = createAuthorization(
+      { deviceName: "Expired", platform: "android-tv", model: null, appVersion: null },
+      "https://watchtower.test",
+      "expired-ip",
+    );
+    const { denyAuthorization } = await import("~/lib/native/pairing.server");
+    expect(denyAuthorization(denied.userCode)).toBe(true);
+    await expect(pollAuthorization(denied.pollingSecret)).resolves.toEqual({ status: "denied" });
+    await expect(pollAuthorization(denied.pollingSecret)).rejects.toMatchObject({ code: "authorization_not_found" });
+    vi.advanceTimersByTime(10 * 60 * 1000 + 1);
+    expect(lookupAuthorization(expired.userCode)).toBeNull();
+    await expect(pollAuthorization(expired.pollingSecret)).resolves.toEqual({ status: "expired" });
+    await expect(pollAuthorization(expired.pollingSecret)).rejects.toMatchObject({ code: "authorization_not_found" });
+  });
+
+  it("rejects creation when all tracked slots are live and frees expired slots", () => {
+    for (let index = 0; index < 200; index += 1) {
+      createAuthorization(
+        { deviceName: `TV ${index}`, platform: "android-tv", model: null, appVersion: null },
+        "https://watchtower.test",
+        `client-${index}`,
+      );
+    }
+    expect(() =>
+      createAuthorization(
+        { deviceName: "Overflow", platform: "android-tv", model: null, appVersion: null },
+        "https://watchtower.test",
+        "overflow-client",
+      ),
+    ).toThrowError(expect.objectContaining({ status: 503, retryable: true }));
+    vi.advanceTimersByTime(10 * 60 * 1000 + 1);
+    expect(() =>
+      createAuthorization(
+        { deviceName: "After prune", platform: "android-tv", model: null, appVersion: null },
+        "https://watchtower.test",
+        "after-prune-client",
+      ),
+    ).not.toThrow();
   });
 });

@@ -1,20 +1,20 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import type {
   CreateDeviceAuthorizationRequest,
   DeviceAuthorizationResponse,
-  MeResponse,
   PollDeviceAuthorizationResponse,
 } from "./contract";
 import { createPollingSecret, openWithKey, sealWithKey, sha256 } from "./crypto.server";
 import { createDeviceSession, type NewDeviceSession } from "./device-store.server";
 import { NativeError } from "./http.server";
 import { enforceRateLimit } from "./rate-limit.server";
+import { meResponse } from "./resources.server";
 
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ23456789";
 const EXPIRY_MS = 10 * 60 * 1000;
 const INTERVAL_MS = 5 * 1000;
 const REPLAY_MS = 60 * 1000;
-const MAX_PENDING = 200;
+const MAX_TRACKED = 200;
 
 type PairingState = "pending" | "approved" | "denied" | "claiming" | "claimed";
 
@@ -43,10 +43,29 @@ const byPollingHash = new Map<string, PairingRecord>();
 function randomCode(): string {
   let code = "";
   do {
-    const bytes = randomBytes(8);
-    code = [...bytes].map((value) => CODE_ALPHABET[value % CODE_ALPHABET.length]).join("");
+    code = Array.from(
+      { length: 8 },
+      () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)],
+    ).join("");
   } while (byCode.has(code));
   return code;
+}
+
+function removeRecord(record: PairingRecord): void {
+  byCode.delete(record.code);
+  byPollingHash.delete(record.pollingHash);
+}
+
+function prunePairings(now: number, preservePollingHash?: string): void {
+  for (const record of byPollingHash.values()) {
+    if (record.pollingHash === preservePollingHash) continue;
+    if (
+      record.expiresAtMs <= now ||
+      (record.state === "claimed" && (record.replayUntilMs ?? 0) < now)
+    ) {
+      removeRecord(record);
+    }
+  }
 }
 
 function sanitizeString(value: unknown, field: string, nullable = false): string | null {
@@ -76,10 +95,8 @@ export function createAuthorization(
 ): DeviceAuthorizationResponse {
   const now = Date.now();
   enforceRateLimit("pair-create", clientIp, 10, EXPIRY_MS, now);
-  const pending = [...byCode.values()].filter(
-    (record) => record.state === "pending" && record.expiresAtMs > now,
-  );
-  if (pending.length >= MAX_PENDING) {
+  prunePairings(now);
+  if (byPollingHash.size >= MAX_TRACKED) {
     throw new NativeError(503, "upstream_unavailable", "Pairing is temporarily unavailable.", true, 30);
   }
   const code = randomCode();
@@ -131,23 +148,6 @@ export function denyAuthorization(code: string): boolean {
   return true;
 }
 
-function meFor(record: Awaited<ReturnType<typeof createDeviceSession>>["record"]): MeResponse {
-  return {
-    deviceSessionId: record.deviceSessionId,
-    identityVersion: record.identityVersion,
-    expiresAtMs: record.expiresAtMs,
-    server: { machineId: record.serverMachineId, name: record.serverName },
-    account: record.account,
-    profile: record.profile,
-    features: {
-      profiles: process.env.WATCHTOWER_PLEX_HOME_PROFILES === "1",
-      requests: true,
-      discovery: true,
-      rooms: false,
-    },
-  };
-}
-
 async function claimApproved(record: PairingRecord): Promise<PollDeviceAuthorizationResponse> {
   const approved = JSON.parse(
     openWithKey(record.approval!, record.approvalKey!, `pairing:${record.pollingHash}`),
@@ -163,7 +163,16 @@ async function claimApproved(record: PairingRecord): Promise<PollDeviceAuthoriza
       expiresInMs: created.record.expiresAtMs - Date.now(),
       identityVersion: created.record.identityVersion,
     },
-    me: meFor(created.record),
+    me: await meResponse(
+      {
+        deviceSessionId: created.record.deviceSessionId,
+        identityVersion: created.record.identityVersion,
+        serverMachineId: created.record.serverMachineId,
+        userId: created.record.profile.userId,
+        profile: created.record.profile,
+      },
+      created.record,
+    ),
   };
   const key = randomBytes(32);
   record.replayKey = key;
@@ -184,8 +193,10 @@ export async function pollAuthorization(pollingSecret: string): Promise<PollDevi
   if (!/^wtp_[A-Za-z0-9_-]{43}$/.test(pollingSecret)) {
     throw new NativeError(404, "authorization_not_found", "Authorization not found.");
   }
-  const record = byPollingHash.get(sha256(pollingSecret));
   const now = Date.now();
+  const pollingHash = sha256(pollingSecret);
+  prunePairings(now, pollingHash);
+  const record = byPollingHash.get(pollingHash);
   if (!record) throw new NativeError(404, "authorization_not_found", "Authorization not found.");
   if (record.state === "claimed") {
     if (record.replay && record.replayKey && (record.replayUntilMs ?? 0) >= now) {
@@ -213,7 +224,17 @@ export async function pollAuthorization(pollingSecret: string): Promise<PollDevi
     return { status: "pending", intervalMs: INTERVAL_MS, expiresInMs: record.expiresAtMs - now };
   }
   record.state = "claiming";
-  record.claim = claimApproved(record);
+  record.claim = claimApproved(record).catch(() => {
+    record.state = "approved";
+    record.claim = undefined;
+    throw new NativeError(
+      503,
+      "upstream_unavailable",
+      "The device session could not be created. Retry polling.",
+      true,
+      5,
+    );
+  });
   return record.claim;
 }
 

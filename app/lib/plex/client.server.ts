@@ -113,13 +113,19 @@ export class PlexClient {
   private readonly serverUrl: string;
   private readonly token: string;
   private readonly clientId: string;
+  private readonly onUnauthorized?: () => void | Promise<void>;
   private readonly providerLibraries = new Map<string, Promise<PlexResult<PlexMetadata[]>>>();
 
-  constructor(config: PlexServerConfig) {
+  constructor(
+    config: PlexServerConfig & {
+      onUnauthorized?: () => void | Promise<void>;
+    },
+  ) {
     // Ensure no trailing slash on server URL
     this.serverUrl = config.serverUrl.replace(/\/$/, "");
     this.token = config.token;
     this.clientId = config.clientId;
+    this.onUnauthorized = config.onUnauthorized;
   }
 
   /**
@@ -161,6 +167,7 @@ export class PlexClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 401) await this.onUnauthorized?.();
         return {
           success: false,
           error: {
@@ -682,8 +689,42 @@ export class PlexClient {
   async getTranscodeDecision(streamUrl: string): Promise<PlexResult<{ generalDecisionCode: number; videoDecision?: string; audioDecision?: string; subtitleDecision?: string }>> {
     const url = new URL(streamUrl);
     url.pathname = "/video/:/transcode/universal/decision";
-    const result = await this.request<{ MediaContainer: { generalDecisionCode: number; videoDecision?: string; audioDecision?: string; subtitleDecision?: string } }>(`${url.pathname}${url.search}`);
-    return result.success ? { success: true, data: result.data.MediaContainer } : result;
+    const result = await this.request<{
+      MediaContainer?: {
+        generalDecisionCode?: number | string;
+        videoDecision?: string;
+        audioDecision?: string;
+        subtitleDecision?: string;
+        Metadata?: Array<{
+          Media?: Array<{
+            Part?: Array<{
+              Stream?: Array<{
+                streamType?: number | string;
+                decision?: string;
+              }>;
+            }>;
+          }>;
+        }>;
+      };
+    }>(`${url.pathname}${url.search}`);
+    if (!result.success) return result;
+    const container = result.data?.MediaContainer ?? {};
+    const streams = container.Metadata?.[0]?.Media?.[0]?.Part?.[0]?.Stream;
+    const streamDecision = (streamType: number): string | undefined =>
+      Array.isArray(streams)
+        ? streams.find((stream) => Number(stream?.streamType) === streamType)
+            ?.decision
+        : undefined;
+    const decisionCode = Number(container.generalDecisionCode);
+    return {
+      success: true,
+      data: {
+        generalDecisionCode: Number.isFinite(decisionCode) ? decisionCode : 0,
+        videoDecision: streamDecision(1) ?? container.videoDecision,
+        audioDecision: streamDecision(2) ?? container.audioDecision,
+        subtitleDecision: streamDecision(3) ?? container.subtitleDecision,
+      },
+    };
   }
 
   /**
@@ -708,6 +749,7 @@ export class PlexClient {
         }
       );
       if (response.ok) return { success: true, data: undefined };
+      if (response.status === 401) await this.onUnauthorized?.();
       return {
         success: false,
         error: {
