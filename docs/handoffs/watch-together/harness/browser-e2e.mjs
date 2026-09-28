@@ -144,7 +144,9 @@ export async function run({ server, startServer, waitForServer }) {
       await A.page.getByRole("button", { name: "Start", exact: true }).click();
       const started = await until(() => bothPlaying(A, B), 10000, "both playing");
       pipelines = [started.value.x.pipeline, started.value.y.pipeline];
-      record("WT-05 coordinated start", before.every((m) => m.paused), { pausedBeforeStart: before.map((m) => m.paused), msToBothPlaying: started.ms, pipelines });
+      // Started from the beginning: a lobby wait must not be added to the start position.
+      const startPositionS = +started.value.x.t.toFixed(2);
+      record("WT-05 coordinated start", before.every((m) => m.paused) && startPositionS < 3, { pausedBeforeStart: before.map((m) => m.paused), msToBothPlaying: started.ms, startPositionS, pipelines });
     });
 
     await step("WT-07 steady-state skew", async () => {
@@ -211,9 +213,12 @@ export async function run({ server, startServer, waitForServer }) {
       await sleep(5000);
       const stillPaused = (await media(B.page)).paused && (await media(A.page)).paused;
       const pauses = commands.filter((command) => command.type === "pause").length;
+      const heldAt = (await media(A.page)).t;
       await A.page.keyboard.press("Space");
       await until(() => bothPlaying(A, B), 15000, "resumed by host");
-      record("WT-09 blocking member buffering pauses the room once; host resumes", stillPaused, { msToGroupPause: paused.ms, memberSeesBlockingBuffering: /Buffering - blocking/.test(reason), noAutoResumeAfterReady: stillPaused, hostPauseCommandsDuringBuffering: pauses });
+      // Resuming continues from the held position; the paused time must not be skipped.
+      const resumeJumpS = +((await media(A.page)).t - heldAt).toFixed(2);
+      record("WT-09 blocking member buffering pauses the room once; host resumes", stillPaused && resumeJumpS < 2.5, { msToGroupPause: paused.ms, memberSeesBlockingBuffering: /Buffering - blocking/.test(reason), noAutoResumeAfterReady: stillPaused, resumeJumpS, hostPauseCommandsDuringBuffering: pauses });
     });
 
     await step("WT-10 member offline: reconnecting, local pause, recovery", async () => {
