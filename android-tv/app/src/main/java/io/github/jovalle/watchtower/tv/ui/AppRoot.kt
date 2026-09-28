@@ -3,6 +3,7 @@ package io.github.jovalle.watchtower.tv.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -265,7 +266,7 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
 }
 
 @Composable
-private fun NavigationRail(
+internal fun NavigationRail(
     expanded: Boolean,
     currentRoute: String?,
     libraries: List<io.github.jovalle.watchtower.tv.api.LibrarySection>,
@@ -274,7 +275,7 @@ private fun NavigationRail(
 ) {
     Column(
         Modifier
-            .fillMaxSize()
+            .fillMaxHeight()
             .width(if (expanded) 250.dp else 82.dp)
             .background(Color(0xF2111111))
             .padding(horizontal = 10.dp, vertical = 24.dp),
