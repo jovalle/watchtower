@@ -251,6 +251,51 @@ describe("commands", () => {
   });
 });
 
+describe("presence", () => {
+  it("resends the latest report after a throttle instead of reconnecting", async () => {
+    vi.useFakeTimers();
+    const bodies: Array<{ ready: boolean }> = [];
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({ error: { code: "rate_limited", message: "Slow down" } }),
+          { status: 429, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ack: { presenceSequence: 1, epoch: playing.epoch, serverNowMs: 1, ignored: false },
+          snapshot: playing,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+    const report = {
+      playbackSessionId: null,
+      positionMs: 1000,
+      buffering: false,
+      replacingSource: false,
+      error: null,
+    };
+
+    await expect(client.reportPresence({ ...report, ready: false })).resolves.toBe(false);
+    client.observePresence({ ...report, ready: true });
+    expect(client.getState().status).toBe("connected");
+    expect(FakeEventSource.instances).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(bodies.map((body) => body.ready)).toEqual([false, true]);
+    expect(client.getState().status).toBe("connected");
+    client.stop();
+  });
+});
+
 it("reuses the complete create body when a later retry uses the same request ID", async () => {
   const requestId = "77777777-7777-4777-8777-777777777777";
   const postBodies: string[] = [];
