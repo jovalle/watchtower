@@ -4,7 +4,7 @@ import { action } from "~/routes/api.plex.scrobble";
 
 vi.mock("~/lib/auth/session.server", () => ({ requireServerToken: async () => "user-token" }));
 vi.mock("~/lib/auth/user.server", () => ({ getCurrentUser: async () => null }));
-vi.mock("~/lib/env.server", () => ({ env: { PLEX_SERVER_URL: "http://plex.test:32400", PLEX_CLIENT_ID: "wt" } }));
+vi.mock("~/lib/env.server", () => ({ env: { PLEX_SERVER_URL: "http://plex.test:32400", PLEX_CLIENT_ID: "wt", SESSION_SECRET: "test-secret", SECURE_COOKIES: false } }));
 afterEach(() => vi.unstubAllGlobals());
 
 it.each([["?t=0", 0], ["", 125], ["?t=5000", 5], ["?t=broken", 125], ["?t=-1", 125], ["?t=5junk", 125]])(
