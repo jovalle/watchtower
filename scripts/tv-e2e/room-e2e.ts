@@ -266,7 +266,19 @@ async function adb(...args: string[]) {
 }
 
 const key = (code: string) => adb("shell", "input", "keyevent", code);
-const mediaKey = (action: string) => adb("shell", "cmd", "media_session", "dispatch", action);
+/**
+ * Sends a media key through the system media-session dispatcher (reaches the MediaSession, bypassing the
+ * activity). API 31's `cmd media_session dispatch` rejects shell callers, so fall back to a key event.
+ */
+async function mediaKey(action: "play" | "pause"): Promise<"media_session" | "key_event"> {
+  try {
+    await adb("shell", "cmd", "media_session", "dispatch", action);
+    return "media_session";
+  } catch {
+    await key(action === "play" ? "KEYCODE_MEDIA_PLAY" : "KEYCODE_MEDIA_PAUSE");
+    return "key_event";
+  }
+}
 
 /** The TV's MediaSession PlaybackState, extrapolated to the device's current elapsed realtime. */
 async function tvPlayback(): Promise<{ state: number; positionMs: number; speed: number } | null> {
@@ -397,10 +409,10 @@ async function webHostTvGuest(cookie: string) {
   record("TVR-A6 TV stays within 500 ms while playing (loopback)", steady.tvState === 3 && Math.abs(steady.skewMs ?? Infinity) < 500, steady);
 
   const revision = host.control.revision;
-  await mediaKey("pause");
+  const guestPath = await mediaKey("pause");
   await sleep(3_000);
   const guestKey = await skew(host);
-  record("TVR-A7 guest TV media key cannot pause the room", host.control.revision === revision && host.control.phase === "playing" && guestKey.tvState === 3, { ...guestKey, phase: host.control.phase });
+  record("TVR-A7 guest TV media key cannot pause the room", host.control.revision === revision && host.control.phase === "playing" && guestKey.tvState === 3, { ...guestKey, phase: host.control.phase, path: guestPath });
 
   const seek = await host.command("seek", { positionMs: 30_000 });
   await sleep(4_000);
@@ -466,9 +478,9 @@ async function tvHostWithGuests(cookie: string, denToken: string, tvToken: strin
   const hostReady = await guest.waitFor((member) => member.presenceView.participants.find((participant: Json) => participant.participantId === tvParticipantId)?.ready === true, 60_000);
   record("TVR-B6 TV host player claims readiness", hostReady);
 
-  await mediaKey("play");
+  const playPath = await mediaKey("play");
   const playing = await guest.waitFor((member) => member.control.phase === "playing", 10_000);
-  record("TVR-B7 TV host MediaSession play becomes a room command", playing && guest.control.reason === "host_played", { phase: guest.control.phase, reason: guest.control.reason });
+  record("TVR-B7 TV host media key play becomes a room command", playing && guest.control.reason === "host_played", { phase: guest.control.phase, reason: guest.control.reason, path: playPath });
   const denPlaying = denMember ? await denMember.waitFor((member) => member.control.phase === "playing", 5_000) : false;
   record("TVR-B8 the bearer participant receives the host's play over SSE", denPlaying);
   await sleep(4_000);
@@ -478,9 +490,9 @@ async function tvHostWithGuests(cookie: string, denToken: string, tvToken: strin
   const guestPause = await guest.command("pause");
   record("TVR-B10 guest transport command is rejected (not_host)", guestPause.status === 403 && guestPause.json?.error?.code === "not_host", { status: guestPause.status, code: guestPause.json?.error?.code });
 
-  await mediaKey("pause");
+  const pausePath = await mediaKey("pause");
   const paused = await guest.waitFor((member) => member.control.phase === "paused" && member.control.reason === "host_paused", 10_000);
-  record("TVR-B11 TV host MediaSession pause becomes a room command", paused, { phase: guest.control.phase, reason: guest.control.reason });
+  record("TVR-B11 TV host media key pause becomes a room command", paused, { phase: guest.control.phase, reason: guest.control.reason, path: pausePath });
 
   const revoked = await bearerClient(tvToken).del("/api/v1/session");
   const transferred = await guest.waitFor((member) => member.control.hostParticipantId !== tvParticipantId, 15_000);
