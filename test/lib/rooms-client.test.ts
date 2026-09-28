@@ -169,6 +169,86 @@ describe("commands", () => {
     expect(client.getState().snapshot?.revision).toBe(playing.revision);
     expect(client.getState().lastErrorCode).toBe("stale_revision");
   });
+
+  it.each([
+    [403, "not_host"],
+    [404, "not_found"],
+    [429, "rate_limited"],
+    [503, "upstream_unavailable"],
+  ])("keeps the room connected after a %s %s command rejection", async (status, code) => {
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      urls.push(String(url));
+      if (String(url).endsWith("/commands")) {
+        return new Response(
+          JSON.stringify({ error: { code, message: "Rejected" } }),
+          { status, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify(envelope), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "select-next", payload: { delayMs: 0 } })
+    ).resolves.toBe(false);
+    await Promise.resolve();
+
+    expect(client.getState()).toMatchObject({ status: "connected", lastErrorCode: code });
+    expect(urls.filter((url) => url.endsWith("/commands"))).toHaveLength(1);
+    // Only not_found is ambiguous with a missing room, so only it re-reads the room.
+    expect(urls.includes(`/api/v1/rooms/${roomId}`)).toBe(code === "not_found");
+  });
+
+  it("ends the client when a not_found command is confirmed by a missing room", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: { code: "not_found", message: "Room not found." } }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "pause", payload: {} })
+    ).resolves.toBe(false);
+    await vi.waitFor(() => expect(client.getState().status).toBe("error"));
+    expect(client.getState().lastErrorCode).toBe("not_found");
+  });
+
+  it.each([
+    [401, "unauthenticated", "error"],
+    [403, "removed", "error"],
+    [410, "room_ended", "ended"],
+  ])("ends the client after a terminal %s %s command rejection", async (status, code, terminal) => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: { code, message: "Ended" } }),
+        { status, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "pause", payload: {} })
+    ).rejects.toMatchObject({ status, code });
+    expect(client.getState()).toMatchObject({ status: terminal, lastErrorCode: code });
+  });
 });
 
 it("reuses the complete create body when a later retry uses the same request ID", async () => {
