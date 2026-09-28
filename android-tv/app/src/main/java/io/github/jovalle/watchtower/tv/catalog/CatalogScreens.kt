@@ -353,7 +353,12 @@ fun DetailsPlaybackActions(
 ) {
     val ratingKey = detail.ratingKey
     if (detail.playable && ratingKey != null) {
-        Button(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = null)) }) { Text(stringResource(R.string.play)) }
+        // Land D-pad focus on the primary action when details open (some devices assign no initial focus).
+        val playFocus = remember { FocusRequester() }
+        LaunchedEffect(ratingKey) { runCatching { playFocus.requestFocus() } }
+        Button(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = null)) }, modifier = Modifier.focusRequester(playFocus)) {
+            Text(stringResource(R.string.play))
+        }
         OutlinedButton(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = 0)) }) { Text(stringResource(R.string.start_over)) }
         if (roomsEnabled && detail.versions.firstOrNull()?.parts?.firstOrNull() != null) {
             OutlinedButton(onClick = onWatchTogether) { Text(stringResource(R.string.room_watch_together)) }
