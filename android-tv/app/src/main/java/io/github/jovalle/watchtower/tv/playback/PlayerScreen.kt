@@ -49,6 +49,8 @@ import androidx.tv.material3.Text
 import io.github.jovalle.watchtower.tv.AppGraph
 import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
+import io.github.jovalle.watchtower.tv.rooms.RoomConnectionStatus
+import io.github.jovalle.watchtower.tv.rooms.RoomInvitationQr
 
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -105,10 +107,12 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 			Controls(state, controller, Modifier.align(Alignment.BottomCenter))
 		}
 		state.menu?.let { Menu(it, state, controller, Modifier.align(Alignment.CenterEnd)) }
+		if (state.roomPanelVisible) RoomPanel(state, controller, Modifier.align(Alignment.CenterEnd))
+		if (state.confirmLeave) LeaveConfirmation(controller, Modifier.align(Alignment.Center))
 		state.nextDeadlineMs?.let { deadline ->
 			NextEpisodeCard(
 				seconds = ((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0) + 999) / 1_000,
-				onPlay = { controller.submit(PlaybackIntent.Next) },
+				onPlay = controller::playNextNow,
 				onCancel = controller::cancelNextCountdown,
 				modifier = Modifier.align(Alignment.BottomEnd),
 			)
@@ -127,6 +131,14 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 				},
 				color = Color.White,
 				fontSize = 20.sp,
+			)
+		}
+		state.roomMessage?.let {
+			Text(
+				text = it,
+				modifier = Modifier.align(Alignment.TopStart).padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite },
+				color = Color.White,
+				fontSize = 18.sp,
 			)
 		}
 	}
@@ -187,6 +199,9 @@ private fun Controls(state: PlaybackUiState, controller: PlaybackController, mod
 			}
 		} else {
 			Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+				if (state.room != null) {
+					PlayerButton(stringResource(R.string.room_controls), stringResource(R.string.room_controls), controller::toggleRoomPanel)
+				}
 				PlayerButton(stringResource(R.string.player_start_over), stringResource(R.string.player_start_over_description)) {
 					controller.submit(PlaybackIntent.StartOver)
 				}
@@ -228,6 +243,72 @@ private fun Controls(state: PlaybackUiState, controller: PlaybackController, mod
 					controller.toggleMenu(PlayerMenu.DIAGNOSTICS)
 				}
 			}
+		}
+	}
+}
+
+@Composable
+private fun RoomPanel(state: PlaybackUiState, controller: PlaybackController, modifier: Modifier = Modifier) {
+	val room = state.room ?: return
+	val snapshot = room.snapshot
+	LazyColumn(
+		modifier.width(420.dp).fillMaxHeight().background(Color(0xF20D0D0D)).padding(24.dp),
+		verticalArrangement = Arrangement.spacedBy(10.dp),
+	) {
+		item { Text(stringResource(R.string.room_controls), color = Color.White, fontSize = 26.sp) }
+		item {
+			Text(
+				when (room.status) {
+					RoomConnectionStatus.CONNECTED -> snapshot?.phase ?: ""
+					RoomConnectionStatus.RECONNECTING -> stringResource(R.string.room_reconnecting)
+					RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR -> room.message.orEmpty()
+					else -> stringResource(R.string.room_preparing)
+				},
+				color = Color(0xFFCCCCCC),
+			)
+		}
+		items(snapshot?.participants.orEmpty(), key = { it.participantId }) { participant ->
+			val status = when {
+				participant.buffering -> stringResource(R.string.room_buffering)
+				participant.ready -> stringResource(R.string.room_ready)
+				else -> stringResource(R.string.room_waiting)
+			}
+			val host = if (participant.participantId == snapshot?.hostParticipantId) " ${stringResource(R.string.room_host_badge)}" else ""
+			Text("${participant.displayName}$host  $status", color = Color.White, fontSize = 18.sp)
+		}
+		if (room.isHost) {
+			item {
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					PlayerButton(stringResource(R.string.room_start), stringResource(R.string.room_start)) { controller.submit(PlaybackIntent.Play) }
+					PlayerButton(stringResource(R.string.room_end_everyone), stringResource(R.string.room_end_everyone), controller::endRoom)
+				}
+			}
+			item {
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					PlayerButton(stringResource(R.string.room_rotate_invite), stringResource(R.string.room_rotate_invite), controller::rotateInvitation)
+					PlayerButton(stringResource(R.string.room_revoke_invite), stringResource(R.string.room_revoke_invite), controller::revokeInvitation)
+				}
+			}
+		}
+		item { PlayerButton(stringResource(R.string.room_leave), stringResource(R.string.room_leave), controller::requestLeave) }
+		state.roomInviteUrl?.let { url ->
+			item { RoomInvitationQr(url) }
+			item { Text(url, color = Color.White, fontSize = 14.sp) }
+		}
+	}
+}
+
+@Composable
+private fun LeaveConfirmation(controller: PlaybackController, modifier: Modifier = Modifier) {
+	Column(
+		modifier.width(440.dp).background(Color(0xFA171717)).padding(28.dp),
+		verticalArrangement = Arrangement.spacedBy(14.dp),
+	) {
+		Text(stringResource(R.string.room_leave_confirm), color = Color.White, fontSize = 26.sp)
+		Text(stringResource(R.string.room_leave_confirm_detail), color = Color(0xFFCCCCCC), fontSize = 17.sp)
+		Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+			PlayerButton(stringResource(R.string.room_leave), stringResource(R.string.room_leave), controller::confirmLeave)
+			PlayerButton(stringResource(R.string.room_stay), stringResource(R.string.room_stay), controller::cancelLeave)
 		}
 	}
 }
