@@ -254,6 +254,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Play the file as-is when the browser reported it can decode the container and codecs
   const media = metadata.Media?.[0];
+  // A room plays exactly the edition it was created with; never substitute Plex's current default.
+  if (
+    room &&
+    (String(media?.id) !== room.mediaId ||
+      String(media?.Part?.[0]?.id) !== room.partId)
+  ) {
+    throw new Response(
+      "This room's title changed on Plex. Create a new room to keep watching together.",
+      { status: 409 }
+    );
+  }
   const caps = parsePlaybackCaps(cookieHeader);
   const videoStream = media?.Part?.[0]?.Stream?.find((s) => s.streamType === 1);
   // Browsers can't burn in subtitles or pick a non-default audio track from a file, so those need HLS.
