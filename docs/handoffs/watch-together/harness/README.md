@@ -2,7 +2,7 @@
 
 Reproduction tooling for `docs/handoffs/watch-together/ACCEPTANCE.md`. It runs the real production build (Express + Remix, real room coordinator, real SSE) against a **synthetic** Plex upstream and a **stubbed** plex.tv identity lookup. It never uses real Plex accounts, tokens, media or watch history, and it does not exercise Plex OAuth, Plex transcoding, codecs or WAN conditions.
 
-Everything it writes goes to `tmp/wt-harness/` (gitignored): isolated `DATA_PATH`, generated media, signed synthetic cookies, logs and JSON results. Ports: Watchtower `9331`, synthetic Plex `32499`.
+Everything it writes goes to `tmp/wt-harness/` (gitignored): isolated `DATA_PATH`, generated media, signed synthetic cookies, logs and JSON results. Ports: Watchtower `9331`, synthetic Plex `32519` (override with `WT_HARNESS_APP_PORT` / `WT_HARNESS_PLEX_PORT`, then rerun `setup.mjs`). `run.mjs` refuses to start when either port is already taken or `server.json` points at another port, so it never talks to another local harness.
 
 ## Requirements
 
