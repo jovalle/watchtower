@@ -41,6 +41,7 @@ import io.github.jovalle.watchtower.tv.rooms.RoomAuthority
 import io.github.jovalle.watchtower.tv.rooms.RoomCommand
 import io.github.jovalle.watchtower.tv.rooms.RoomConnectionStatus
 import io.github.jovalle.watchtower.tv.rooms.RoomPolicy
+import io.github.jovalle.watchtower.tv.rooms.RoomSession
 import io.github.jovalle.watchtower.tv.rooms.RoomUiState
 import io.github.jovalle.watchtower.tv.rooms.estimatedServerNowMs
 import io.github.jovalle.watchtower.tv.rooms.reconcileRoomPlayback
@@ -61,6 +62,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class PlayerMenu { AUDIO, SUBTITLES, QUALITY, DIAGNOSTICS }
 
@@ -87,6 +89,7 @@ data class PlaybackUiState(
     val confirmLeave: Boolean = false,
     val roomMessage: String? = null,
     val roomInviteUrl: String? = null,
+    val terminalRoom: Boolean = false,
 )
 
 /** Upper bound for the seek-latency lead applied to room hard seeks. */
@@ -105,15 +108,21 @@ class PlaybackController(
         setAudioAttributes(DeviceCapabilityDetector.MEDIA_AUDIO_ATTRIBUTES, true)
         setHandleAudioBecomingNoisy(true)
     }
-    private val roomSession = route.roomId?.let(graph.rooms::activeSession)
-    private val authority = roomSession?.let { session ->
-        RoomAuthority(
-            state = { session.state.value },
-            positionMs = ::absolutePosition,
-            send = { command -> scope.launch { session.send(command) } },
-            requestLeave = ::requestLeave,
-        )
-    } ?: SoloAuthority
+    private var roomSession = route.roomId?.let(graph.rooms::activeSession)
+    private var roomAuthority = roomSession?.let(::createRoomAuthority)
+    private val authority = object : TransportAuthority {
+        override fun authorize(intent: PlaybackIntent): AuthorityDecision = when {
+            route.roomId == null -> SoloAuthority.authorize(intent)
+            roomAuthority != null -> requireNotNull(roomAuthority).authorize(intent)
+            else -> AuthorityDecision.Deny(context.getString(R.string.room_session_unavailable))
+        }
+
+        override fun authorizeAutomatic(intent: PlaybackIntent): AuthorityDecision = when {
+            route.roomId == null -> SoloAuthority.authorizeAutomatic(intent)
+            roomAuthority != null -> requireNotNull(roomAuthority).authorizeAutomatic(intent)
+            else -> AuthorityDecision.Deny(context.getString(R.string.room_session_unavailable))
+        }
+    }
     private val gate = PlaybackIntentGate(authority, ::executeIntent)
     private val sessionPlayer = GatedPlayer(player, gate) { index, position ->
         mapper?.toAbsolute(index, position) ?: position
@@ -129,7 +138,8 @@ class PlaybackController(
     private val scrubController = ScrubController()
     private val bingePolicy = BingePolicy()
     private val recoveryPolicy = RecoveryPolicy()
-    private val closed = AtomicBoolean()
+    private val resourcesReleased = AtomicBoolean()
+    private val exited = AtomicBoolean()
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private val displayMode = DisplayModeController(context)
     private var snapshot: SessionSnapshot? = null
@@ -143,6 +153,7 @@ class PlaybackController(
     private var quality = "original"
     private var controlsGeneration = 0L
     private var lifecycleStopped = false
+    private var transportInterruptionLatched = false
     private var nextCountdownCancelled = false
     private var decoderName: String? = null
     private var droppedFrames = 0
@@ -191,68 +202,51 @@ class PlaybackController(
                 if (snapshot != null && change.current != snapshot) forceExit()
             }
         }
-        roomSession?.let { session ->
-            scope.launch {
-                session.state.collect { room ->
-                    _state.value = _state.value.copy(
-                        room = room,
-                        roomMessage = room.message,
-                        roomInviteUrl = room.invitation?.let { roomInvitationUrl(session.identity.baseUrl, it.secret) },
-                    )
-                    if (room.status in setOf(RoomConnectionStatus.RECONNECTING, RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR)) {
-                        scheduledPlayJob?.cancel()
-                        gate.applyState {
-                            player.pause()
-                            player.setPlaybackSpeed(1f)
-                        }
-                    }
-                    val roomSnapshot = room.snapshot
-                    val currentDescriptor = descriptor
-                    if (roomSnapshot != null && currentDescriptor != null &&
-                        roomSnapshot.mediaGeneration > (roomMediaGeneration ?: 0) &&
-                        (
-                            roomSnapshot.media.ratingKey != currentDescriptor.media.ratingKey ||
-                                roomSnapshot.media.mediaId != currentDescriptor.media.mediaId ||
-                                roomSnapshot.media.partId != currentDescriptor.media.partId ||
-                                roomSnapshot.media.serverMachineId != currentDescriptor.media.serverMachineId
-                            )
-                    ) {
-                        roomMediaGeneration = roomSnapshot.mediaGeneration
-                        openItem(roomSnapshot.media.ratingKey, roomSnapshot.media.mediaId)
-                    } else {
-                        reconcileRoom()
-                        evaluateRoomReadiness()
-                    }
-                }
-            }
-        }
+        roomSession?.let(::observeRoomSession)
         scope.launch { initialize() }
     }
 
     fun submit(intent: PlaybackIntent): AuthorityDecision {
         showControls()
+        if (roomSession != null && intent in setOf(PlaybackIntent.Play, PlaybackIntent.Toggle) && transportInterruptionLatched) {
+            transportInterruptionLatched = false
+            reconcileRoom()
+            evaluateRoomReadiness()
+            return AuthorityDecision.Handled
+        }
         return gate.submitUserIntent(intent).also { decision ->
             if (decision is AuthorityDecision.Deny) _state.value = _state.value.copy(roomMessage = decision.reason)
         }
     }
 
     fun toggleMenu(menu: PlayerMenu) {
-        _state.value = _state.value.copy(menu = menu.takeUnless { _state.value.menu == it }, controlsVisible = true)
+        _state.value = _state.value.copy(
+            menu = menu.takeUnless { _state.value.menu == it },
+            roomPanelVisible = false,
+            controlsVisible = true,
+        )
         showControls()
     }
 
     fun handleBack() {
         when {
+            _state.value.terminalRoom -> forceExit()
             _state.value.confirmLeave -> cancelLeave()
             _state.value.roomPanelVisible -> _state.value = _state.value.copy(roomPanelVisible = false)
             _state.value.menu != null -> _state.value = _state.value.copy(menu = null)
+            _state.value.nextDeadlineMs != null && (_state.value.room == null || _state.value.room?.isHost == true) ->
+                cancelNextCountdown()
             _state.value.controlsVisible -> _state.value = _state.value.copy(controlsVisible = false)
             else -> exit()
         }
     }
 
     fun toggleRoomPanel() {
-        _state.value = _state.value.copy(roomPanelVisible = !_state.value.roomPanelVisible, controlsVisible = true)
+        _state.value = _state.value.copy(
+            roomPanelVisible = !_state.value.roomPanelVisible,
+            menu = null,
+            controlsVisible = true,
+        )
     }
 
     fun requestLeave() {
@@ -300,7 +294,7 @@ class PlaybackController(
 
     fun cancelNextCountdown() {
         if (roomSession != null) {
-            scope.launch { roomSession.send(io.github.jovalle.watchtower.tv.rooms.RoomCommand.CancelNext) }
+            sendCountdownCommand(RoomCommand.CancelNext)
             return
         }
         nextCountdownCancelled = true
@@ -309,7 +303,7 @@ class PlaybackController(
 
     fun playNextNow() {
         if (roomSession != null) {
-            scope.launch { roomSession.send(io.github.jovalle.watchtower.tv.rooms.RoomCommand.SelectNext(0)) }
+            sendCountdownCommand(RoomCommand.SelectNext(0))
         } else {
             submit(PlaybackIntent.Next)
         }
@@ -321,9 +315,12 @@ class PlaybackController(
 
     fun selectAudio(track: AudioTrack) {
         val current = descriptor ?: return
-        trackIntent = TrackIntent(track.streamId, trackIntent?.subtitleStreamId, trackIntent?.subtitlesOff ?: false)
-        if (current.delivery.type == "hls") replace("track_change", absolutePosition())
+        val requestedTrackIntent = TrackIntent(track.streamId, trackIntent?.subtitleStreamId, trackIntent?.subtitlesOff ?: false)
+        if (current.delivery.type == "hls") {
+            replace("track_change", absolutePosition(), requirePresenceAck = true, requestedTrackIntent = requestedTrackIntent)
+        }
         else {
+            trackIntent = requestedTrackIntent
             applyFileTrack(track.streamId, TrackKind.AUDIO)
             updateSelectedTracks(audioStreamId = track.streamId)
         }
@@ -332,12 +329,16 @@ class PlaybackController(
 
     fun selectSubtitle(track: SubtitleTrack?) {
         val current = descriptor ?: return
-        trackIntent = TrackIntent(trackIntent?.audioStreamId, track?.streamId, track == null)
-        if (current.delivery.type == "hls") replace("track_change", absolutePosition())
+        val requestedTrackIntent = TrackIntent(trackIntent?.audioStreamId, track?.streamId, track == null)
+        if (current.delivery.type == "hls") {
+            replace("track_change", absolutePosition(), requirePresenceAck = true, requestedTrackIntent = requestedTrackIntent)
+        }
         else if (track == null) {
+            trackIntent = requestedTrackIntent
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
         } else {
+            trackIntent = requestedTrackIntent
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
             applyFileTrack(track.streamId, TrackKind.TEXT)
@@ -348,9 +349,8 @@ class PlaybackController(
 
     fun selectQuality(id: String) {
         if (quality == id) return
-        quality = id
         _state.value = _state.value.copy(menu = null)
-        replace("quality_change", absolutePosition())
+        replace("quality_change", absolutePosition(), requirePresenceAck = true, requestedQuality = id)
     }
 
     fun retry() {
@@ -359,16 +359,24 @@ class PlaybackController(
     }
 
     fun onStop() {
+        if (resourcesReleased.get()) return
         lifecycleStopped = true
-        gate.applyState { player.pause() }
+        interruptRoomPlayback()
+        gate.applyState {
+            player.pause()
+            player.stop()
+        }
         _state.value = _state.value.copy(controlsVisible = true)
     }
 
     fun onStart() {
+        if (resourcesReleased.get()) return
         if (lifecycleStopped) {
             lifecycleStopped = false
-            gate.applyState { player.pause() }
+            gate.applyState { player.prepare() }
             _state.value = _state.value.copy(controlsVisible = true)
+            reconcileRoom()
+            evaluateRoomReadiness()
         }
     }
 
@@ -378,18 +386,17 @@ class PlaybackController(
     }
 
     private fun forceExit() {
-        if (!closed.compareAndSet(false, true)) return
         releaseAndStop()
-        onExit()
+        if (exited.compareAndSet(false, true)) onExit()
     }
 
     fun dispose() {
-        if (!closed.compareAndSet(false, true)) return
         releaseAndStop()
     }
 
     /** Reads the final position on the player thread, then releases; the stop report outlives the screen. */
     private fun releaseAndStop() {
+        if (!resourcesReleased.compareAndSet(false, true)) return
         val finalReporter = reporter
         val finalPosition = absolutePosition()
         release()
@@ -399,6 +406,19 @@ class PlaybackController(
     private suspend fun initialize() {
         val captured = graph.session.current() ?: return exit()
         val me = graph.session.currentMe() ?: return exit()
+        if (route.roomId != null && roomSession == null) {
+            val roomId = route.roomId
+            val recovered = runCatching { graph.rooms.recover(roomId) }.getOrNull()
+                ?.takeIf { it.state.value.isActive }
+            if (playbackRouteMode(route.roomId, recovered != null) == PlaybackRouteMode.TERMINAL_ROOM) {
+                terminateRoomPlayback(context.getString(R.string.room_session_unavailable))
+                return
+            }
+            roomSession = recovered
+            roomAuthority = recovered?.let(::createRoomAuthority)
+            roomMediaGeneration = recovered?.state?.value?.snapshot?.mediaGeneration
+            recovered?.let(::observeRoomSession)
+        }
         snapshot = captured
         prefs = graph.localPlaybackPrefs.get(me.server.machineId, me.profile.userId)
         try {
@@ -415,7 +435,7 @@ class PlaybackController(
             install(playback)
         } catch (error: Exception) {
             reportRoomPresence(ready = false, buffering = false, error = "stream_unavailable")
-            if (!closed.get()) _state.value = _state.value.copy(
+            if (!resourcesReleased.get()) _state.value = _state.value.copy(
                 loading = false,
                 error = error.message ?: context.getString(R.string.player_error_start),
             )
@@ -423,7 +443,7 @@ class PlaybackController(
     }
 
     private fun install(playback: PlaybackDescriptor) {
-        if (closed.get()) return
+        if (resourcesReleased.get()) return
         val roomSnapshot = roomSession?.state?.value?.snapshot
         val roomMedia = roomSnapshot?.media
         if (roomMedia != null && (
@@ -518,22 +538,30 @@ class PlaybackController(
     private fun seekAbsolute(targetMs: Long) {
         val plan = mapper?.seekPlan(targetMs) ?: return
         if (plan.replacementReason != null) {
-            replace(plan.replacementReason, targetMs)
+            replace(plan.replacementReason, targetMs, requirePresenceAck = true)
             return
         }
         plan.playerPosition?.let { player.seekTo(it.mediaItemIndex, it.positionMs) }
     }
 
-    private fun replace(reason: String, positionMs: Long, forceTranscode: Boolean = false) {
+    private fun replace(
+        reason: String,
+        positionMs: Long,
+        forceTranscode: Boolean = false,
+        requirePresenceAck: Boolean = false,
+        requestedQuality: String? = null,
+        requestedTrackIntent: TrackIntent? = null,
+    ) {
+        if (resourcesReleased.get()) return
         if (replacementJob?.isActive == true) return
         val captured = snapshot ?: return
         val current = descriptor ?: return
         val loadedDetail = detail ?: return
-        reportRoomPresence(ready = false, buffering = false, replacingSource = true)
-        player.pause()
-        _state.value = _state.value.copy(loading = true, buffering = true, controlsVisible = true)
         replacementJob = scope.launch {
             try {
+                if (!prepareRoomSourceReplacement(requirePresenceAck)) return@launch
+                player.pause()
+                _state.value = _state.value.copy(loading = true, buffering = true, controlsVisible = true)
                 val capabilities = capabilityDetector.detect(prefs.maxBitrateKbps)
                 val request = PlaybackRequestFactory.create(
                     loadedDetail,
@@ -541,14 +569,16 @@ class PlaybackController(
                     positionMs,
                     prefs,
                     capabilities,
-                    quality,
+                    requestedQuality ?: quality,
                     forceTranscode,
                     current.playbackId,
                     reason,
-                    trackIntent,
+                    requestedTrackIntent ?: trackIntent,
                 )
                 val replacement = withContext(Dispatchers.IO) { graph.api.createPlayback(captured, request) }
                 lastCapabilities = capabilities
+                requestedQuality?.let { quality = it }
+                requestedTrackIntent?.let { trackIntent = it }
                 val oldReporter = reporter
                 oldReporter?.stopFinal(absolutePosition())
                 install(replacement)
@@ -566,7 +596,7 @@ class PlaybackController(
     }
 
     private suspend fun replaceSessionExpired(positionMs: Long) {
-        if (!closed.get()) replace("retry", positionMs)
+        if (!resourcesReleased.get()) replace("retry", positionMs)
     }
 
     private fun applyFileTrack(streamId: String, kind: TrackKind) {
@@ -630,12 +660,13 @@ class PlaybackController(
     }
 
     private suspend fun tick() {
-        while (!closed.get()) {
+        while (!resourcesReleased.get()) {
             val current = descriptor
             if (current != null) {
                 val position = absolutePosition()
-                var nextDeadline = if (roomSession != null) {
-                    val room = roomSession.state.value
+                val activeRoomSession = roomSession
+                var nextDeadline = if (activeRoomSession != null) {
+                    val room = activeRoomSession.state.value
                     val deadline = room.snapshot?.nextCountdown?.deadlineMs
                     val offset = room.clock?.offsetMs
                     if (deadline != null && offset != null) (deadline - offset).toLong() else null
@@ -682,7 +713,7 @@ class PlaybackController(
     }
 
     private fun openItem(ratingKey: String, mediaId: String? = null) {
-        if (!closed.compareAndSet(false, true)) return
+        if (!exited.compareAndSet(false, true)) return
         releaseAndStop()
         onOpenItem(PlayerRoute(ratingKey, mediaId = mediaId, roomId = route.roomId))
     }
@@ -752,6 +783,24 @@ class PlaybackController(
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         _state.value = _state.value.copy(playWhenReady = playWhenReady)
         scope.launch { reporter?.transition(if (playWhenReady) "playing" else "paused") }
+        if (reason in setOf(
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS,
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY,
+            )
+        ) {
+            transportInterruptionLatched = true
+            interruptRoomPlayback(reason)
+        }
+    }
+
+    override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+        if (resourcesReleased.get()) return
+        if (playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
+            reconcileRoom()
+            evaluateRoomReadiness()
+        } else {
+            interruptRoomPlayback()
+        }
     }
 
     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
@@ -814,6 +863,7 @@ class PlaybackController(
 
     private fun release() {
         ticker?.cancel()
+        replacementJob?.cancel()
         scheduledPlayJob?.cancel()
         bufferingPresenceJob?.cancel()
         if (roomSession != null) gate.applyState { player.setPlaybackSpeed(1f) }
@@ -864,6 +914,11 @@ class PlaybackController(
         val roomSnapshot = room.snapshot ?: return
         val clock = room.clock ?: return
         if (room.status != RoomConnectionStatus.CONNECTED || descriptor == null) return
+        if (!currentInterruption().ready) {
+            val claim = Triple(false, roomSnapshot.mediaGeneration, roomSnapshot.preparationGeneration)
+            if (claim != lastReadyClaim) reportRoomPresence(ready = false, buffering = false)
+            return
+        }
         if (player.playbackState == Player.STATE_BUFFERING) return
         val desiredMs = targetPositionMs(roomSnapshot, estimatedServerNowMs(clock, android.os.SystemClock.elapsedRealtime()))
         val toleranceMs = if (roomSnapshot.phase == "playing") RoomPolicy.HARD_SEEK_MS else RoomPolicy.DEAD_BAND_MS
@@ -897,6 +952,14 @@ class PlaybackController(
         val roomSnapshot = room.snapshot ?: return
         val clock = room.clock ?: return
         if (room.status != RoomConnectionStatus.CONNECTED || descriptor == null) return
+        if (!currentInterruption().reconcile) {
+            scheduledPlayJob?.cancel()
+            gate.applyState {
+                player.pause()
+                player.setPlaybackSpeed(1f)
+            }
+            return
+        }
         val decision = reconcileRoomPlayback(
             roomSnapshot,
             ObservedMediaState(
@@ -928,7 +991,7 @@ class PlaybackController(
                     scheduledPlayJob?.cancel()
                     scheduledPlayJob = scope.launch {
                         delay((action.localTimeMs - android.os.SystemClock.elapsedRealtime()).toLong().coerceAtLeast(0))
-                        if (roomSession.state.value.snapshot?.revision == roomSnapshot.revision) {
+                        if (roomSession?.state?.value?.snapshot?.revision == roomSnapshot.revision && currentInterruption().reconcile) {
                             gate.applyState { player.play() }
                         }
                     }
@@ -944,6 +1007,127 @@ class PlaybackController(
                 ReconciliationAction.None -> Unit
             }
         }
+    }
+
+    private fun createRoomAuthority(session: RoomSession) = RoomAuthority(
+        state = { session.state.value },
+        positionMs = ::absolutePosition,
+        send = { command -> scope.launch { session.send(command) } },
+        requestLeave = ::requestLeave,
+    )
+
+    private fun observeRoomSession(session: RoomSession) {
+        scope.launch {
+            session.state.collect { room ->
+                _state.value = _state.value.copy(
+                    room = room,
+                    roomMessage = room.message,
+                    roomInviteUrl = room.invitation?.let { roomInvitationUrl(session.identity.baseUrl, it.secret) },
+                )
+                if (room.status in setOf(RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR)) {
+                    terminateRoomPlayback(room.message ?: context.getString(R.string.room_ended_generic))
+                    return@collect
+                }
+                if (room.status == RoomConnectionStatus.RECONNECTING) {
+                    scheduledPlayJob?.cancel()
+                    gate.applyState {
+                        player.pause()
+                        player.setPlaybackSpeed(1f)
+                    }
+                }
+                val roomSnapshot = room.snapshot
+                val currentDescriptor = descriptor
+                if (roomSnapshot != null && currentDescriptor != null &&
+                    roomSnapshot.mediaGeneration > (roomMediaGeneration ?: 0) &&
+                    (
+                        roomSnapshot.media.ratingKey != currentDescriptor.media.ratingKey ||
+                            roomSnapshot.media.mediaId != currentDescriptor.media.mediaId ||
+                            roomSnapshot.media.partId != currentDescriptor.media.partId ||
+                            roomSnapshot.media.serverMachineId != currentDescriptor.media.serverMachineId
+                        )
+                ) {
+                    roomMediaGeneration = roomSnapshot.mediaGeneration
+                    openItem(roomSnapshot.media.ratingKey, roomSnapshot.media.mediaId)
+                } else {
+                    reconcileRoom()
+                    evaluateRoomReadiness()
+                }
+            }
+        }
+    }
+
+    private fun currentInterruption(reason: Int? = null): LocalInterruptionDecision = localInterruptionDecision(
+        lifecycleStopped = lifecycleStopped,
+        playbackSuppressionReason = player.playbackSuppressionReason,
+        playWhenReadyChangeReason = reason,
+        transportInterruptionLatched = transportInterruptionLatched,
+    )
+
+    private fun interruptRoomPlayback(reason: Int? = null) {
+        if (roomSession == null || !currentInterruption(reason).interrupted) return
+        scheduledPlayJob?.cancel()
+        reportRoomPresence(ready = false, buffering = false)
+    }
+
+    private suspend fun prepareRoomSourceReplacement(required: Boolean): Boolean {
+        val session = roomSession ?: return true
+        val previous = roomPresence
+        val generation = session.state.value.snapshot?.mediaGeneration
+        val replacing = previous.copy(
+            playbackSessionId = descriptor?.playbackId,
+            positionMs = descriptor?.let { absolutePosition() },
+            ready = false,
+            buffering = false,
+            replacingSource = true,
+            error = null,
+        )
+        roomPresence = replacing
+        if (!required) {
+            session.observePresence(replacing, reportImmediately = true)
+            return true
+        }
+        val acknowledged = withTimeoutOrNull(ROOM_REPLACEMENT_ACK_TIMEOUT_MS) {
+            session.reportPresence(replacing)
+        } == true && session.state.value.snapshot?.mediaGeneration == generation
+        if (acknowledged) return true
+        roomPresence = previous.copy(
+            playbackSessionId = descriptor?.playbackId,
+            positionMs = descriptor?.let { absolutePosition() },
+            replacingSource = false,
+        )
+        session.observePresence(roomPresence, reportImmediately = true)
+        lastReadyClaim = null
+        _state.value = _state.value.copy(roomMessage = context.getString(R.string.room_replacement_not_acknowledged))
+        evaluateRoomReadiness()
+        return false
+    }
+
+    private fun sendCountdownCommand(command: RoomCommand) {
+        val session = roomSession ?: return
+        if (!session.state.value.isHost) {
+            _state.value = _state.value.copy(roomMessage = context.getString(R.string.room_error_not_host))
+            return
+        }
+        scope.launch { session.send(command) }
+    }
+
+    private fun terminateRoomPlayback(message: String) {
+        _state.value = _state.value.copy(
+            loading = false,
+            buffering = false,
+            controlsVisible = false,
+            menu = null,
+            roomPanelVisible = false,
+            confirmLeave = false,
+            nextDeadlineMs = null,
+            roomMessage = message,
+            terminalRoom = true,
+        )
+        releaseAndStop()
+    }
+
+    private companion object {
+        const val ROOM_REPLACEMENT_ACK_TIMEOUT_MS = 3_000L
     }
 }
 

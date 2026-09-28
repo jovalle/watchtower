@@ -1,0 +1,144 @@
+name: Android TV
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "android-tv/**"
+      - "contracts/native/**"
+      - ".github/workflows/android-tv.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "android-tv/**"
+      - "contracts/native/**"
+      - ".github/workflows/android-tv.yml"
+  workflow_dispatch:
+    inputs:
+      instrumentation:
+        description: "Also run instrumentation tests on an Android TV emulator"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: android-tv-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  build:
+    name: Unit tests, lint and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: android-tv
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # No signing secrets are available here: release outputs are unsigned by design.
+      - name: Test, lint and build
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:bundleRelease --console=plain
+
+      - name: Checksums
+        run: |
+          find app/build/outputs/apk app/build/outputs/bundle -type f \( -name '*.apk' -o -name '*.aab' \) -print0 \
+            | sort -z | xargs -0 sha256sum > app/build/outputs/SHA256SUMS
+          cat app/build/outputs/SHA256SUMS
+
+      - name: Upload builds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-tv-builds
+          path: |
+            android-tv/app/build/outputs/apk/debug/*.apk
+            android-tv/app/build/outputs/apk/release/*.apk
+            android-tv/app/build/outputs/bundle/release/*.aab
+            android-tv/app/build/outputs/mapping/release/mapping.txt
+            android-tv/app/build/outputs/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-tv-reports
+          path: |
+            android-tv/app/build/reports
+            android-tv/app/build/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  instrumentation:
+    name: Instrumentation (Android TV emulator)
+    if: github.event_name == 'workflow_dispatch' && inputs.instrumentation
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Connected tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: android-tv
+          arch: x86
+          profile: tv_1080p
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect
+          working-directory: android-tv
+          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
+
+      - name: Upload instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-tv-instrumentation
+          path: |
+            android-tv/app/build/reports/androidTests
+            android-tv/app/build/outputs/androidTest-results
+          if-no-files-found: ignore
+          retention-days: 14

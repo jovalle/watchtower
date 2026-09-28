@@ -74,6 +74,36 @@ class RoomApiTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun `presence rate limit exposes retry after delay`() = runTest {
+        val api = RoomApi(HttpClients("rooms/test"), clock = MonotonicClock { 0 })
+        server.enqueue(
+            json("""{"error":{"code":"rate_limited","message":"Slow down."}}""", 429)
+                .newBuilder()
+                .addHeader("Retry-After", "3")
+                .build(),
+        )
+        val report = PresenceReport(
+            epoch = "6f1c1d52-3f0e-4c7a-9d51-0d1b2c3a4e5f",
+            membershipVersion = 1,
+            mediaGeneration = 1,
+            preparationGeneration = 1,
+            presenceSequence = 7,
+            playbackSessionId = null,
+            positionMs = 42_000,
+            ready = false,
+            buffering = false,
+            replacingSource = false,
+            error = null,
+        )
+
+        val error = runCatching {
+            api.presence(snapshot, "8e2f7a64-5b1c-4d3e-9f80-1a2b3c4d5e6f", report)
+        }.exceptionOrNull() as RoomApiException
+
+        assertEquals(429, error.status)
+        assertEquals(3_000L, error.retryAfterMs)
+    }
+
     private fun json(body: String, code: Int = 200) = MockResponse.Builder()
         .code(code)
         .addHeader("Content-Type", "application/json")
