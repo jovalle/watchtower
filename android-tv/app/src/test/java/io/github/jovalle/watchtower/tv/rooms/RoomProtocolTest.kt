@@ -51,6 +51,10 @@ class RoomProtocolTest {
         val snapshot = WatchtowerJson.decodeFromJsonElement(RoomSnapshot.serializer(), fixtureJson().getValue("playingSnapshot"))
         assertTrue(RoomProtocol.validate(snapshot))
         assertFalse(RoomProtocol.validate(snapshot.copy(protocolVersion = 2)))
+        assertFalse(RoomProtocol.validate(snapshot.copy(media = snapshot.media.copy(partId = ""))))
+        assertFalse(RoomProtocol.validate(snapshot.copy(hostParticipantId = "host")))
+        assertTrue(RoomProtocol.validate(snapshot.copy(hostParticipantId = null)))
+        assertFalse(RoomProtocol.validate(snapshot.copy(participants = snapshot.participants.map { it.copy(participantId = "p1") })))
     }
 
     @Suppress("UNCHECKED_CAST")
