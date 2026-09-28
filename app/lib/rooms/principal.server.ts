@@ -1,8 +1,7 @@
 /**
  * Request-principal boundary for room routes (shared-contract `PlaybackPrincipal`).
- * This file is the web-cookie adapter. Native bearer credentials are owned by the
- * Android TV track; until its resolver lands, bearer requests fail closed instead
- * of downgrading to cookie authentication.
+ * Browser requests use the cookie adapter below; bearer requests are resolved only by the
+ * Android TV native device-session principal and never downgrade to cookie authentication.
  */
 
 import { createCookie } from "@remix-run/node";
@@ -11,10 +10,12 @@ import { getSession } from "~/lib/auth/session.server";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { getServerConfig } from "~/lib/config/server-config.server";
 import { env } from "~/lib/env.server";
+import { NativeError } from "~/lib/native/http.server";
+import { requireNativePrincipal } from "~/lib/native/principal.server";
 import { isUuid, ROOM_POLICY, type RoomErrorCode } from "./protocol";
 
 export type PlaybackPrincipal = {
-  kind: "web";
+  kind: "web" | "native";
   userId: string;
   displayName: string;
   serverMachineId: string;
@@ -51,11 +52,41 @@ export async function getWebDevice(request: Request): Promise<{ deviceSessionId:
   return { deviceSessionId, setCookie: await cookie.serialize(deviceSessionId) };
 }
 
+/** Native device session (Android TV): identity version is required on every room request. */
+async function resolveNativeRoomPrincipal(request: Request): Promise<PrincipalResult> {
+  try {
+    const native = await requireNativePrincipal(request);
+    return {
+      ok: true,
+      setCookie: null,
+      principal: {
+        kind: "native",
+        userId: native.userId,
+        displayName: (native.profile.title || "Viewer").slice(0, ROOM_POLICY.maxDisplayNameLength),
+        serverMachineId: native.serverMachineId,
+        serverToken: native.serverToken,
+        deviceSessionId: native.deviceSessionId,
+        identityVersion: native.identityVersion,
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof NativeError)) throw error;
+    const code: RoomErrorCode =
+      error.code === "ambiguous_credentials" ? "identity_ambiguous"
+        : error.code === "server_changed" ? "server_changed"
+        : error.code === "identity_version_mismatch" ? "identity_version_mismatch"
+        : error.status === 401 ? "unauthenticated"
+        : error.status >= 500 ? "upstream_unavailable"
+        : "forbidden";
+    return { ok: false, code, message: error.message };
+  }
+}
+
 export async function resolveRoomPrincipal(request: Request): Promise<PrincipalResult> {
   if (request.headers.has("Authorization")) {
     return request.headers.get("Cookie")?.includes("__plex_session=")
       ? { ok: false, code: "identity_ambiguous", message: "Send either a device credential or a browser session, not both." }
-      : { ok: false, code: "bearer_unsupported", message: "Device credentials are not supported by this server yet." };
+      : resolveNativeRoomPrincipal(request);
   }
   const session = await getSession(request);
   const serverToken = session.get("serverToken");
