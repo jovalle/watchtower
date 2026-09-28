@@ -8,6 +8,7 @@ This page records what the web branch (`work/watch-together`) provides to, and n
 - **Changes since the freeze are compatible:** no wire field was renamed or removed, and no status code changed.
   - `5063680` makes `parseSnapshot` stricter (media identity strings, `hostParticipantId`, participant shapes). Snapshots produced by the server already satisfied it; the Android branch mirrors it (`3a7bde7`).
   - `b04b429` changes server behavior only: joins during a next-item authorization are re-checked, a member whose Plex media changed is removed with `access_denied`, and identical command retries return the cached result before phase and rate checks (an ended room answers a retried `end` with its original `200`).
+  - `3848e23` fixes `play` from the lobby or a pause: the new anchor now starts at the held position instead of adding the wait (the bug the Android room E2E reported).
   - Everything else after the freeze is client-side or player-side.
 - **Additive changes on the Android side (not in this branch):** error code `identity_version_mismatch` (`409`), bearer principals in `resolveRoomPrincipal`, same-origin checks skipped for requests that carry `Authorization`, and a native device-revocation hook that calls `leaveDeviceMemberships`. The web client treats any unknown `409` as a dropped intent and applies the returned snapshot, so it is compatible.
 
@@ -56,7 +57,9 @@ Both branches edit these files; merge the web branch first, then rebase or merge
 - `app/lib/rooms/http.server.ts`, `app/lib/rooms/coordinator.server.ts`, `app/lib/rooms/protocol.ts` (small Android additions listed above)
 - `app/lib/plex/playback-session.server.ts`, `app/lib/plex/client.server.ts` (device scope here; Android also refactors playback extraction and an HLS proxy)
 - `app/routes/auth.logout.ts`
-- `app/routes/app.watch.$ratingKey.tsx` (web only; `f0fd030` changed the solo scope after the Android integration branch last merged this branch at `63bdfef`)
+- `app/routes/app.watch.$ratingKey.tsx` (web only)
+
+The Android integration branch last merged this branch at `63bdfef`; it still needs `f0fd030` (solo playback scope), `3848e23` (play anchor) and `e0fac75`/`eff04db` (harness only).
 
 ## Worktrees and local harnesses
 
