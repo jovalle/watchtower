@@ -89,6 +89,9 @@ data class PlaybackUiState(
     val roomInviteUrl: String? = null,
 )
 
+/** Upper bound for the seek-latency lead applied to room hard seeks. */
+private const val MAX_ROOM_SEEK_LEAD_MS = 2_000L
+
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackController(
     private val context: Context,
@@ -154,6 +157,8 @@ class PlaybackController(
     private var roomPresence = PresenceObservation()
     private var lastReadyClaim: Triple<Boolean, Long, Long>? = null
     private var nextRequestedGeneration: Long? = null
+    private var roomSeekStartedAtMs: Long? = null
+    private var roomSeekLatencyMs = 500L
 
     private val analyticsListener = object : AnalyticsListener {
         override fun onVideoDecoderInitialized(
@@ -709,6 +714,11 @@ class PlaybackController(
         if (playbackState == Player.STATE_READY) {
             resolveHlsTimelineIfPossible()
             displayMode.requestOnce(player.videoFormat?.frameRate, prefs.matchFrameRate)
+            roomSeekStartedAtMs?.let { started ->
+                val measured = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, MAX_ROOM_SEEK_LEAD_MS)
+                roomSeekLatencyMs = (roomSeekLatencyMs + measured) / 2
+                roomSeekStartedAtMs = null
+            }
             reconcileRoom()
             evaluateRoomReadiness()
         }
@@ -924,7 +934,12 @@ class PlaybackController(
                     }
                 }
                 ReconciliationAction.Play -> player.play()
-                is ReconciliationAction.Seek -> seekAbsolute(action.positionMs)
+                is ReconciliationAction.Seek -> {
+                    // A TV rebuffers after a seek; land where the room will be once playback resumes.
+                    val leadMs = if (roomSnapshot.phase == "playing" && player.playWhenReady) roomSeekLatencyMs else 0L
+                    roomSeekStartedAtMs = android.os.SystemClock.elapsedRealtime()
+                    seekAbsolute((action.positionMs + leadMs).coerceAtMost(roomSnapshot.durationMs))
+                }
                 is ReconciliationAction.Rate -> player.setPlaybackSpeed(action.rate.toFloat())
                 ReconciliationAction.None -> Unit
             }
