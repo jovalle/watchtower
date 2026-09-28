@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.annotation.StringRes
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -53,8 +54,9 @@ data class SettingsState(
     val devices: List<DeviceSummary> = emptyList(),
     val local: ProfilePlaybackPrefs = ProfilePlaybackPrefs(),
     val savingKey: String? = null,
-    val message: String? = null,
+    val saved: Boolean = false,
     val error: String? = null,
+    @StringRes val errorRes: Int? = null,
 )
 
 class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
@@ -84,7 +86,11 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
                 }
             } catch (error: Exception) {
                 if (graph.session.current() == snapshot) {
-                    _state.value = _state.value.copy(loading = false, error = error.message ?: "Unable to load settings.")
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        error = error.message,
+                        errorRes = if (error.message == null) R.string.settings_load_failed else null,
+                    )
                 }
             }
         }
@@ -95,15 +101,19 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         val previous = _state.value.preferences ?: return
         if (previous.booleanValue(key) == value || _state.value.savingKey != null) return
         viewModelScope.launch {
-            _state.value = _state.value.copy(savingKey = key, message = null, error = null)
+            _state.value = _state.value.copy(savingKey = key, saved = false, error = null, errorRes = null)
             try {
                 val updated = graph.api.updatePreferences(snapshot, buildJsonObject { put(key, JsonPrimitive(value)) })
                 if (graph.session.current() == snapshot) {
-                    _state.value = _state.value.copy(preferences = updated, savingKey = null, message = "Saved")
+                    _state.value = _state.value.copy(preferences = updated, savingKey = null, saved = true)
                 }
             } catch (error: Exception) {
                 if (graph.session.current() == snapshot) {
-                    _state.value = _state.value.copy(savingKey = null, error = error.message ?: "The setting was not saved.")
+                    _state.value = _state.value.copy(
+                        savingKey = null,
+                        error = error.message,
+                        errorRes = if (error.message == null) R.string.settings_save_failed else null,
+                    )
                 }
             }
         }
@@ -113,7 +123,7 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         val me = graph.session.currentMe() ?: return
         val updated = transform(_state.value.local)
         graph.localPlaybackPrefs.set(me.server.machineId, me.profile.userId, updated)
-        _state.value = _state.value.copy(local = updated, message = "Saved", error = null)
+        _state.value = _state.value.copy(local = updated, saved = true, error = null, errorRes = null)
     }
 
     fun revoke(device: DeviceSummary) {
@@ -127,7 +137,10 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
                     _state.value = _state.value.copy(devices = _state.value.devices.filterNot { it.deviceSessionId == device.deviceSessionId })
                 }
             } catch (error: Exception) {
-                if (graph.session.current() == snapshot) _state.value = _state.value.copy(error = error.message ?: "Device revoke failed.")
+                if (graph.session.current() == snapshot) _state.value = _state.value.copy(
+                    error = error.message,
+                    errorRes = if (error.message == null) R.string.device_revoke_failed else null,
+                )
             }
         }
     }
@@ -161,35 +174,42 @@ fun SettingsScreen(graph: AppGraph) {
     ) {
         item { Text(stringResource(R.string.settings), fontSize = 34.sp, fontWeight = FontWeight.Bold) }
         state.error?.let { item { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 16.sp) } }
-        state.message?.let { item { Text(stringResource(R.string.saved), color = MaterialTheme.colorScheme.primary) } }
+        state.errorRes?.let { errorRes -> item { Text(stringResource(errorRes), color = MaterialTheme.colorScheme.error, fontSize = 16.sp) } }
+        if (state.saved) item { Text(stringResource(R.string.saved), color = MaterialTheme.colorScheme.primary) }
+        if (state.loading) item { Text(stringResource(R.string.loading)) }
         state.preferences?.let { preferences ->
             item { SectionTitle(stringResource(R.string.server_preferences)) }
-            item { PreferenceToggle("Continue Watching", preferences.showContinueWatching, state.savingKey == "showContinueWatching") { model.setServerPreference("showContinueWatching", it) } }
-            item { PreferenceToggle("Recently Added", preferences.showRecentlyAdded, state.savingKey == "showRecentlyAdded") { model.setServerPreference("showRecentlyAdded", it) } }
-            item { PreferenceToggle("Trending", preferences.showTrending, state.savingKey == "showTrending") { model.setServerPreference("showTrending", it) } }
-            item { PreferenceToggle("Collections", preferences.showCollections, state.savingKey == "showCollections") { model.setServerPreference("showCollections", it) } }
-            item { PreferenceToggle("Discovery disabled", preferences.discoveryDisabled, state.savingKey == "discoveryDisabled") { model.setServerPreference("discoveryDisabled", it) } }
-            item { PreferenceToggle("Auto-skip intros", preferences.autoSkipIntro, state.savingKey == "autoSkipIntro") { model.setServerPreference("autoSkipIntro", it) } }
-            item { PreferenceToggle("Autoplay next episode", preferences.autoPlayNextEpisode, state.savingKey == "autoPlayNextEpisode") { model.setServerPreference("autoPlayNextEpisode", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_continue_watching), preferences.showContinueWatching, state.savingKey == "showContinueWatching") { model.setServerPreference("showContinueWatching", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_recently_added), preferences.showRecentlyAdded, state.savingKey == "showRecentlyAdded") { model.setServerPreference("showRecentlyAdded", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_trending), preferences.showTrending, state.savingKey == "showTrending") { model.setServerPreference("showTrending", it) } }
+            item { PreferenceToggle(stringResource(R.string.collections), preferences.showCollections, state.savingKey == "showCollections") { model.setServerPreference("showCollections", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_discovery_disabled), preferences.discoveryDisabled, state.savingKey == "discoveryDisabled") { model.setServerPreference("discoveryDisabled", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_auto_skip_intro), preferences.autoSkipIntro, state.savingKey == "autoSkipIntro") { model.setServerPreference("autoSkipIntro", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_autoplay_next), preferences.autoPlayNextEpisode, state.savingKey == "autoPlayNextEpisode") { model.setServerPreference("autoPlayNextEpisode", it) } }
         }
         item { SectionTitle(stringResource(R.string.local_playback)) }
-        item { ChoiceRow("Quality", QUALITY_OPTIONS, state.local.defaultQuality) { model.setLocal { prefs -> prefs.copy(defaultQuality = it) } } }
-        item { ChoiceRow("Subtitles", SubtitleMode.entries.map { it.name }, state.local.subtitleMode.name) { value -> model.setLocal { it.copy(subtitleMode = SubtitleMode.valueOf(value)) } } }
-        item { PreferenceToggle("Prefer audio description", state.local.preferAudioDescription, false) { value -> model.setLocal { it.copy(preferAudioDescription = value) } } }
-        item { PreferenceToggle("Match frame rate", state.local.matchFrameRate, false) { value -> model.setLocal { it.copy(matchFrameRate = value) } } }
+        item { ChoiceRow(stringResource(R.string.preference_quality), QUALITY_OPTIONS, state.local.defaultQuality) { value -> model.setLocal { it.copy(defaultQuality = requireNotNull(value)) } } }
+        item { ChoiceRow(stringResource(R.string.preference_max_bitrate), BITRATE_OPTIONS, state.local.maxBitrateKbps?.toString()) { value -> model.setLocal { it.copy(maxBitrateKbps = value?.toInt()) } } }
+        item { ChoiceRow(stringResource(R.string.preference_audio_language), LANGUAGE_OPTIONS, state.local.preferredAudioLanguage) { value -> model.setLocal { it.copy(preferredAudioLanguage = value) } } }
+        item { ChoiceRow(stringResource(R.string.preference_subtitle_language), LANGUAGE_OPTIONS, state.local.preferredSubtitleLanguage) { value -> model.setLocal { it.copy(preferredSubtitleLanguage = value) } } }
+        item { ChoiceRow(stringResource(R.string.preference_subtitle_mode), SUBTITLE_OPTIONS, state.local.subtitleMode.name) { value -> model.setLocal { it.copy(subtitleMode = SubtitleMode.valueOf(requireNotNull(value))) } } }
+        item { PreferenceToggle(stringResource(R.string.preference_audio_description), state.local.preferAudioDescription, false) { value -> model.setLocal { it.copy(preferAudioDescription = value) } } }
+        item { PreferenceToggle(stringResource(R.string.preference_match_frame_rate), state.local.matchFrameRate, false) { value -> model.setLocal { it.copy(matchFrameRate = value) } } }
         item { SectionTitle(stringResource(R.string.linked_devices)) }
         items(state.devices, key = { it.deviceSessionId }) { device ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column { Text(device.name, fontSize = 18.sp); Text(device.model.orEmpty(), fontSize = 14.sp, color = Color.LightGray) }
-                OutlinedButton(onClick = { model.revoke(device) }) { Text(if (device.current) stringResource(R.string.sign_out) else "Revoke") }
+                OutlinedButton(onClick = { model.revoke(device) }) {
+                    Text(if (device.current) stringResource(R.string.sign_out) else stringResource(R.string.revoke_device))
+                }
             }
         }
         item { SectionTitle(stringResource(R.string.diagnostics)) }
         item {
             val snapshot: SessionSnapshot? = graph.session.current()
-            Text("App ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", fontSize = 16.sp)
-            Text("Server ${snapshot?.baseUrl?.host.orEmpty()} • ${me?.server?.name.orEmpty()} • API v1", fontSize = 16.sp)
-            Text("Device …${snapshot?.deviceSessionId?.takeLast(6).orEmpty()} • identity ${snapshot?.identityVersion ?: 0}", fontSize = 16.sp)
+            Text(stringResource(R.string.diagnostic_app, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE), fontSize = 16.sp)
+            Text(stringResource(R.string.diagnostic_server, snapshot?.baseUrl?.host.orEmpty(), me?.server?.name.orEmpty()), fontSize = 16.sp)
+            Text(stringResource(R.string.diagnostic_device, snapshot?.deviceSessionId?.takeLast(6).orEmpty(), snapshot?.identityVersion ?: 0), fontSize = 16.sp)
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -218,12 +238,15 @@ private fun PreferenceToggle(label: String, checked: Boolean, busy: Boolean, upd
 }
 
 @Composable
-private fun ChoiceRow(label: String, options: List<String>, selected: String, update: (String) -> Unit) {
+private fun ChoiceRow(label: String, options: List<ChoiceOption>, selected: String?, update: (String?) -> Unit) {
     Column {
         Text(label, fontSize = 17.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             options.forEach { option ->
-                OutlinedButton(onClick = { update(option) }) { Text(if (option == selected) "$option •" else option) }
+                val optionLabel = stringResource(option.label)
+                OutlinedButton(onClick = { update(option.value) }) {
+                    Text(if (option.value == selected) stringResource(R.string.selected_option, optionLabel) else optionLabel)
+                }
             }
         }
     }
@@ -240,4 +263,43 @@ private fun Preferences.booleanValue(key: String): Boolean = when (key) {
     else -> false
 }
 
-private val QUALITY_OPTIONS = listOf("original", "1080p-20", "1080p-12", "1080p-8", "720p-4", "720p-2", "480p-1.5")
+private data class ChoiceOption(val value: String?, @StringRes val label: Int)
+
+private val QUALITY_OPTIONS = listOf(
+    ChoiceOption("original", R.string.quality_original),
+    ChoiceOption("1080p-20", R.string.quality_1080p_20),
+    ChoiceOption("1080p-12", R.string.quality_1080p_12),
+    ChoiceOption("1080p-8", R.string.quality_1080p_8),
+    ChoiceOption("720p-4", R.string.quality_720p_4),
+    ChoiceOption("720p-2", R.string.quality_720p_2),
+    ChoiceOption("480p-1.5", R.string.quality_480p_15),
+)
+
+private val BITRATE_OPTIONS = listOf(
+    ChoiceOption(null, R.string.default_option),
+    ChoiceOption("2000", R.string.bitrate_2),
+    ChoiceOption("4000", R.string.bitrate_4),
+    ChoiceOption("8000", R.string.bitrate_8),
+    ChoiceOption("12000", R.string.bitrate_12),
+    ChoiceOption("20000", R.string.bitrate_20),
+)
+
+private val LANGUAGE_OPTIONS = listOf(
+    ChoiceOption(null, R.string.default_option),
+    ChoiceOption("en", R.string.language_english),
+    ChoiceOption("es", R.string.language_spanish),
+    ChoiceOption("fr", R.string.language_french),
+    ChoiceOption("de", R.string.language_german),
+    ChoiceOption("it", R.string.language_italian),
+    ChoiceOption("pt", R.string.language_portuguese),
+    ChoiceOption("ja", R.string.language_japanese),
+    ChoiceOption("ko", R.string.language_korean),
+    ChoiceOption("zh", R.string.language_chinese),
+)
+
+private val SUBTITLE_OPTIONS = listOf(
+    ChoiceOption(SubtitleMode.AUTO.name, R.string.subtitle_auto),
+    ChoiceOption(SubtitleMode.ALWAYS.name, R.string.subtitle_always),
+    ChoiceOption(SubtitleMode.FORCED_ONLY.name, R.string.subtitle_forced_only),
+    ChoiceOption(SubtitleMode.OFF.name, R.string.subtitle_off),
+)
