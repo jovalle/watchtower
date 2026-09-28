@@ -4,7 +4,7 @@ import { scrobbleTimeline } from "~/lib/trakt/scrobble.server";
 import { nativePlexClient, plexData } from "~/lib/native/catalog.server";
 import type { TimelineResponse } from "~/lib/native/contract";
 import { NativeError, nativeJson, readJsonObject, requireMethod, withNativeErrors } from "~/lib/native/http.server";
-import { requireNativePrincipal } from "~/lib/native/principal.server";
+import { recheckPrincipal, requireNativePrincipal } from "~/lib/native/principal.server";
 import { requireOwnedPlayback, serializedTimeline } from "~/lib/native/playback-resources.server";
 
 export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
@@ -20,6 +20,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const client = nativePlexClient(principal);
     const accepted = await serializedTimeline(session, Number(body.sequence), async () => {
+      await recheckPrincipal(principal);
       plexData(await client.reportTimeline({ ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }));
       if (body.state !== "playing") await invalidateCache(getUserCacheKey("home", principal.serverToken));
       void scrobbleTimeline({ userId: Number(principal.userId), client, ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }).catch(() => {

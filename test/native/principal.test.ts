@@ -6,8 +6,11 @@ import { resetNativeCryptoForTests } from "~/lib/native/crypto.server";
 import {
   createDeviceSession,
   findDeviceSession,
+  replaceDeviceProfile,
   revokeDeviceSession,
   resetDeviceStoreForTests,
+  settleDeviceStoreForTests,
+  unsealDeviceCredentials,
   updateDeviceSession,
 } from "~/lib/native/device-store.server";
 import {
@@ -36,6 +39,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  // A request can leave a last-seen write queued; deleting the directory underneath it fails with ENOTEMPTY.
+  await settleDeviceStoreForTests();
   await rm(dataPath, { recursive: true, force: true });
 });
 
@@ -186,6 +191,58 @@ describe("native principal verification", () => {
     await requireNativePrincipal(principalRequest(created.accessToken));
 
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects stale verification after a profile switch without replacing its server token", async () => {
+    const created = await createPrincipalSession(20 * 60 * 1000);
+    let resolveVerification!: (response: Response) => void;
+    const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveVerification = resolve;
+        }),
+    );
+
+    const pendingPrincipal = requireNativePrincipal(
+      principalRequest(created.accessToken),
+    );
+    await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(1));
+    await replaceDeviceProfile(created.accessToken, 1, {
+      profile: {
+        userId: "20",
+        title: "Home User",
+        restricted: true,
+        owner: false,
+        protected: true,
+      },
+      plexToken: "new-profile-plex-token",
+      serverToken: "new-profile-server-token",
+      isOwner: false,
+    });
+    resolveVerification(
+      Response.json([
+        {
+          provides: "server",
+          clientIdentifier: "fake-machine",
+          name: "Fake PMS",
+          accessToken: "stale-profile-server-token",
+          owned: true,
+        },
+      ]),
+    );
+
+    await expect(pendingPrincipal).rejects.toMatchObject({
+      status: 409,
+      code: "identity_version_mismatch",
+    });
+    const stored = await findDeviceSession(created.accessToken);
+    expect(stored?.profile.userId).toBe("20");
+    await expect(
+      unsealDeviceCredentials(stored!, created.accessToken),
+    ).resolves.toEqual({
+      plexToken: "new-profile-plex-token",
+      serverToken: "new-profile-server-token",
+    });
   });
 
   it("rechecks revocation, expiry, and identity changes before mutations", async () => {

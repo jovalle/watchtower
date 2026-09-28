@@ -5,8 +5,10 @@ import { getServerConfig } from "~/lib/config/server-config.server";
 import { sha256 } from "./crypto.server";
 import {
   findDeviceSession,
+  currentDeviceSessionAfterVerification,
   replaceServerToken,
   revokeDeviceSession,
+  revokeDeviceSessionAfterVerification,
   unsealDeviceCredentials,
   updateDeviceSession,
   type DeviceSessionRecord,
@@ -102,10 +104,17 @@ export async function requireNativePrincipal(
     const access = await checkServerAccessDetailed(credentials.plexToken);
     if (access.status === "denied") {
       verificationRetryAt.delete(record.tokenHash);
-      await revokeDeviceSession(record.deviceSessionId);
+      if (!(await revokeDeviceSessionAfterVerification(record))) {
+        throw new NativeError(409, "identity_version_mismatch", "The active profile changed. Refresh identity and retry.");
+      }
       throw new NativeError(401, "upstream_auth_failed", "Plex access could not be verified.");
     }
     if (access.status === "unavailable") {
+      const current = await currentDeviceSessionAfterVerification(record);
+      if (!current) {
+        throw new NativeError(409, "identity_version_mismatch", "The active profile changed. Refresh identity and retry.");
+      }
+      record = current;
       verificationRetryAt.set(record.tokenHash, now + VERIFICATION_RETRY_MS);
       if (verificationAgeMs >= MAX_VERIFICATION_AGE_MS) {
         throw new NativeError(
@@ -118,12 +127,16 @@ export async function requireNativePrincipal(
       }
     } else {
       verificationRetryAt.delete(record.tokenHash);
-      record = (await updateDeviceSession(record.tokenHash, (stored) => {
-        stored.verifiedAtMs = Date.now();
-        stored.verifyImmediately = false;
-      }))!;
+      const updated = await replaceServerToken(
+        token,
+        record,
+        access.serverToken,
+      );
+      if (!updated || updated === "stale") {
+        throw new NativeError(409, "identity_version_mismatch", "The active profile changed. Refresh identity and retry.");
+      }
+      record = updated;
       credentials.serverToken = access.serverToken;
-      await replaceServerToken(token, access.serverToken);
     }
   } else if (verificationAgeMs >= MAX_VERIFICATION_AGE_MS) {
     throw new NativeError(
