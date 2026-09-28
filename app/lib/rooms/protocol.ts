@@ -478,6 +478,21 @@ export function parseSnapshot(value: unknown): Parsed<RoomSnapshot> {
   const anchor = value.anchor;
   if (!isRecord(anchor) || !isCount(anchor.positionMs) || !isCount(anchor.effectiveAtMs) || anchor.rate !== 1)
     return fail("anchor is invalid");
-  if (!Array.isArray(value.participants) || value.participants.length > ROOM_POLICY.maxParticipants) return fail("participants are invalid");
+  const media = value.media;
+  if (!isRecord(media) || !(["serverMachineId", "ratingKey", "mediaId", "partId"] as const).every((key) => typeof media[key] === "string" && media[key] !== ""))
+    return fail("media is invalid");
+  if (value.hostParticipantId !== null && !isUuid(value.hostParticipantId)) return fail("hostParticipantId is invalid");
+  if (
+    !Array.isArray(value.participants) ||
+    value.participants.length > ROOM_POLICY.maxParticipants ||
+    !value.participants.every(
+      (participant) =>
+        isRecord(participant) &&
+        isUuid(participant.participantId) &&
+        typeof participant.displayName === "string" &&
+        (["connected", "ready", "buffering", "blocking"] as const).every((key) => typeof participant[key] === "boolean")
+    )
+  )
+    return fail("participants are invalid");
   return { ok: true, value: value as RoomSnapshot };
 }
