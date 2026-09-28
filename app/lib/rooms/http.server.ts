@@ -86,7 +86,8 @@ export async function prepareRoomPost<T>(
   if (Number.isFinite(declaredLength) && declaredLength > ROOM_POLICY.maxBodyBytes) {
     return { ok: false, response: roomError("payload_too_large", "Request body is too large.") };
   }
-  const csrfError = requireSameOrigin(request);
+  // Bearer credentials are never sent ambiently by browsers; cookie requests need same-origin proof.
+  const csrfError = request.headers.has("Authorization") ? null : requireSameOrigin(request);
   if (csrfError) return { ok: false, response: csrfError };
   const auth = await authenticateRoomRequest(request);
   if (!auth.ok) return auth;
