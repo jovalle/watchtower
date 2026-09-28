@@ -148,7 +148,8 @@ class PlaybackController(
     private var scheduledPlayJob: Job? = null
     private var bufferingPresenceJob: Job? = null
     private var reconciliationMemory = ReconciliationMemory()
-    private var lastRoomObservationAtMs = Long.MIN_VALUE
+    // 0 (not Long.MIN_VALUE): `now - MIN_VALUE` overflows and would disable the room observation tick.
+    private var lastRoomObservationAtMs = 0L
     private var roomMediaGeneration = roomSession?.state?.value?.snapshot?.mediaGeneration
     private var roomPresence = PresenceObservation()
     private var lastReadyClaim: Triple<Boolean, Long, Long>? = null
