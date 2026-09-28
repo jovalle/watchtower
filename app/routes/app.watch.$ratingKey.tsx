@@ -33,6 +33,7 @@ import {
   getUserSettings,
   DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
+import { getWebDevice } from "~/lib/rooms/principal.server";
 
 interface AudioTrack {
   id: number;
@@ -229,11 +230,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     QUALITY_PROFILES[0];
 
   // Get stream URL - offset is in SECONDS
+  const device = await getWebDevice(request);
   const playbackInfo = client.getPlaybackInfo(ratingKey, {
     offsetSeconds: resumeSeconds,
     quality: selectedQuality,
     forceTranscode,
     subtitles: trackNeeds.burnSubtitleId !== null ? "burn" : "none",
+    deviceScope: device.deviceSessionId,
   });
 
   // Logging
@@ -374,7 +377,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     nextEpisode,
     autoSkipIntro: preferences.autoSkipIntro,
     autoPlayNextEpisode: preferences.autoPlayNextEpisode,
-  });
+  }, device.setCookie ? { headers: { "Set-Cookie": device.setCookie } } : undefined);
 }
 
 export default function WatchPage() {
