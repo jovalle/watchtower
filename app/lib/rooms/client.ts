@@ -68,7 +68,15 @@ type ClientOptions = {
 };
 
 const AUTH_TERMINAL_STATUSES = new Set([401, 403, 404, 410]);
+// Command rejections that end the membership; any other answered rejection only drops that intent.
+const COMMAND_TERMINAL_CODES = new Set<RoomErrorCode | null>([
+  "removed",
+  "forbidden",
+  "room_ended",
+  "membership_ended",
+]);
 const MUTATION_EXPIRY_MS = 30_000;
+const PRESENCE_RETRY_MS = 1_000;
 const mutationBodies = new Map<string, object>();
 
 export class RoomApiError extends Error {
@@ -229,6 +237,7 @@ export class BrowserRoomClient {
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private presenceRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private lastAcknowledgementAtMs = 0;
   private commandSequence = 0;
   private presenceSequence = 0;
@@ -368,7 +377,12 @@ export class BrowserRoomClient {
       window.addEventListener("online", this.handleResume);
       document.addEventListener("visibilitychange", this.handleVisibility);
     } catch (error) {
-      this.handleRequestFailure(error);
+      if (this.handleRequestFailure(error) || this.stopped) return;
+      // A failed first contact retries like any later disconnect instead of staying "connecting".
+      this.startTimers();
+      window.addEventListener("online", this.handleResume);
+      document.addEventListener("visibilitychange", this.handleVisibility);
+      this.beginReconnect();
     }
   }
 
@@ -509,9 +523,11 @@ export class BrowserRoomClient {
     if (this.livenessTimer) clearInterval(this.livenessTimer);
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.presenceRetryTimer) clearTimeout(this.presenceRetryTimer);
     this.livenessTimer = null;
     this.presenceTimer = null;
     this.reconnectTimer = null;
+    this.presenceRetryTimer = null;
   }
 
   async sendCommand(command: RoomCommand): Promise<boolean> {
@@ -541,6 +557,21 @@ export class BrowserRoomClient {
         if (error instanceof RoomApiError && error.status === 409) {
           if (error.snapshot) this.applySnapshot(error.snapshot);
           this.update({ lastErrorCode: error.code });
+          return false;
+        }
+        if (
+          error instanceof RoomApiError &&
+          error.status !== 401 &&
+          !COMMAND_TERMINAL_CODES.has(error.code)
+        ) {
+          if (error.snapshot) this.applySnapshot(error.snapshot);
+          this.update({ lastErrorCode: error.code });
+          // "No next episode" and a missing room share not_found; ask the room which one it is.
+          if (error.code === "not_found") {
+            void this.recover().catch((recoverError) =>
+              this.handleRequestFailure(recoverError)
+            );
+          }
           return false;
         }
         if (!this.handleRequestFailure(error)) this.beginReconnect();
@@ -574,6 +605,16 @@ export class BrowserRoomClient {
       this.acknowledge();
       return !result.ack.ignored;
     } catch (error) {
+      if (error instanceof RoomApiError && error.status === 429) {
+        // Presence is latest-state: resend the newest report after the burst.
+        this.presenceRetryTimer ??= setTimeout(() => {
+          this.presenceRetryTimer = null;
+          if (this.state.status === "connected") {
+            void this.reportPresence(this.latestPresence).catch(() => {});
+          }
+        }, PRESENCE_RETRY_MS);
+        return false;
+      }
       if (!this.handleRequestFailure(error)) this.beginReconnect();
       throw error;
     }
