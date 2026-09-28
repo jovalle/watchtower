@@ -1,0 +1,10 @@
+# Native library / 16 KB audit of watchtower-tv-0.1.0-1-release-unsigned.apk
+entry: lib/arm64-v8a/libandroidx.graphics.path.so
+entry: lib/armeabi-v7a/libandroidx.graphics.path.so
+entry: lib/x86/libandroidx.graphics.path.so
+entry: lib/x86_64/libandroidx.graphics.path.so
+zipalign -c -P 16: Verification successful
+ELF lib/arm64-v8a/libandroidx.graphics.path.so: ELF64 LOAD p_align=[16384] >=16K OK
+ELF lib/armeabi-v7a/libandroidx.graphics.path.so: ELF32 LOAD p_align=[16384] >=16K OK
+ELF lib/x86/libandroidx.graphics.path.so: ELF32 LOAD p_align=[16384] >=16K OK
+ELF lib/x86_64/libandroidx.graphics.path.so: ELF64 LOAD p_align=[16384] >=16K OK
