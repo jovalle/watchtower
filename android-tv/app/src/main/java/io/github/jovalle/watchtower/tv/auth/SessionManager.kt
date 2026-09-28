@@ -57,11 +57,28 @@ sealed interface PairingState {
 /** A new effective identity (or none). Consumers drop personalized caches, players and pending work. */
 data class IdentityChange(val previous: SessionSnapshot?, val current: SessionSnapshot?)
 
+internal sealed interface StoredCredentialAction {
+    data class Restore(val snapshot: SessionSnapshot, val me: MeResponse?) : StoredCredentialAction
+    data class Discard(val identityChange: IdentityChange) : StoredCredentialAction
+}
+
 data class DeviceInfo(val name: String, val model: String?, val versionName: String, val versionCode: Int)
 
-class SessionManager(
+internal interface SessionCredentialStore {
+    fun read(): StoredCredential?
+    fun write(credential: StoredCredential)
+    fun clear()
+}
+
+private class EncryptedSessionCredentialStore(private val store: CredentialStore) : SessionCredentialStore {
+    override fun read() = store.read()
+    override fun write(credential: StoredCredential) = store.write(credential)
+    override fun clear() = store.clear()
+}
+
+class SessionManager internal constructor(
     private val api: WatchtowerApi,
-    private val store: CredentialStore,
+    private val store: SessionCredentialStore,
     private val prefs: SharedPreferences,
     private val appScope: CoroutineScope,
     private val device: DeviceInfo,
@@ -69,6 +86,26 @@ class SessionManager(
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
     private val wallClock: () -> Long = System::currentTimeMillis,
 ) : ApiEvents {
+    constructor(
+        api: WatchtowerApi,
+        store: CredentialStore,
+        prefs: SharedPreferences,
+        appScope: CoroutineScope,
+        device: DeviceInfo,
+        allowCleartext: Boolean,
+        elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
+        wallClock: () -> Long = System::currentTimeMillis,
+    ) : this(
+        api,
+        EncryptedSessionCredentialStore(store),
+        prefs,
+        appScope,
+        device,
+        allowCleartext,
+        elapsedRealtime,
+        wallClock,
+    )
+
     private val _state = MutableStateFlow<AuthState>(AuthState.Starting)
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
@@ -92,15 +129,19 @@ class SessionManager(
     /** Restores a remembered device session without waiting for the network. */
     suspend fun start() = mutex.withLock {
         val stored = store.read()
-        val base = stored?.baseUrl?.toHttpUrlOrNull()
-        if (stored != null && base != null && wallClock() < stored.expiresAtMs + CLOCK_SKEW_GRACE_MS) {
-            val snapshot = SessionSnapshot(base, stored.accessToken, stored.deviceSessionId, stored.identityVersion, stored.expiresAtMs)
-            _state.value = AuthState.SignedIn(snapshot, stored.me)
-            _identityChanges.tryEmit(IdentityChange(null, snapshot))
-            appScope.launch { runCatching { refreshMe() } }
-            return@withLock
+        when (val action = stored?.let { storedCredentialAction(it, wallClock()) }) {
+            is StoredCredentialAction.Restore -> {
+                _state.value = AuthState.SignedIn(action.snapshot, action.me)
+                _identityChanges.tryEmit(IdentityChange(null, action.snapshot))
+                appScope.launch { runCatching { refreshMe() } }
+                return@withLock
+            }
+            is StoredCredentialAction.Discard -> {
+                store.clear()
+                _identityChanges.tryEmit(action.identityChange)
+            }
+            null -> Unit
         }
-        if (stored != null) store.clear()
         val lastAddress = prefs.getString(PREF_BASE_URL, null)
         _state.value = lastAddress?.toHttpUrlOrNull()?.let { AuthState.ReadyToPair(it, null, null) }
             ?: AuthState.NeedsServer(null, null)
@@ -295,8 +336,8 @@ class SessionManager(
     private fun clearIdentity(snapshot: SessionSnapshot, message: String?) {
         store.clear()
         resetIdentityScope()
-        _state.value = AuthState.ReadyToPair(snapshot.baseUrl, null, message)
         _identityChanges.tryEmit(IdentityChange(snapshot, null))
+        _state.value = AuthState.ReadyToPair(snapshot.baseUrl, null, message)
     }
 
     private fun resetIdentityScope() {
@@ -321,8 +362,6 @@ class SessionManager(
         private const val PREF_BASE_URL = "base_url"
         private const val MIN_POLL_INTERVAL_MS = 5_000L
         private const val REVOKE_TIMEOUT_MS = 5_000L
-        private const val CLOCK_SKEW_GRACE_MS = 24L * 60 * 60 * 1000
-
         fun signedOutMessage(code: String): String = when (code) {
             "session_expired" -> "Your sign-in on this TV expired. Link it again to continue."
             "session_revoked" -> "This TV was signed out from another device. Link it again to continue."
@@ -338,3 +377,22 @@ class SessionManager(
         }
     }
 }
+
+internal fun storedCredentialAction(stored: StoredCredential, wallClockMs: Long): StoredCredentialAction {
+    val previous = stored.baseUrl.toHttpUrlOrNull()?.let { baseUrl ->
+        SessionSnapshot(
+            baseUrl = baseUrl,
+            accessToken = stored.accessToken,
+            deviceSessionId = stored.deviceSessionId,
+            identityVersion = stored.identityVersion,
+            expiresAtMs = stored.expiresAtMs,
+        )
+    }
+    return if (previous != null && wallClockMs < stored.expiresAtMs + CLOCK_SKEW_GRACE_MS) {
+        StoredCredentialAction.Restore(previous, stored.me)
+    } else {
+        StoredCredentialAction.Discard(IdentityChange(previous, null))
+    }
+}
+
+private const val CLOCK_SKEW_GRACE_MS = 24L * 60 * 60 * 1000

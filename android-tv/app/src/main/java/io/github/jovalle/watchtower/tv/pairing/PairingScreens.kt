@@ -27,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
@@ -60,32 +62,46 @@ fun ServerAddressScreen(graph: AppGraph, initialAddress: String?, message: Strin
     var submitting by remember { mutableStateOf(false) }
 
     AuthPanel(title = stringResource(R.string.server_title)) {
-        Text(stringResource(R.string.server_prompt), fontSize = 18.sp)
-        Spacer(Modifier.height(18.dp))
-        BasicTextField(
-            value = address,
-            onValueChange = { address = it; error = null },
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.White)
-                .border(3.dp, MaterialTheme.colorScheme.primary)
-                .padding(16.dp)
-                .focusable(),
-            textStyle = TextStyle(color = Color.Black, fontSize = 20.sp),
-            singleLine = true,
-        )
-        ErrorText(error)
-        Button(
-            onClick = {
-                if (submitting) return@Button
+        ServerAddressContent(address, error, submitting, { address = it; error = null }) {
+            if (!submitting) {
                 submitting = true
                 graph.appScope.launch {
                     error = graph.session.chooseServer(address)
                     submitting = false
                 }
-            },
-            enabled = !submitting,
-        ) { Text(if (submitting) stringResource(R.string.connecting) else stringResource(R.string.continue_action)) }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ServerAddressContent(
+    address: String,
+    error: String?,
+    submitting: Boolean,
+    onAddressChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    val addressFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { addressFocus.requestFocus() }
+    Text(stringResource(R.string.server_prompt), fontSize = 18.sp)
+    Spacer(Modifier.height(18.dp))
+    BasicTextField(
+        value = address,
+        onValueChange = onAddressChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .border(3.dp, MaterialTheme.colorScheme.primary)
+            .padding(16.dp)
+            .focusRequester(addressFocus)
+            .focusable(),
+        textStyle = TextStyle(color = Color.Black, fontSize = 20.sp),
+        singleLine = true,
+    )
+    ErrorText(error)
+    Button(onClick = onSubmit, enabled = !submitting) {
+        Text(if (submitting) stringResource(R.string.connecting) else stringResource(R.string.continue_action))
     }
 }
 
@@ -224,16 +240,16 @@ class ProfileGateController(private val graph: AppGraph) {
         graph.appScope.launch {
             try {
                 graph.session.switchProfile(profile.profileId, pin)
-                state = state.copy(busy = false, completed = true)
+                state = state.afterSwitch()
             } catch (error: ApiException) {
                 val message = when (error.code) {
                     "invalid_pin" -> "That PIN was not accepted."
                     "rate_limited" -> "Too many attempts. Wait before trying again."
                     else -> error.message ?: "Profile change failed."
                 }
-                state = state.copy(busy = false, error = message)
+                state = state.afterSwitch(message)
             } catch (error: Exception) {
-                state = state.copy(busy = false, error = error.message ?: "Profile change failed.")
+                state = state.afterSwitch(error.message ?: "Profile change failed.")
             }
         }
     }
@@ -247,17 +263,33 @@ fun ProfileChooser(graph: AppGraph, controller: ProfileGateController) {
         when {
             state.loading -> Text(stringResource(R.string.loading))
             state.selected != null -> PinPad(state, controller)
-            else -> {
-                ErrorText(state.error)
-                state.profiles.forEach { profile ->
-                    Button(onClick = { controller.choose(profile) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(profile.title + if (profile.protected) "  •  ${stringResource(R.string.pin_required)}" else "")
-                    }
-                }
-            }
+            else -> ProfileList(state.profiles, state.error, controller::choose)
         }
     }
 }
+
+@Composable
+internal fun ProfileList(profiles: List<HomeProfile>, error: String?, onChoose: (HomeProfile) -> Unit) {
+    val primaryFocus = remember { FocusRequester() }
+    LaunchedEffect(profiles) { if (profiles.isNotEmpty()) primaryFocus.requestFocus() }
+    ErrorText(error)
+    profiles.forEachIndexed { index, profile ->
+        Button(
+            onClick = { onChoose(profile) },
+            modifier = Modifier.fillMaxWidth().then(if (index == 0) Modifier.focusRequester(primaryFocus) else Modifier),
+        ) {
+            Text(profile.title + if (profile.protected) "  •  ${stringResource(R.string.pin_required)}" else "")
+        }
+    }
+}
+
+internal fun ProfileGateState.afterSwitch(error: String? = null) = copy(
+    selected = null,
+    pin = "",
+    busy = false,
+    error = error,
+    completed = error == null,
+)
 
 @Composable
 private fun PinPad(state: ProfileGateState, controller: ProfileGateController) {
