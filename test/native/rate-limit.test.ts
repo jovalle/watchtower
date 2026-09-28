@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  checkRateLimitFailures,
   clearRateLimit,
   recordRateLimitFailure,
   resetNativeRateLimitsForTests,
@@ -8,18 +9,20 @@ import {
 describe("native failure rate limits", () => {
   beforeEach(() => resetNativeRateLimitsForTests());
 
-  it("blocks the fifth rejected PIN and clears after success", () => {
+  it("blocks after five rejected PINs and clears after success", () => {
     const recordFailure = () =>
       recordRateLimitFailure("profile-pin", "device:profile", 5, 15_000, 1_000);
+    const checkFailures = () =>
+      checkRateLimitFailures("profile-pin", "device:profile", 5, 15_000, 1_000);
 
-    for (let attempt = 1; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       expect(recordFailure).not.toThrow();
     }
-    expect(recordFailure).toThrowError(
+    expect(checkFailures).toThrowError(
       expect.objectContaining({ status: 429, code: "rate_limited" }),
     );
 
     clearRateLimit("profile-pin", "device:profile");
-    expect(recordFailure).not.toThrow();
+    expect(checkFailures).not.toThrow();
   });
 });

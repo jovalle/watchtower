@@ -1,6 +1,6 @@
 import { activatePlaybackSession, ownedNativePlaybackSession, playbackSessionExists, type PlaybackSession } from "~/lib/plex/playback-session.server";
 import { NativeError } from "./http.server";
-import type { NativePrincipal } from "./principal.server";
+import { recheckPrincipal, type NativePrincipal } from "./principal.server";
 import { requireNativePlexResponse } from "./catalog.server";
 
 export function requireOwnedPlayback(
@@ -70,6 +70,7 @@ export async function transcodeCommand(
   command: "ping" | "stop",
 ): Promise<void> {
   if (session.native?.delivery !== "hls" || session.native.replaced) return;
+  await recheckPrincipal(principal);
   const url = new URL(`/video/:/transcode/universal/${command}`, principal.serverUrl);
   url.searchParams.set("session", session.native ? session.clientId.split("-").slice(-5).join("-") : "");
   url.searchParams.set("X-Plex-Token", principal.serverToken);
