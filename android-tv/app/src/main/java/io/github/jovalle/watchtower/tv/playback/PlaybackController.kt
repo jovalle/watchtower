@@ -87,7 +87,9 @@ class PlaybackController(
     private val sessionPlayer = GatedPlayer(player, gate) { index, position ->
         mapper?.toAbsolute(index, position) ?: position
     }
-    val mediaSession: MediaSession = MediaSession.Builder(context, sessionPlayer).build()
+    val mediaSession: MediaSession = MediaSession.Builder(context, sessionPlayer)
+        .setId("watchtower-player-${java.util.UUID.randomUUID()}")
+        .build()
     val surfacePlayer: Player get() = player
 
     private val _state = MutableStateFlow(PlaybackUiState())
@@ -245,17 +247,21 @@ class PlaybackController(
 
     fun exit() {
         if (!closed.compareAndSet(false, true)) return
-        val finalReporter = reporter
-        release()
-        graph.appScope.launch(Dispatchers.IO) { finalReporter?.stopFinal() }
+        releaseAndStop()
         onExit()
     }
 
     fun dispose() {
         if (!closed.compareAndSet(false, true)) return
+        releaseAndStop()
+    }
+
+    /** Reads the final position on the player thread, then releases; the stop report outlives the screen. */
+    private fun releaseAndStop() {
         val finalReporter = reporter
+        val finalPosition = absolutePosition()
         release()
-        graph.appScope.launch(Dispatchers.IO) { finalReporter?.stopFinal() }
+        graph.appScope.launch(Dispatchers.IO) { finalReporter?.stopFinal(finalPosition) }
     }
 
     private suspend fun initialize() {
@@ -379,7 +385,7 @@ class PlaybackController(
                 val replacement = withContext(Dispatchers.IO) { graph.api.createPlayback(captured, request) }
                 lastCapabilities = capabilities
                 val oldReporter = reporter
-                oldReporter?.stopFinal()
+                oldReporter?.stopFinal(absolutePosition())
                 install(replacement)
             } catch (error: Exception) {
                 _state.value = _state.value.copy(
@@ -466,7 +472,9 @@ class PlaybackController(
                 val introEnd = current.markers.firstOrNull {
                     it.type == "intro" && position in it.startMs until it.endMs
                 }?.endMs
-                bingePolicy.skipTarget(position, current.markers, current.autoplay.autoSkipIntro)?.let(::seekAbsolute)
+                bingePolicy.skipTarget(position, current.markers, current.autoplay.autoSkipIntro)?.let {
+                    gate.submitAutomaticIntent(PlaybackIntent.SeekTo(it))
+                }
                 if (nextDeadline == null && !nextCountdownCancelled) {
                     nextDeadline = bingePolicy.nextCountdown(
                         position,
@@ -478,7 +486,9 @@ class PlaybackController(
                     )?.deadlineMs
                 }
                 if (nextDeadline != null && android.os.SystemClock.elapsedRealtime() >= nextDeadline) {
-                    current.nextItem?.ratingKey?.let { openItem(it) }
+                    _state.value = _state.value.copy(nextDeadlineMs = null)
+                    nextCountdownCancelled = true
+                    gate.submitAutomaticIntent(PlaybackIntent.Next)
                     return
                 }
                 _state.value = _state.value.copy(
@@ -493,9 +503,7 @@ class PlaybackController(
 
     private fun openItem(ratingKey: String) {
         if (!closed.compareAndSet(false, true)) return
-        val finalReporter = reporter
-        release()
-        graph.appScope.launch(Dispatchers.IO) { finalReporter?.stopFinal() }
+        releaseAndStop()
         onOpenItem(PlayerRoute(ratingKey))
     }
 
@@ -526,7 +534,9 @@ class PlaybackController(
             if (current.delivery.type == "hls" && active < current.delivery.parts.lastIndex) {
                 replace("part_change", current.delivery.parts[active + 1].startMs)
             } else if (current.nextItem != null && current.autoplay.autoPlayNextEpisode && !nextCountdownCancelled) {
-                openItem(current.nextItem.ratingKey ?: return)
+                if (gate.submitAutomaticIntent(PlaybackIntent.Next) is AuthorityDecision.Deny) {
+                    _state.value = _state.value.copy(controlsVisible = true, playWhenReady = false, isPlaying = false)
+                }
             } else if (current.nextItem != null) {
                 _state.value = _state.value.copy(controlsVisible = true, playWhenReady = false, isPlaying = false)
             } else {
@@ -615,6 +625,10 @@ class PlaybackController(
     }
 }
 
+/**
+ * The only player MediaSession controllers see. Every transport path (play/pause, playWhenReady, seeks, next/previous,
+ * stop) goes through the intent gate; commands that could swap media or change speed are not offered at all.
+ */
 @androidx.annotation.OptIn(UnstableApi::class)
 private class GatedPlayer(
     player: Player,
@@ -623,11 +637,40 @@ private class GatedPlayer(
 ) : ForwardingPlayer(player) {
     override fun play() { gate.submitUserIntent(PlaybackIntent.Play) }
     override fun pause() { gate.submitUserIntent(PlaybackIntent.Pause) }
+    override fun setPlayWhenReady(playWhenReady: Boolean) {
+        gate.submitUserIntent(if (playWhenReady) PlaybackIntent.Play else PlaybackIntent.Pause)
+    }
     override fun seekTo(positionMs: Long) { gate.submitUserIntent(PlaybackIntent.SeekTo(toAbsolute(currentMediaItemIndex, positionMs))) }
     override fun seekTo(mediaItemIndex: Int, positionMs: Long) { gate.submitUserIntent(PlaybackIntent.SeekTo(toAbsolute(mediaItemIndex, positionMs))) }
+    override fun seekToDefaultPosition() { gate.submitUserIntent(PlaybackIntent.StartOver) }
+    override fun seekToDefaultPosition(mediaItemIndex: Int) { gate.submitUserIntent(PlaybackIntent.SeekTo(toAbsolute(mediaItemIndex, 0))) }
     override fun seekBack() { gate.submitUserIntent(PlaybackIntent.SeekBy(-10_000)) }
     override fun seekForward() { gate.submitUserIntent(PlaybackIntent.SeekBy(10_000)) }
+    override fun seekToNext() { gate.submitUserIntent(PlaybackIntent.Next) }
+    override fun seekToNextMediaItem() { gate.submitUserIntent(PlaybackIntent.Next) }
+    override fun seekToPrevious() { gate.submitUserIntent(PlaybackIntent.Previous) }
+    override fun seekToPreviousMediaItem() { gate.submitUserIntent(PlaybackIntent.Previous) }
     override fun stop() { gate.submitUserIntent(PlaybackIntent.Stop) }
+
+    override fun getAvailableCommands(): Player.Commands =
+        super.getAvailableCommands().buildUpon().removeAll(*BLOCKED_COMMANDS).build()
+
+    override fun isCommandAvailable(command: Int): Boolean = command !in BLOCKED_COMMANDS && super.isCommandAvailable(command)
+
+    private companion object {
+        val BLOCKED_COMMANDS = intArrayOf(
+            Player.COMMAND_SET_MEDIA_ITEM,
+            Player.COMMAND_CHANGE_MEDIA_ITEMS,
+            Player.COMMAND_SEEK_TO_MEDIA_ITEM,
+            Player.COMMAND_SET_SPEED_AND_PITCH,
+            Player.COMMAND_SET_SHUFFLE_MODE,
+            Player.COMMAND_SET_REPEAT_MODE,
+            Player.COMMAND_SET_PLAYLIST_METADATA,
+            Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS,
+            Player.COMMAND_PREPARE,
+            Player.COMMAND_RELEASE,
+        )
+    }
 }
 
 private class ApiProgressTransport(
