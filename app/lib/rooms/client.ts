@@ -76,6 +76,7 @@ const COMMAND_TERMINAL_CODES = new Set<RoomErrorCode | null>([
   "membership_ended",
 ]);
 const MUTATION_EXPIRY_MS = 30_000;
+const PRESENCE_RETRY_MS = 1_000;
 const mutationBodies = new Map<string, object>();
 
 export class RoomApiError extends Error {
@@ -236,6 +237,7 @@ export class BrowserRoomClient {
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private presenceRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private lastAcknowledgementAtMs = 0;
   private commandSequence = 0;
   private presenceSequence = 0;
@@ -516,9 +518,11 @@ export class BrowserRoomClient {
     if (this.livenessTimer) clearInterval(this.livenessTimer);
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.presenceRetryTimer) clearTimeout(this.presenceRetryTimer);
     this.livenessTimer = null;
     this.presenceTimer = null;
     this.reconnectTimer = null;
+    this.presenceRetryTimer = null;
   }
 
   async sendCommand(command: RoomCommand): Promise<boolean> {
@@ -596,6 +600,16 @@ export class BrowserRoomClient {
       this.acknowledge();
       return !result.ack.ignored;
     } catch (error) {
+      if (error instanceof RoomApiError && error.status === 429) {
+        // Presence is latest-state: resend the newest report after the burst.
+        this.presenceRetryTimer ??= setTimeout(() => {
+          this.presenceRetryTimer = null;
+          if (this.state.status === "connected") {
+            void this.reportPresence(this.latestPresence).catch(() => {});
+          }
+        }, PRESENCE_RETRY_MS);
+        return false;
+      }
       if (!this.handleRequestFailure(error)) this.beginReconnect();
       throw error;
     }
