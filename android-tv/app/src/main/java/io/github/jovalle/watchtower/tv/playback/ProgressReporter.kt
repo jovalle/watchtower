@@ -78,28 +78,30 @@ class ProgressReporter(
         heartbeatJob?.cancel()
     }
 
-    suspend fun stopFinal(timeoutMs: Long = 5_000) {
+    /** [finalPositionMs] must be read on the player thread before the player is released. */
+    suspend fun stopFinal(finalPositionMs: Long, timeoutMs: Long = 5_000) {
         mutex.withLock {
             if (!active) return
             active = false
             timelineJob?.cancel()
             heartbeatJob?.cancel()
-            val observed = positionMs().coerceIn(0, durationMs)
-            val request = StopPlaybackRequest(observed, durationMs, ++sequence)
-            withTimeoutOrNull(timeoutMs) { retry(continueWhenInactive = true) { transport.stop(playbackId, request) } }
+            val request = StopPlaybackRequest(finalPositionMs.coerceIn(0, durationMs), durationMs, ++sequence)
+            withTimeoutOrNull(timeoutMs) { retry(stopping = true) { transport.stop(playbackId, request) } }
         }
     }
 
-    private suspend fun retry(continueWhenInactive: Boolean = false, block: suspend () -> Unit) {
+    private suspend fun retry(stopping: Boolean = false, block: suspend () -> Unit) {
         for (attempt in 0..retryDelaysMs.size) {
-            if (!continueWhenInactive && !active && attempt > 0) return
+            if (!stopping && !active && attempt > 0) return
             try {
                 block()
                 return
             } catch (error: IOException) {
                 if (error is ApiException && error.status == 409 && error.code == "playback_session_expired") {
-                    active = false
-                    onSessionExpired(positionMs().coerceIn(0, durationMs))
+                    if (!stopping && active) {
+                        active = false
+                        onSessionExpired(positionMs().coerceIn(0, durationMs))
+                    }
                     return
                 }
                 if (error is ApiException && !error.retryable) return
