@@ -11,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +60,15 @@ import io.github.jovalle.watchtower.tv.platform.DeepLinkResult
 import io.github.jovalle.watchtower.tv.platform.AndroidWatchNextSink
 import io.github.jovalle.watchtower.tv.platform.WatchNextManager
 import io.github.jovalle.watchtower.tv.playback.PlayerScreen
+import io.github.jovalle.watchtower.tv.rooms.CreateMedia
+import io.github.jovalle.watchtower.tv.rooms.InviteParser
+import io.github.jovalle.watchtower.tv.rooms.JoinRoomRoute
+import io.github.jovalle.watchtower.tv.rooms.JoinRoomScreen
+import io.github.jovalle.watchtower.tv.rooms.RoomLobbyRoute
+import io.github.jovalle.watchtower.tv.rooms.RoomLobbyScreen
 import io.github.jovalle.watchtower.tv.settings.SettingsRoute
 import io.github.jovalle.watchtower.tv.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
 private val WatchtowerColors = darkColorScheme(
     primary = Color(0xFFFDBE02),
@@ -110,6 +118,7 @@ private fun Splash() {
 @Composable
 private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
     val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
     val data = remember(graph) { ApiCatalogDataSource(graph.api) }
     var notice by remember { mutableStateOf<String?>(null) }
     val navigation: NavigationViewModel = viewModel {
@@ -117,6 +126,7 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
     }
     val libraries by navigation.state.collectAsStateWithLifecycle()
     val backStack by navController.currentBackStackEntryAsState()
+    val roomsEnabled = graph.session.currentMe()?.features?.rooms == true
 
     LaunchedEffect(graph) {
         graph.session.identityChanges.collect {
@@ -128,14 +138,30 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
     LaunchedEffect(deepLink, graph.session.currentMe()?.profile?.userId) {
         val uri = deepLink ?: return@LaunchedEffect
         val machineId = graph.session.currentMe()?.server?.machineId ?: return@LaunchedEffect
-        when (val result = DeepLinkResolver.resolve(uri.toString(), machineId)) {
-            is DeepLinkResult.Allowed -> when (result.link.action) {
-                DeepLinkAction.DETAILS -> navController.navigate(DetailsRoute(result.link.ratingKey))
-                DeepLinkAction.PLAY -> navController.navigate(PlayerRoute(result.link.ratingKey))
-            }
-            is DeepLinkResult.Rejected -> {
-                notice = result.message
+        if (uri.host == "join") {
+            val secret = InviteParser.parse(uri.toString())
+            if (!roomsEnabled || secret == null) {
+                notice = if (roomsEnabled) "This Watch Together invitation is invalid." else "Watch Together is unavailable for this profile."
                 navController.navigate(HomeRoute)
+            } else {
+                try {
+                    val room = graph.rooms.join(secret)
+                    navController.navigate(RoomLobbyRoute(room.roomId))
+                } catch (error: Exception) {
+                    notice = error.message ?: "Could not join this room."
+                    navController.navigate(HomeRoute)
+                }
+            }
+        } else {
+            when (val result = DeepLinkResolver.resolve(uri.toString(), machineId)) {
+                is DeepLinkResult.Allowed -> when (result.link.action) {
+                    DeepLinkAction.DETAILS -> navController.navigate(DetailsRoute(result.link.ratingKey))
+                    DeepLinkAction.PLAY -> navController.navigate(PlayerRoute(result.link.ratingKey))
+                }
+                is DeepLinkResult.Rejected -> {
+                    notice = result.message
+                    navController.navigate(HomeRoute)
+                }
             }
         }
         graph.consumeDeepLink(uri)
@@ -148,6 +174,7 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
                     expanded = drawerValue == DrawerValue.Open,
                     currentRoute = backStack?.destination?.route,
                     libraries = (libraries as? LoadState.Content)?.value.orEmpty(),
+                    roomsEnabled = roomsEnabled,
                     navigate = { destination ->
                         notice = null
                         navController.navigate(destination) {
@@ -179,6 +206,39 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
                     entry.toRoute(),
                     onOpen = { navController.navigate(DetailsRoute(it)) },
                     onPlay = { navController.navigate(it) },
+                    onWatchTogether = if (roomsEnabled) {
+                        { detail ->
+                            val version = detail.versions.firstOrNull()
+                            val part = version?.parts?.firstOrNull()
+                            val ratingKey = detail.ratingKey
+                            if (version != null && part != null && ratingKey != null) {
+                                scope.launch {
+                                    try {
+                                        val identity = graph.session.current() ?: return@launch
+                                        val preferences = graph.api.preferences(identity)
+                                        val room = graph.rooms.create(
+                                            CreateMedia(ratingKey, version.mediaId, part.partId),
+                                            detail.viewOffsetMs ?: 0,
+                                            preferences.autoPlayNextEpisode,
+                                        )
+                                        navController.navigate(RoomLobbyRoute(room.roomId))
+                                    } catch (error: Exception) {
+                                        notice = error.message ?: "Could not create a Watch Together room."
+                                    }
+                                }
+                            }
+                        }
+                    } else null,
+                )
+            }
+            composable<JoinRoomRoute> {
+                JoinRoomScreen(graph) { roomId -> navController.navigate(RoomLobbyRoute(roomId)) }
+            }
+            composable<RoomLobbyRoute> {
+                RoomLobbyScreen(
+                    graph,
+                    onPlay = { navController.navigate(it) },
+                    onExit = { navController.popBackStack() },
                 )
             }
             composable<SettingsRoute> { SettingsScreen(graph) }
@@ -209,6 +269,7 @@ private fun NavigationRail(
     expanded: Boolean,
     currentRoute: String?,
     libraries: List<io.github.jovalle.watchtower.tv.api.LibrarySection>,
+    roomsEnabled: Boolean,
     navigate: (Any) -> Unit,
 ) {
     Column(
@@ -226,6 +287,11 @@ private fun NavigationRail(
         }
         DrawerButton(stringResource(R.string.search), expanded, currentRoute?.contains("SearchRoute") == true) { navigate(SearchRoute) }
         DrawerButton(stringResource(R.string.my_lists), expanded, currentRoute?.contains("ListsRoute") == true) { navigate(ListsRoute) }
+        if (roomsEnabled) {
+            DrawerButton(stringResource(R.string.room_watch_together), expanded, currentRoute?.contains("JoinRoomRoute") == true) {
+                navigate(JoinRoomRoute)
+            }
+        }
         DrawerButton(stringResource(R.string.settings), expanded, currentRoute?.contains("SettingsRoute") == true) { navigate(SettingsRoute) }
     }
 }
