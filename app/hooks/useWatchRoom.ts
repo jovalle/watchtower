@@ -81,9 +81,8 @@ function storeMembership(envelope: RoomEnvelope) {
   );
 }
 
-function friendlyError(error: unknown): string {
-  if (!(error instanceof RoomApiError)) return "The room could not be reached.";
-  switch (error.code) {
+function messageForCode(code: string | null): string | null {
+  switch (code) {
     case "media_forbidden":
       return "Your Plex profile cannot access this title.";
     case "capacity_exceeded":
@@ -95,9 +94,22 @@ function friendlyError(error: unknown): string {
     case "room_ended":
     case "membership_ended":
       return "This room has ended.";
+    case "removed":
+      return "The host removed you from this room.";
+    case "not_host":
+      return "Only the host controls playback.";
+    case "unauthenticated":
+    case "server_changed":
+    case "identity_ambiguous":
+      return "Your sign-in changed. Sign in again to rejoin the room.";
     default:
-      return error.message;
+      return null;
   }
+}
+
+function friendlyError(error: unknown): string {
+  if (!(error instanceof RoomApiError)) return "The room could not be reached.";
+  return messageForCode(error.code) ?? error.message;
 }
 
 export function useWatchRoom(options: UseWatchRoomOptions) {
@@ -197,7 +209,15 @@ export function useWatchRoom(options: UseWatchRoomOptions) {
 
   useEffect(() => {
     if (clientState.status === "ended") setPlaybackArmed(false);
-  }, [clientState.status]);
+    // A live connection that fails terminally replaces any stale transient notice.
+    if (clientState.status === "error" && clientState.lastErrorCode) {
+      setPlaybackArmed(false);
+      setMessage(
+        messageForCode(clientState.lastErrorCode) ??
+          "The room is no longer available."
+      );
+    }
+  }, [clientState.status, clientState.lastErrorCode]);
 
   const submitCreate = useCallback(
     async (startPositionMs: number) => {
@@ -269,7 +289,10 @@ export function useWatchRoom(options: UseWatchRoomOptions) {
       return false;
     });
     if (!accepted && client.getState().lastErrorCode) {
-      setMessage("The room changed before that action. Try again.");
+      setMessage(
+        messageForCode(client.getState().lastErrorCode) ??
+          "The room changed before that action. Try again."
+      );
     }
     return accepted;
   }, []);

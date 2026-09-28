@@ -7,6 +7,7 @@ import type { RoomEnvelope } from "~/lib/rooms/protocol";
 const navigate = vi.hoisted(() => vi.fn());
 const leaveClient = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const recoverRoom = vi.hoisted(() => vi.fn());
+const emitters = vi.hoisted(() => [] as Array<(state: RoomClientState) => void>);
 
 vi.mock("@remix-run/react", () => ({ useNavigate: () => navigate }));
 vi.mock("~/lib/rooms/client", async (importOriginal) => {
@@ -30,6 +31,7 @@ vi.mock("~/lib/rooms/client", async (importOriginal) => {
     }
 
     subscribe(listener: (state: RoomClientState) => void) {
+      emitters.push(listener);
       listener(this.state);
       return () => {};
     }
@@ -101,6 +103,20 @@ it("keeps playback armed across next-episode option changes and clears it on lea
 
   await act(async () => view.result.current.leave());
   expect(view.result.current.controller).toBeNull();
+});
+
+it("replaces a stale notice with the terminal reason when the live connection fails", async () => {
+  const view = renderHook(() => useWatchRoom(baseOptions));
+  await waitFor(() => expect(view.result.current.controller).not.toBeNull());
+  act(() => view.result.current.controller?.explainHostOnly());
+  act(() => view.result.current.controller?.setPlaybackArmed(true));
+  expect(view.result.current.message).toBe("Only the host controls playback.");
+
+  const current = view.result.current.state;
+  act(() => emitters.at(-1)?.({ ...current, status: "error", lastErrorCode: "not_found" }));
+
+  expect(view.result.current.message).toBe("The room is no longer available.");
+  expect(view.result.current.controller?.playbackArmed).toBe(false);
 });
 
 it("continues from the last local position after terminal without leaving", async () => {
