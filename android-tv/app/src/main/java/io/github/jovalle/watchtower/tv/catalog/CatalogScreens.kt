@@ -259,6 +259,7 @@ fun MediaDetailsScreen(
     route: DetailsRoute,
     onOpen: (String) -> Unit,
     onPlay: (PlayerRoute) -> Unit,
+    onWatchTogether: ((MediaDetail) -> Unit)? = null,
 ) {
     val model: DetailViewModel = viewModel(key = route.ratingKey) {
         DetailViewModel(route.ratingKey, data, graph.session::current, graph.session.identityChanges)
@@ -267,7 +268,7 @@ fun MediaDetailsScreen(
     when {
         state.loading -> LoadingScreen()
         state.error != null && state.detail == null -> ErrorScreen(state.error.orEmpty(), model::reload)
-        state.detail != null -> DetailsContent(graph, requireNotNull(state.detail), state, model, onOpen, onPlay)
+        state.detail != null -> DetailsContent(graph, requireNotNull(state.detail), state, model, onOpen, onPlay, onWatchTogether)
     }
 }
 
@@ -279,6 +280,7 @@ private fun DetailsContent(
     model: DetailViewModel,
     onOpen: (String) -> Unit,
     onPlay: (PlayerRoute) -> Unit,
+    onWatchTogether: ((MediaDetail) -> Unit)?,
 ) {
     LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         item {
@@ -290,7 +292,7 @@ private fun DetailsContent(
                     Text(detail.metadataLine(), fontSize = 17.sp)
                     detail.summary?.let { Text(it, fontSize = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp)) {
-                        DetailsPlaybackActions(detail, onPlay)
+                        DetailsPlaybackActions(detail, onPlay, onWatchTogether != null) { onWatchTogether?.invoke(detail) }
                         OutlinedButton(onClick = { model.setWatched(detail.viewCount == 0) }, enabled = !state.mutationInFlight) {
                             Text(if (detail.viewCount > 0) stringResource(R.string.mark_unwatched) else stringResource(R.string.mark_watched))
                         }
@@ -343,11 +345,19 @@ private fun DetailsContent(
 }
 
 @Composable
-fun DetailsPlaybackActions(detail: MediaDetail, onPlay: (PlayerRoute) -> Unit) {
+fun DetailsPlaybackActions(
+    detail: MediaDetail,
+    onPlay: (PlayerRoute) -> Unit,
+    roomsEnabled: Boolean = false,
+    onWatchTogether: () -> Unit = {},
+) {
     val ratingKey = detail.ratingKey
     if (detail.playable && ratingKey != null) {
         Button(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = null)) }) { Text(stringResource(R.string.play)) }
         OutlinedButton(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = 0)) }) { Text(stringResource(R.string.start_over)) }
+        if (roomsEnabled && detail.versions.firstOrNull()?.parts?.firstOrNull() != null) {
+            OutlinedButton(onClick = onWatchTogether) { Text(stringResource(R.string.room_watch_together)) }
+        }
     }
 }
 

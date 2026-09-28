@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_watch_together">Watch together</string>
+    <string name="room_join_title">Join Watch Together</string>
+    <string name="room_join_prompt">Enter the invitation link or 43-character invitation.</string>
+    <string name="room_join_action">Join room</string>
+    <string name="room_joining">Joining…</string>
+    <string name="room_join_failed">Could not join this room.</string>
+    <string name="room_invalid_invite">Enter a valid Watch Together invitation.</string>
+    <string name="room_lobby_title">Watch Together</string>
+    <string name="room_open_player">Open player</string>
+    <string name="room_start">Start</string>
+    <string name="room_leave">Leave</string>
+    <string name="room_rotate_invite">New invitation</string>
+    <string name="room_revoke_invite">Revoke invitation</string>
+    <string name="room_end_everyone">End for everyone</string>
+    <string name="room_host_badge">Host</string>
+    <string name="room_ready">Ready</string>
+    <string name="room_waiting">Waiting</string>
+    <string name="room_buffering">Buffering</string>
+    <string name="room_reconnecting">Reconnecting to the room…</string>
+    <string name="room_host_transferred">A new host is now controlling playback.</string>
+    <string name="room_host_disconnected">The host disconnected. Playback is paused while they reconnect.</string>
+    <string name="room_preparing">Preparing everyone for playback…</string>
+    <string name="room_playing">The room is playing.</string>
+    <string name="room_waiting_for_start">Waiting for the host to start.</string>
+    <string name="room_invite_qr_description">QR code for this Watch Together invitation</string>
+    <string name="room_controls">Room</string>
+    <string name="room_leave_confirm">Leave this room?</string>
+    <string name="room_leave_confirm_detail">Playback will stop on this TV. The room continues for everyone else.</string>
+    <string name="room_stay">Stay</string>
+    <string name="room_media_mismatch">This stream does not match the room media. Playback was stopped.</string>
+</resources>
