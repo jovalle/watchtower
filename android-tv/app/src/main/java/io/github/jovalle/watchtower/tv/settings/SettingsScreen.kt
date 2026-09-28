@@ -3,6 +3,7 @@ package io.github.jovalle.watchtower.tv.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,10 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.annotation.StringRes
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -167,6 +173,14 @@ fun SettingsScreen(graph: AppGraph) {
     val model: SettingsViewModel = viewModel { SettingsViewModel(graph) }
     val state by model.state.collectAsStateWithLifecycle()
     val me = graph.session.currentMe()
+    val primaryFocus = remember { FocusRequester() }
+    var focusRequested by remember { mutableStateOf(false) }
+    LaunchedEffect(state.loading, state.preferences) {
+        if (!state.loading && !focusRequested) {
+            primaryFocus.requestFocus()
+            focusRequested = true
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(32.dp),
@@ -179,7 +193,7 @@ fun SettingsScreen(graph: AppGraph) {
         if (state.loading) item { Text(stringResource(R.string.loading)) }
         state.preferences?.let { preferences ->
             item { SectionTitle(stringResource(R.string.server_preferences)) }
-            item { PreferenceToggle(stringResource(R.string.preference_continue_watching), preferences.showContinueWatching, state.savingKey == "showContinueWatching") { model.setServerPreference("showContinueWatching", it) } }
+            item { PreferenceToggle(stringResource(R.string.preference_continue_watching), preferences.showContinueWatching, state.savingKey == "showContinueWatching", Modifier.focusRequester(primaryFocus)) { model.setServerPreference("showContinueWatching", it) } }
             item { PreferenceToggle(stringResource(R.string.preference_recently_added), preferences.showRecentlyAdded, state.savingKey == "showRecentlyAdded") { model.setServerPreference("showRecentlyAdded", it) } }
             item { PreferenceToggle(stringResource(R.string.preference_trending), preferences.showTrending, state.savingKey == "showTrending") { model.setServerPreference("showTrending", it) } }
             item { PreferenceToggle(stringResource(R.string.collections), preferences.showCollections, state.savingKey == "showCollections") { model.setServerPreference("showCollections", it) } }
@@ -188,7 +202,7 @@ fun SettingsScreen(graph: AppGraph) {
             item { PreferenceToggle(stringResource(R.string.preference_autoplay_next), preferences.autoPlayNextEpisode, state.savingKey == "autoPlayNextEpisode") { model.setServerPreference("autoPlayNextEpisode", it) } }
         }
         item { SectionTitle(stringResource(R.string.local_playback)) }
-        item { ChoiceRow(stringResource(R.string.preference_quality), QUALITY_OPTIONS, state.local.defaultQuality) { value -> model.setLocal { it.copy(defaultQuality = requireNotNull(value)) } } }
+        item { ChoiceRow(stringResource(R.string.preference_quality), QUALITY_OPTIONS, state.local.defaultQuality, if (state.preferences == null) Modifier.focusRequester(primaryFocus) else Modifier) { value -> model.setLocal { it.copy(defaultQuality = requireNotNull(value)) } } }
         item { ChoiceRow(stringResource(R.string.preference_max_bitrate), BITRATE_OPTIONS, state.local.maxBitrateKbps?.toString()) { value -> model.setLocal { it.copy(maxBitrateKbps = value?.toInt()) } } }
         item { ChoiceRow(stringResource(R.string.preference_audio_language), LANGUAGE_OPTIONS, state.local.preferredAudioLanguage) { value -> model.setLocal { it.copy(preferredAudioLanguage = value) } } }
         item { ChoiceRow(stringResource(R.string.preference_subtitle_language), LANGUAGE_OPTIONS, state.local.preferredSubtitleLanguage) { value -> model.setLocal { it.copy(preferredSubtitleLanguage = value) } } }
@@ -230,21 +244,33 @@ private fun SectionTitle(value: String) = Text(
 )
 
 @Composable
-private fun PreferenceToggle(label: String, checked: Boolean, busy: Boolean, update: (Boolean) -> Unit) {
-    Button(onClick = { update(!checked) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+private fun PreferenceToggle(
+    label: String,
+    checked: Boolean,
+    busy: Boolean,
+    modifier: Modifier = Modifier,
+    update: (Boolean) -> Unit,
+) {
+    Button(onClick = { update(!checked) }, enabled = !busy, modifier = modifier.fillMaxWidth()) {
         Text(label, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = null)
     }
 }
 
 @Composable
-private fun ChoiceRow(label: String, options: List<ChoiceOption>, selected: String?, update: (String?) -> Unit) {
+internal fun ChoiceRow(
+    label: String,
+    options: List<ChoiceOption>,
+    selected: String?,
+    firstOptionModifier: Modifier = Modifier,
+    update: (String?) -> Unit,
+) {
     Column {
         Text(label, fontSize = 17.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { option ->
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEachIndexed { index, option ->
                 val optionLabel = stringResource(option.label)
-                OutlinedButton(onClick = { update(option.value) }) {
+                OutlinedButton(onClick = { update(option.value) }, modifier = if (index == 0) firstOptionModifier else Modifier) {
                     Text(if (option.value == selected) stringResource(R.string.selected_option, optionLabel) else optionLabel)
                 }
             }
@@ -263,7 +289,7 @@ private fun Preferences.booleanValue(key: String): Boolean = when (key) {
     else -> false
 }
 
-private data class ChoiceOption(val value: String?, @StringRes val label: Int)
+internal data class ChoiceOption(val value: String?, @StringRes val label: Int)
 
 private val QUALITY_OPTIONS = listOf(
     ChoiceOption("original", R.string.quality_original),

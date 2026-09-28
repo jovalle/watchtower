@@ -10,17 +10,20 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed as listItemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -31,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,6 +128,14 @@ private fun HomeContent(
     val hero = home.hero.firstOrNull()
     val snapshot = graph.session.current()
     val me = graph.session.currentMe()
+    var focusedRowId by rememberSaveable { mutableStateOf<String?>(null) }
+    var focusedItemKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val firstRow = home.rows.firstOrNull { it.items.isNotEmpty() }
+    val restoreRowId = focusedRowId?.takeIf { id -> home.rows.any { it.id == id && it.items.isNotEmpty() } }
+        ?: firstRow?.id
+    val restoreItemKey = home.rows.firstOrNull { it.id == restoreRowId }?.items
+        ?.firstOrNull { it.stableKey == focusedItemKey }?.stableKey
+        ?: home.rows.firstOrNull { it.id == restoreRowId }?.items?.firstOrNull()?.stableKey
     LaunchedEffect(home, snapshot, me?.profile?.userId) {
         if (snapshot != null && me != null) {
             val items = home.rows.firstOrNull { it.kind == "continue_watching" }?.items.orEmpty().map { item ->
@@ -145,13 +157,46 @@ private fun HomeContent(
             item(key = row.id) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(row.title, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        items(row.items, key = { it.stableKey }) { item ->
-                            MediaCard(graph, item) { item.ratingKey?.let(onDetails) }
-                        }
+                    FocusRestoringHomeRow(
+                        items = row.items,
+                        restoreKey = restoreItemKey.takeIf { row.id == restoreRowId },
+                        onFocused = { key -> focusedRowId = row.id; focusedItemKey = key },
+                    ) { item, modifier ->
+                        MediaCard(graph, item, modifier) { item.ratingKey?.let(onDetails) }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun FocusRestoringHomeRow(
+    items: List<MediaSummary>,
+    restoreKey: String?,
+    onFocused: (String) -> Unit,
+    itemContent: @Composable (MediaSummary, Modifier) -> Unit,
+) {
+    val keys = items.map(MediaSummary::stableKey)
+    val requesters = remember(keys) { keys.associateWith { FocusRequester() } }
+    val listState = rememberLazyListState()
+    val restoreIndex = keys.indexOf(restoreKey)
+    var restorePending by remember { mutableStateOf(true) }
+    LaunchedEffect(restoreKey, keys, restorePending) {
+        if (restorePending && restoreIndex >= 0) {
+            listState.scrollToItem(restoreIndex)
+            requesters[restoreKey]?.requestFocus()
+            restorePending = false
+        }
+    }
+    LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(items, key = MediaSummary::stableKey) { item ->
+            itemContent(
+                item,
+                Modifier.focusRequester(requireNotNull(requesters[item.stableKey])).onFocusChanged {
+                    if (it.isFocused) onFocused(item.stableKey)
+                },
+            )
         }
     }
 }
@@ -350,13 +395,16 @@ fun SearchScreen(graph: AppGraph, data: CatalogDataSource, onOpen: (MediaSummary
     val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) VoiceSearch.firstResult(result.data)?.let(model::search)
     }
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { searchFocus.requestFocus() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp)) {
         Text(stringResource(R.string.search), fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             BasicTextField(
                 value = state.query,
                 onValueChange = model::search,
-                modifier = Modifier.weight(1f).background(Color.White).border(3.dp, MaterialTheme.colorScheme.primary).padding(15.dp).focusable(),
+                modifier = Modifier.weight(1f).background(Color.White).border(3.dp, MaterialTheme.colorScheme.primary)
+                    .padding(15.dp).focusRequester(searchFocus).focusable(),
                 textStyle = TextStyle(color = Color.Black, fontSize = 21.sp),
                 singleLine = true,
             )
@@ -447,30 +495,25 @@ private fun DetailsContent(
     var showIssue by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         item {
-            Box(Modifier.fillMaxWidth().height(390.dp)) {
+            Box(Modifier.fillMaxWidth().heightIn(min = 390.dp)) {
                 CatalogImage(graph, detail.backdropUrl, detail.title, Modifier.fillMaxSize(), ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Color(0x77000000)))
                 Column(Modifier.align(Alignment.BottomStart).padding(36.dp).fillMaxWidth(0.78f)) {
                     Text(detail.title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
                     Text(detail.metadataLine(), fontSize = 17.sp)
                     detail.summary?.let { Text(it, fontSize = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp)) {
-                        DetailsPlaybackActions(detail, onPlay, onWatchTogether != null) { onWatchTogether?.invoke(detail) }
-                        OutlinedButton(onClick = { model.setWatched(detail.viewCount == 0) }, enabled = !state.mutationInFlight) {
-                            Text(if (detail.viewCount > 0) stringResource(R.string.mark_unwatched) else stringResource(R.string.mark_watched))
-                        }
-                        OutlinedButton(onClick = { model.setWatchlist(detail.onWatchlist != true) }, enabled = !state.mutationInFlight) {
-                            Text(if (detail.onWatchlist == true) stringResource(R.string.remove_watchlist) else stringResource(R.string.add_watchlist))
-                        }
-                        OutlinedButton(onClick = { model.loadPlaylists(); showPlaylists = true }, enabled = !state.mutationInFlight) {
-                            Text(stringResource(R.string.add_to_playlist))
-                        }
-                        if (requestState.enabled) {
-                            OutlinedButton(onClick = { showIssue = true }, enabled = !requestState.mutationInFlight) {
-                                Text(stringResource(R.string.report_issue))
-                            }
-                        }
-                    }
+                    DetailsActionRow(
+                        detail = detail,
+                        enabled = !state.mutationInFlight,
+                        issueEnabled = requestState.enabled,
+                        onPlay = onPlay,
+                        onWatchTogether = onWatchTogether?.let { action -> { action(detail) } },
+                        onSetWatched = { model.setWatched(detail.viewCount == 0) },
+                        onSetWatchlist = { model.setWatchlist(detail.onWatchlist != true) },
+                        onAddToPlaylist = { model.loadPlaylists(); showPlaylists = true },
+                        onReportIssue = { showIssue = true },
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
                     state.message?.let { Text(stringResource(R.string.saved), color = MaterialTheme.colorScheme.primary) }
                     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     requestState.message?.let { Text(stringResource(R.string.issue_submitted), color = MaterialTheme.colorScheme.primary) }
@@ -560,6 +603,38 @@ private fun DetailsContent(
             onSubmit = { issueType, message -> showIssue = false; requestModel.reportIssue(issueType, message) },
             onDismiss = { showIssue = false },
         )
+    }
+}
+
+@Composable
+internal fun DetailsActionRow(
+    detail: MediaDetail,
+    enabled: Boolean,
+    issueEnabled: Boolean,
+    onPlay: (PlayerRoute) -> Unit,
+    onWatchTogether: (() -> Unit)?,
+    onSetWatched: () -> Unit,
+    onSetWatchlist: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onReportIssue: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DetailsPlaybackActions(detail, onPlay, onWatchTogether != null) { onWatchTogether?.invoke() }
+        OutlinedButton(onClick = onSetWatched, enabled = enabled) {
+            Text(if (detail.viewCount > 0) stringResource(R.string.mark_unwatched) else stringResource(R.string.mark_watched))
+        }
+        OutlinedButton(onClick = onSetWatchlist, enabled = enabled) {
+            Text(if (detail.onWatchlist == true) stringResource(R.string.remove_watchlist) else stringResource(R.string.add_watchlist))
+        }
+        OutlinedButton(onClick = onAddToPlaylist, enabled = enabled) { Text(stringResource(R.string.add_to_playlist)) }
+        if (issueEnabled) {
+            OutlinedButton(onClick = onReportIssue, enabled = enabled) { Text(stringResource(R.string.report_issue)) }
+        }
     }
 }
 
@@ -1019,7 +1094,7 @@ private fun CatalogImage(graph: AppGraph, path: String?, title: String, modifier
     }
 }
 
-private val MediaSummary.stableKey: String get() = ratingKey ?: "${external?.provider}:${external?.id}:${external?.type}"
+internal val MediaSummary.stableKey: String get() = ratingKey ?: "${external?.provider}:${external?.id}:${external?.type}"
 private val MediaSummary.progress: Float
     get() = if ((durationMs ?: 0) > 0) ((viewOffsetMs ?: 0).toFloat() / durationMs!!.toFloat()).coerceIn(0f, 1f) else 0f
 private val MediaSummary.minutesLeft: Long?
