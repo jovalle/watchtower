@@ -182,8 +182,14 @@ export async function revokeDeviceSession(deviceSessionId: string): Promise<bool
 
 export async function listAccountDevices(accountUserId: string): Promise<DeviceSessionRecord[]> {
   await ensureLoaded();
+  const now = Date.now();
   return [...records.values()]
-    .filter((record) => record.account.userId === accountUserId && record.revokedAtMs === null)
+    .filter(
+      (record) =>
+        record.account.userId === accountUserId &&
+        record.revokedAtMs === null &&
+        record.expiresAtMs > now,
+    )
     .map((record) => structuredClone(record));
 }
 

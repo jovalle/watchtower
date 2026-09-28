@@ -7,6 +7,8 @@ import { NativeError, nativeJson, readJsonObject, requireMethod, withNativeError
 import { requireNativePrincipal } from "~/lib/native/principal.server";
 import { requireOwnedPlayback, serializedTimeline } from "~/lib/native/playback-resources.server";
 
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   return withNativeErrors(request, async (requestId) => {
     requireMethod(request, "POST");
@@ -20,7 +22,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const accepted = await serializedTimeline(session, Number(body.sequence), async () => {
       plexData(await client.reportTimeline({ ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }));
       if (body.state !== "playing") await invalidateCache(getUserCacheKey("home", principal.serverToken));
-      void scrobbleTimeline({ userId: Number(principal.userId), client, ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) });
+      void scrobbleTimeline({ userId: Number(principal.userId), client, ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }).catch(() => {
+        console.error("[Native Playback] Failed to update Trakt timeline.");
+      });
     });
     return nativeJson({ accepted } satisfies TimelineResponse, requestId);
   });

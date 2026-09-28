@@ -15,6 +15,7 @@ import type {
 } from "./contract";
 import { NativeError } from "./http.server";
 import type { NativePrincipal } from "./principal.server";
+import { markPrincipalForVerification } from "./principal.server";
 
 type ExtendedStream = PlexStream & {
   visualImpaired?: boolean;
@@ -41,7 +42,23 @@ export function nativePlexClient(principal: NativePrincipal): PlexClient {
     serverUrl: principal.serverUrl,
     token: principal.serverToken,
     clientId: process.env.PLEX_CLIENT_ID ?? "watchtower-001",
+    onUnauthorized: () => markPrincipalForVerification(principal),
   });
+}
+
+export async function requireNativePlexResponse(
+  response: Response,
+  principal: NativePrincipal,
+): Promise<Response> {
+  if (response.status === 401) {
+    await markPrincipalForVerification(principal);
+    throw new NativeError(
+      401,
+      "upstream_auth_failed",
+      "Plex authorization failed.",
+    );
+  }
+  return response;
 }
 
 export function plexData<T>(result: PlexResult<T>, notFound = false): T {

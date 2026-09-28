@@ -3,6 +3,8 @@ import { nativePlexClient, plexData } from "~/lib/native/catalog.server";
 import { NativeError, nativeEmpty, requireMethod, withNativeErrors } from "~/lib/native/http.server";
 import { recheckPrincipal, requireNativePrincipal } from "~/lib/native/principal.server";
 
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   return withNativeErrors(request, async (requestId) => {
     requireMethod(request, "PUT", "DELETE");

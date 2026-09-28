@@ -2,6 +2,8 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { findDeviceSession } from "~/lib/native/device-store.server";
 import { NativeError, nativeJson, readJsonObject, requireMethod, withNativeErrors } from "~/lib/native/http.server";
 import { negotiatePlayback, parsePlaybackRequest } from "~/lib/native/playback.server";
+
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
 import { requireNativePrincipal } from "~/lib/native/principal.server";
 
 export async function action({ request }: ActionFunctionArgs) {
