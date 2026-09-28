@@ -1,6 +1,8 @@
 package io.github.jovalle.watchtower.tv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -351,6 +355,7 @@ internal fun NavigationRail(
             .fillMaxHeight()
             .width(if (expanded) 250.dp else 82.dp)
             .background(Color(0xF2111111))
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 24.dp),
     ) {
         DrawerButton(stringResource(R.string.home), expanded, currentRoute?.contains("HomeRoute") == true) { navigate(HomeRoute) }
@@ -374,7 +379,10 @@ internal fun NavigationRail(
 private fun DrawerButton(label: String, expanded: Boolean, selected: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.padding(vertical = 4.dp).width(if (expanded) 226.dp else 58.dp),
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .width(if (expanded) 226.dp else 58.dp)
+            .semantics { contentDescription = label },
     ) {
         Text(if (expanded) label else label.take(1), maxLines = 1)
         if (selected && expanded) Text(stringResource(R.string.selected_marker))
