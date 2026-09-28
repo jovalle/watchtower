@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, Users } from "lucide-react";
 import type { RoomClientState } from "~/lib/rooms/client";
 import type {
@@ -355,11 +355,39 @@ export function RoomPanel({
   );
 }
 
+/** Keeps Tab inside a modal room overlay so the covered player controls stay unreachable. */
+function useContainedTab(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>("button:not([disabled])")];
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!first || !last) {
+        event.preventDefault();
+      } else if (event.shiftKey && (active === first || !active || !focusable.includes(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", onKeyDown);
+    return () => dialog.removeEventListener("keydown", onKeyDown);
+  }, [ref]);
+}
+
 export function RoomTakeover({ pending, onTakeover }: { pending: boolean; onTakeover(): void }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useContainedTab(dialogRef);
   useEffect(() => buttonRef.current?.focus(), []);
   return (
-    <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 p-4" role="alertdialog" aria-labelledby="takeover-title">
+    <div ref={dialogRef} className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 p-4" role="alertdialog" aria-modal="true" aria-labelledby="takeover-title">
       <div className="max-w-md rounded-md border border-white/20 bg-black p-6 text-white">
         <h2 id="takeover-title" className="text-lg font-semibold">Room already open</h2>
         <p className="mt-2 text-sm text-white/70">This room is open in another tab or window on this device.</p>
@@ -379,10 +407,14 @@ export function RoomTerminal({
   onBack(): void;
 }) {
   const messageRef = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useContainedTab(dialogRef);
   useEffect(() => messageRef.current?.focus(), []);
   return (
     <div
+      ref={dialogRef}
       role="alertdialog"
+      aria-modal="true"
       aria-labelledby="room-terminal-message"
       className="absolute inset-0 z-[65] flex items-center justify-center bg-black/85 p-6 text-center text-white"
     >
