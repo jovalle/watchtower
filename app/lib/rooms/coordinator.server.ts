@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getServerConfig } from "~/lib/config/server-config.server";
 import { env } from "~/lib/env.server";
+import { onDeviceIdentityEnded } from "~/lib/native/device-store.server";
 import { ownedPlaybackSession } from "~/lib/plex/playback-session.server";
 import { authorizeMedia, resolveNextMedia, type AuthorizedMedia } from "./media-access.server";
 import { resolveRoomPrincipal, type PlaybackPrincipal } from "./principal.server";
@@ -1223,3 +1224,6 @@ export function isWatchTogetherEnabled(): boolean {
 export function leaveDeviceMemberships(userId: string, deviceSessionId: string): void {
   getRoomCoordinator().leaveDeviceMemberships(userId, deviceSessionId);
 }
+
+// Native device revocation, sign-out and profile switches end that device's memberships too.
+onDeviceIdentityEnded(({ userId, deviceSessionId }) => leaveDeviceMemberships(userId, deviceSessionId));

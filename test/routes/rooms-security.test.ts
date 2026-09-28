@@ -208,7 +208,7 @@ describe("room route security", () => {
   });
 
   it.each([
-    ["without cookie", undefined, "bearer_unsupported"],
+    ["without cookie", undefined, "unauthenticated"],
     ["with cookie", "__plex_session=cookie-value", "identity_ambiguous"],
   ])("rejects an Authorization header %s without cookie fallback", async (_label, cookie, code) => {
     const route = routes[0];
