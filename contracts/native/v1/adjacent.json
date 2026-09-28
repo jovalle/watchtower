@@ -1,0 +1,24 @@
+{
+  "previous": {
+    "ratingKey": "7002",
+    "type": "episode",
+    "title": "Episode Two",
+    "year": 2020,
+    "posterUrl": null,
+    "backdropUrl": null,
+    "thumbUrl": null,
+    "durationMs": 2580000,
+    "viewOffsetMs": null,
+    "viewCount": 1,
+    "leafCount": null,
+    "viewedLeafCount": null,
+    "contentRating": "TV-14",
+    "showTitle": "Test Show",
+    "seasonNumber": 1,
+    "episodeNumber": 2,
+    "parentRatingKey": "7001",
+    "grandparentRatingKey": "7000",
+    "external": null
+  },
+  "next": null
+}
