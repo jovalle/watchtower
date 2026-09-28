@@ -320,13 +320,17 @@ async function focusAndSelect(label: string, key: string, timeoutMs: number): Pr
     const xml = await uiXml().catch(() => "");
     const focused = /focused="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
     if (!focused) {
-      await sleep(1_000);
+      // Nothing focused yet: the first D-pad key assigns focus.
+      await adb("shell", "input", "keyevent", key);
+      moves += 1;
+      await sleep(800);
       continue;
     }
     const [x1, y1, x2, y2] = focused.slice(1).map(Number);
     const labels = [...xml.matchAll(/text="([^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)]
       .filter((match) => Number(match[2]) >= x1 && Number(match[3]) >= y1 && Number(match[4]) <= x2 && Number(match[5]) <= y2)
       .map((match) => match[1]);
+    if (TRACE) console.log(`TRACE focus ${JSON.stringify(labels)} [${x1},${y1}][${x2},${y2}]`);
     if (labels.includes(label)) {
       await adb("shell", "input", "keyevent", "KEYCODE_DPAD_CENTER");
       return true;
