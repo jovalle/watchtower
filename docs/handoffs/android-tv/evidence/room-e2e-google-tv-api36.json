@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-28T05:48:13.353Z",
+  "at": "2026-09-28T06:13:13.586Z",
   "results": [
     {
       "id": "TVR-00 combined server advertises rooms",
@@ -43,7 +43,7 @@
       "pass": true,
       "detail": {
         "tv": {
-          "participantId": "f89c7acc-b8ed-4f2c-8de4-82d223925f61",
+          "participantId": "446c78bb-b9d1-4c7d-ac6e-0081d8e3e08d",
           "displayName": "Test Owner",
           "connected": true,
           "ready": true,
@@ -65,9 +65,9 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 7940,
-        "targetMs": 8130,
-        "skewMs": -190,
+        "tvMs": 3014,
+        "targetMs": 3042,
+        "skewMs": -28,
         "speed": 1
       }
     },
@@ -76,9 +76,9 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 13922,
-        "targetMs": 14171,
-        "skewMs": -249,
+        "tvMs": 9074,
+        "targetMs": 9079,
+        "skewMs": -5,
         "speed": 1
       }
     },
@@ -87,9 +87,9 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 16988,
-        "targetMs": 17247,
-        "skewMs": -259,
+        "tvMs": 12139,
+        "targetMs": 12145,
+        "skewMs": -6,
         "speed": 1,
         "phase": "playing",
         "path": "media_session"
@@ -100,10 +100,12 @@
       "pass": true,
       "detail": {
         "status": 200,
+        "resumed": true,
+        "resumeMs": 2424,
         "tvState": 3,
-        "tvMs": 30606,
-        "targetMs": 30619,
-        "skewMs": -13,
+        "tvMs": 31221,
+        "targetMs": 31236,
+        "skewMs": -15,
         "speed": 1
       }
     },
@@ -113,9 +115,9 @@
       "detail": {
         "status": 200,
         "tvState": 2,
-        "tvMs": 30603,
-        "targetMs": 30620,
-        "skewMs": -17,
+        "tvMs": 31226,
+        "targetMs": 31237,
+        "skewMs": -11,
         "speed": 0
       }
     },
@@ -130,7 +132,11 @@
     {
       "id": "TVR-B0 details offers Watch together for a rooms-enabled profile",
       "pass": true,
-      "detail": {}
+      "detail": {
+        "lastFocus": [
+          "Watch together"
+        ]
+      }
     },
     {
       "id": "TVR-B1 TV host lobby shows a fragment-only invite link",
@@ -191,9 +197,9 @@
       "pass": true,
       "detail": {
         "tvState": 3,
-        "tvMs": 18739,
-        "targetMs": 18877,
-        "skewMs": -138,
+        "tvMs": 15177,
+        "targetMs": 15200,
+        "skewMs": -23,
         "speed": 1
       }
     },
