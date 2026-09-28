@@ -35,6 +35,8 @@ import {
 export type MemberPlaybackContext = {
   roomId: string;
   ratingKey: string;
+  mediaId: string;
+  partId: string;
   targetPositionMs: number;
   phase: RoomPhase;
   isHost: boolean;
@@ -116,6 +118,9 @@ type RateBucket = { startedAtMs: number; count: number };
 
 const MUTATION_CACHE_LIMIT = ROOM_POLICY.maxRooms * ROOM_POLICY.commandResultsPerRoom;
 const SWEEP_INTERVAL_MS = 750;
+const MAX_FORMER_MEMBERSHIPS = ROOM_POLICY.maxParticipants * 16;
+// Bounded re-authorization when members join or leave while next-item access checks are in flight.
+const ADVANCE_AUTHORIZATION_ATTEMPTS = 3;
 // Due one sweep early so the observed gap stays within sseHeartbeatMs despite tick quantization.
 const HEARTBEAT_DUE_MS = ROOM_POLICY.sseHeartbeatMs - SWEEP_INTERVAL_MS;
 const encoder = new TextEncoder();
@@ -511,11 +516,12 @@ export class RoomCoordinator {
   private commandPreflight(room: RoomRecord, participant: ParticipantRecord, command: CommandEnvelope, bodyDigest: string): CachedResponse | null {
     if (!participant.active || room.participants.get(participant.participantId) !== participant) return failure("not_found", "Room not found.");
     if (participant.membershipVersion !== command.membershipVersion) return failure("stale_membership", "This room membership was replaced.", this.snapshot(room));
+    // A byte-identical retry gets its original result even after the room ended or during a burst.
+    const cached = room.commandResults.get(commandKey(participant.participantId, command.commandId));
+    if (cached) return cached.digest === bodyDigest ? cached.response : failure("command_conflict", "commandId was already used for a different command.", this.snapshot(room));
     if (room.phase === "ended") return failure("room_ended", "This room has ended.", this.snapshot(room));
     if (command.epoch !== this.epoch) return failure("stale_epoch", "The coordinator restarted.", this.snapshot(room));
     if (this.rateLimited(`command:${room.roomId}:${participant.participantId}`, 30, 2_000, this.now())) return failure("rate_limited", "Commands are arriving too quickly.");
-    const cached = room.commandResults.get(commandKey(participant.participantId, command.commandId));
-    if (cached) return cached.digest === bodyDigest ? cached.response : failure("command_conflict", "commandId was already used for a different command.", this.snapshot(room));
     if (command.commandSequence <= participant.lastCommandSequence) {
       return this.cacheCommand(room, participant, command, bodyDigest, failure("command_result_expired", "This command sequence was already processed.", this.snapshot(room)));
     }
@@ -644,21 +650,27 @@ export class RoomCoordinator {
     });
   }
 
-  private async advanceResolved(room: RoomRecord, host: ParticipantRecord, command: CommandEnvelope | null, bodyDigest: string | null, next: AuthorizedMedia, expectedGeneration: number): Promise<CachedResponse> {
+  private async advanceResolved(room: RoomRecord, host: ParticipantRecord, command: CommandEnvelope | null, bodyDigest: string | null, next: AuthorizedMedia, expectedGeneration: number, attempt = 1): Promise<CachedResponse> {
     const checks = await Promise.all([...room.participants.values()].filter((participant) => participant.active).map(async (participant) => ({
       participant,
       access: await authorizeMedia(participant.principal, next.media.ratingKey, { mediaId: next.media.mediaId, partId: next.media.partId }, true),
     })));
-    return this.withRoomLock(room, () => {
+    const result = await this.withRoomLock(room, (): CachedResponse | null => {
       if (room.phase === "ended" || room.mediaGeneration !== expectedGeneration) {
         const response = failure("stale_generation", "The room media changed.", this.snapshot(room));
         return command && bodyDigest ? this.cacheCommand(room, host, command, bodyDigest, response) : response;
       }
+      // Members who joined while access was being checked have not been authorized for the next item.
+      const checked = new Set(checks.map((entry) => entry.participant.participantId));
+      const unchecked = [...room.participants.values()].some((participant) => participant.active && !checked.has(participant.participantId));
+      if (unchecked && attempt < ADVANCE_AUTHORIZATION_ATTEMPTS) return null;
       if (command && bodyDigest) {
         const rejected = this.commandPreflight(room, host, command, bodyDigest);
         if (rejected) return rejected;
       }
-      const hostCheck = checks.find((entry) => entry.participant.participantId === room.hostParticipantId);
+      // Departed members no longer affect the advance.
+      const current = checks.filter((entry) => entry.participant.active && room.participants.get(entry.participant.participantId) === entry.participant);
+      const hostCheck = current.find((entry) => entry.participant.participantId === room.hostParticipantId);
       if (!hostCheck?.access.ok) {
         const now = this.now();
         room.anchor = { positionMs: targetPositionMs(this.snapshot(room, now), now), effectiveAtMs: now, rate: 1 };
@@ -671,7 +683,7 @@ export class RoomCoordinator {
         this.publish(room);
         return command ? failure("not_found", "The next episode is unavailable.") : success({ advanced: false });
       }
-      const indeterminate = checks.find(
+      const indeterminate = unchecked || current.some(
         (entry) => entry.participant.participantId !== room.hostParticipantId && !entry.access.ok && entry.access.code !== "media_forbidden"
       );
       if (indeterminate) {
@@ -686,7 +698,7 @@ export class RoomCoordinator {
         this.publish(room);
         return command ? failure("upstream_unavailable", "Plex is temporarily unavailable.") : success({ advanced: false });
       }
-      for (const check of checks) {
+      for (const check of current) {
         if (check.participant.participantId !== room.hostParticipantId && !check.access.ok && check.access.code === "media_forbidden") {
           this.removeParticipant(room, check.participant, false, "access_denied");
         }
@@ -717,6 +729,7 @@ export class RoomCoordinator {
       this.publish(room);
       return response;
     });
+    return result ?? this.advanceResolved(room, host, command, bodyDigest, next, expectedGeneration, attempt + 1);
   }
 
   async presence(principal: PlaybackPrincipal, roomId: string, report: PresenceReport): Promise<CachedResponse> {
@@ -841,6 +854,8 @@ export class RoomCoordinator {
       (entry) => entry.userId !== participant.userId || entry.deviceSessionId !== participant.deviceSessionId || entry.removed
     );
     room.formerMemberships.push({ userId: participant.userId, deviceSessionId: participant.deviceSessionId, removed: banned });
+    // New device cookies make cumulative identities unbounded; bans stay enforced by bannedUserIds.
+    if (room.formerMemberships.length > MAX_FORMER_MEMBERSHIPS) room.formerMemberships.shift();
     if (banned) room.bannedUserIds.add(participant.userId);
     room.presenceRevision += 1;
     if (![...room.participants.values()].some((member) => member.active && member.connected)) room.emptySinceMs ??= this.now();
@@ -901,6 +916,8 @@ export class RoomCoordinator {
     return {
       roomId,
       ratingKey: room.media.ratingKey,
+      mediaId: room.media.mediaId,
+      partId: room.media.partId,
       targetPositionMs: targetPositionMs(this.snapshot(room), this.now()),
       phase: room.phase,
       isHost: room.hostParticipantId === this.findParticipant(room, principal)?.participantId,
@@ -1032,7 +1049,8 @@ export class RoomCoordinator {
     try {
       const access = await authorizeMedia(participant.principal, room.media.ratingKey, { mediaId: room.media.mediaId, partId: room.media.partId }, true);
       if (access.ok || room.mediaGeneration !== generation || !participant.active) return;
-      if (access.code === "media_forbidden") {
+      // A changed Plex media/part is never silently substituted for the room's exact edition.
+      if (access.code === "media_forbidden" || access.code === "media_mismatch") {
         await this.withRoomLock(room, () => {
           if (!participant.active || room.mediaGeneration !== generation) return;
           const wasHost = room.hostParticipantId === participant.participantId;

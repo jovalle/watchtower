@@ -618,4 +618,49 @@ describe("RoomCoordinator", () => {
     expect(record.formerMemberships).toHaveLength(1);
     expect(coordinator.diagnostics()).toMatchObject({ participants: 1 });
   });
+
+  it("bounds cumulative membership history when each join uses a new device", async () => {
+    const room = await created();
+    for (let cycle = 0; cycle < ROOM_POLICY.maxParticipants * 16 + 10; cycle += 1) {
+      const device = { ...guest, deviceSessionId: `guest-device-${cycle}` };
+      const joined = await join(room, device, 1000 + cycle);
+      await coordinator.leave(device, room.snapshot.roomId, { epoch: EPOCH, membershipVersion: joined.membership.membershipVersion });
+    }
+    const record = (coordinator as unknown as { rooms: Map<string, { formerMemberships: unknown[] }> }).rooms.get(room.snapshot.roomId)!;
+    expect(record.formerMemberships).toHaveLength(ROOM_POLICY.maxParticipants * 16);
+  });
+
+  it("re-authorizes a member who joins while next-item access is being checked", async () => {
+    const late = { ...guest, userId: "denied-user", displayName: "Late", serverToken: "late-token", deviceSessionId: "late-device" };
+    const room = await created();
+    let releaseChecks!: () => void;
+    const checksPaused = new Promise<void>((resolve) => { releaseChecks = resolve; });
+    let pauseNextChecks = true;
+    mocks.authorizeMedia.mockImplementation(async (principal: PlaybackPrincipal, ratingKey: string) => {
+      if (ratingKey === "43" && pauseNextChecks) {
+        pauseNextChecks = false;
+        await checksPaused;
+      }
+      return principal.userId === "denied-user" && ratingKey === "43"
+        ? { ok: false, code: "media_forbidden", message: "denied" }
+        : { ok: true, value: media(ratingKey) };
+    });
+
+    const advancing = coordinator.command(host, room.snapshot.roomId, command(room, 1, 1, "select-next", { delayMs: 0 }));
+    await vi.waitFor(() => expect(pauseNextChecks).toBe(false));
+    await join(room, late, 3);
+    releaseChecks();
+
+    expect(snapshot(await advancing)).toMatchObject({ media: { ratingKey: "43" }, reason: "next_selected" });
+    expect(coordinator.get(late, room.snapshot.roomId)).toMatchObject({ status: 404 });
+    expect(snapshot(coordinator.get(host, room.snapshot.roomId)).participants).toHaveLength(1);
+  });
+
+  it("returns a cached command result to an identical retry after the room ended", async () => {
+    const room = await created();
+    const end = command(room, 1, 1, "end", {});
+    const accepted = await coordinator.command(host, room.snapshot.roomId, end);
+    expect(accepted).toMatchObject({ status: 200, body: { accepted: true } });
+    expect(await coordinator.command(host, room.snapshot.roomId, end)).toEqual(accepted);
+  });
 });
