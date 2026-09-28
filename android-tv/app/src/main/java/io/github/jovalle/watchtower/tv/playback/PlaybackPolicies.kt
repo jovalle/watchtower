@@ -22,6 +22,9 @@ sealed interface AuthorityDecision {
 
 fun interface TransportAuthority {
     fun authorize(intent: PlaybackIntent): AuthorityDecision
+
+    /** Automatic actions (auto-skip, autoplay next); a room authority denies these so clients never advance independently. */
+    fun authorizeAutomatic(intent: PlaybackIntent): AuthorityDecision = authorize(intent)
 }
 
 object SoloAuthority : TransportAuthority {
@@ -32,8 +35,11 @@ class PlaybackIntentGate(
     private val authority: TransportAuthority,
     private val execute: (PlaybackIntent) -> Unit,
 ) {
-    fun submitUserIntent(intent: PlaybackIntent): AuthorityDecision {
-        val decision = authority.authorize(intent)
+    fun submitUserIntent(intent: PlaybackIntent): AuthorityDecision = dispatch(intent, authority.authorize(intent))
+
+    fun submitAutomaticIntent(intent: PlaybackIntent): AuthorityDecision = dispatch(intent, authority.authorizeAutomatic(intent))
+
+    private fun dispatch(intent: PlaybackIntent, decision: AuthorityDecision): AuthorityDecision {
         when (decision) {
             AuthorityDecision.Allow -> execute(intent)
             is AuthorityDecision.Redirect -> execute(decision.intent)

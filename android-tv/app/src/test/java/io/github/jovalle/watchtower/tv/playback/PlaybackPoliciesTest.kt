@@ -34,6 +34,26 @@ class PlaybackPoliciesTest {
         assertEquals(emptyList<PlaybackIntent>(), executed)
     }
 
+    @Test fun `automatic skip and next are authorized separately from user intents`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        val roomLike = object : TransportAuthority {
+            override fun authorize(intent: PlaybackIntent) = AuthorityDecision.Allow
+            override fun authorizeAutomatic(intent: PlaybackIntent) = AuthorityDecision.Deny("room controls advance")
+        }
+        val gate = PlaybackIntentGate(roomLike, executed::add)
+
+        assertEquals(AuthorityDecision.Deny("room controls advance"), gate.submitAutomaticIntent(PlaybackIntent.Next))
+        assertEquals(AuthorityDecision.Deny("room controls advance"), gate.submitAutomaticIntent(PlaybackIntent.SeekTo(90_000)))
+        assertEquals(AuthorityDecision.Allow, gate.submitUserIntent(PlaybackIntent.Next))
+        assertEquals(listOf<PlaybackIntent>(PlaybackIntent.Next), executed)
+    }
+
+    @Test fun `solo authority allows automatic intents by default`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        PlaybackIntentGate(SoloAuthority, executed::add).submitAutomaticIntent(PlaybackIntent.SeekTo(90_000))
+        assertEquals(listOf<PlaybackIntent>(PlaybackIntent.SeekTo(90_000)), executed)
+    }
+
     @Test fun `repeat acceleration commits one final seek`() {
         val scrub = ScrubController()
         scrub.begin(60_000)
