@@ -174,10 +174,30 @@ export async function revokeDeviceSession(deviceSessionId: string): Promise<bool
     if (record.deviceSessionId === deviceSessionId && record.revokedAtMs === null) {
       record.revokedAtMs = Date.now();
       await queuePersist();
+      notifyIdentityEnded(record.profile.userId, record.deviceSessionId);
       return true;
     }
   }
   return false;
+}
+
+type IdentityEndedListener = (identity: { userId: string; deviceSessionId: string }) => void;
+const identityEndedListeners = new Set<IdentityEndedListener>();
+
+/** Fires after a device session is revoked or its effective profile is replaced. */
+export function onDeviceIdentityEnded(listener: IdentityEndedListener): () => void {
+  identityEndedListeners.add(listener);
+  return () => identityEndedListeners.delete(listener);
+}
+
+function notifyIdentityEnded(userId: string, deviceSessionId: string): void {
+  for (const listener of identityEndedListeners) {
+    try {
+      listener({ userId, deviceSessionId });
+    } catch (error) {
+      console.error("[Native] identity-ended listener failed:", error instanceof Error ? error.message : "unknown error");
+    }
+  }
 }
 
 export async function listAccountDevices(accountUserId: string): Promise<DeviceSessionRecord[]> {
@@ -247,6 +267,7 @@ export async function replaceDeviceProfile(
   const record = records.get(tokenHash);
   if (!record) return null;
   if (record.identityVersion !== expectedIdentityVersion) return "stale";
+  const previousUserId = record.profile.userId;
   record.profile = input.profile;
   record.plexToken = plexToken;
   record.serverToken = serverToken;
@@ -255,6 +276,7 @@ export async function replaceDeviceProfile(
   record.verifiedAtMs = Date.now();
   record.verifyImmediately = false;
   await queuePersist();
+  notifyIdentityEnded(previousUserId, record.deviceSessionId);
   return structuredClone(record);
 }
 
