@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "deviceSessionId": "ds_4f9c2b7e1a0d4c6e",
+      "name": "Living Room TV",
+      "platform": "android-tv",
+      "model": "Google TV Streamer",
+      "appVersion": "0.1.0 (1)",
+      "createdAtMs": 1790726400000,
+      "lastSeenAtMs": 1790730000000,
+      "expiresAtMs": 1793318400000,
+      "current": true
+    },
+    {
+      "deviceSessionId": "ds_0b1c2d3e4f5a6b7c",
+      "name": "Bedroom TV",
+      "platform": "android-tv",
+      "model": null,
+      "appVersion": null,
+      "createdAtMs": 1790640000000,
+      "lastSeenAtMs": null,
+      "expiresAtMs": 1793232000000,
+      "current": false
+    }
+  ]
+}

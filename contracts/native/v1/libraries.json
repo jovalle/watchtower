@@ -1,0 +1,6 @@
+{
+  "items": [
+    { "sectionId": "1", "type": "movie", "title": "Movies" },
+    { "sectionId": "2", "type": "show", "title": "TV Shows" }
+  ]
+}

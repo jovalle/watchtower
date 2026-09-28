@@ -1,0 +1,6 @@
+{
+  "items": [
+    { "profileId": "home-uuid-owner", "title": "Test Owner", "restricted": false, "protected": false, "admin": true, "current": true },
+    { "profileId": "home-uuid-kid", "title": "Kid", "restricted": true, "protected": true, "admin": false, "current": false }
+  ]
+}
