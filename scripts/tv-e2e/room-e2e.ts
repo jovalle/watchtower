@@ -38,6 +38,9 @@ const ADB = path.join(process.env.ANDROID_HOME ?? `${process.env.HOME}/Library/A
 const MOVIE = { ratingKey: "1", mediaId: "10", partId: "100" };
 const results: Array<{ id: string; pass: boolean; detail: unknown }> = [];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// ROOM_E2E_ONLY=A|B runs one scenario; ROOM_E2E_HOLD=1 keeps the seeded servers up; ROOM_E2E_TRACE=1 logs room revisions.
+const ONLY = process.env.ROOM_E2E_ONLY;
+const TRACE = process.env.ROOM_E2E_TRACE === "1";
 
 function record(id: string, pass: boolean, detail: unknown = {}) {
   results.push({ id, pass, detail });
@@ -153,7 +156,10 @@ class Member {
   get roomId(): string { return this.control.roomId; }
 
   apply(snapshot: Json) {
-    if (snapshot.revision > this.control.revision) this.control = snapshot;
+    if (snapshot.revision > this.control.revision) {
+      this.control = snapshot;
+      if (TRACE) console.log(`TRACE t=${Math.round(performance.now() + this.offsetMs)} rev=${snapshot.revision} ${snapshot.phase}/${snapshot.reason} anchor=${JSON.stringify(snapshot.anchor)} gen=${snapshot.mediaGeneration}/${snapshot.preparationGeneration}`);
+    }
     if (snapshot.presenceRevision >= this.presenceView.presenceRevision) this.presenceView = snapshot;
   }
 
@@ -349,9 +355,11 @@ async function webHostTvGuest(cookie: string) {
   const host = new Member(bob, envelope);
   await host.syncClock();
   host.subscribe();
+  if (TRACE) console.log(`TRACE created anchor=${JSON.stringify(envelope.snapshot.anchor)} phase=${envelope.snapshot.phase}`);
   const web = await webPlaybackSession(bob, host.roomId);
   record("TVR-A1 web host registers a room-scoped playback session", web.id !== null, { status: web.status });
   await host.presence({ playbackSessionId: web.id, ready: web.id !== null });
+  if (TRACE) console.log(`TRACE after host presence anchor=${JSON.stringify(host.control.anchor)} rev=${host.control.revision}`);
   host.keepAlive();
 
   await launch(`watchtower://join#i=${envelope.invitation.secret}`);
@@ -365,6 +373,12 @@ async function webHostTvGuest(cookie: string) {
 
   const play = await host.command("play");
   record("TVR-A4 web host play accepted", play.status === 200, { status: play.status, code: play.json?.error?.code });
+  if (TRACE) {
+    for (let sample = 0; sample < 12; sample += 1) {
+      console.log(`TRACE skew ${JSON.stringify(await skew(host))}`);
+      await sleep(400);
+    }
+  }
   await sleep(4_000);
   const afterPlay = await skew(host);
   record("TVR-A5 TV follows host play", afterPlay.tvState === 3 && Math.abs(afterPlay.skewMs ?? Infinity) < 750, afterPlay);
@@ -487,8 +501,12 @@ try {
     `${PKG}.test/androidx.test.runner.AndroidJUnitRunner`,
   );
   record("TVR-01 harness credential stored on the emulator", /OK \(1 test\)/.test(seededTv));
-  await webHostTvGuest(seeded.cookie);
-  await tvHostWithGuests(seeded.cookie, seeded.den.accessToken, seeded.tv.accessToken);
+  if (process.env.ROOM_E2E_HOLD === "1") {
+    console.log(`holding: ${BASE} (Ctrl-C to stop)`);
+    await new Promise<void>((resolve) => process.once("SIGINT", () => resolve()));
+  }
+  if (!ONLY || ONLY === "A") await webHostTvGuest(seeded.cookie);
+  if (!ONLY || ONLY === "B") await tvHostWithGuests(seeded.cookie, seeded.den.accessToken, seeded.tv.accessToken);
   failed = results.some((result) => !result.pass);
 } finally {
   await writeFile(path.join(WORK, "results.json"), JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
