@@ -52,7 +52,12 @@ class FakeEventSource {
 }
 
 const envelope = structuredClone(fixtures.createResponse) as RoomEnvelope;
-const baseSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+const fixtureSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+// The room is on the title the player under test shows.
+const baseSnapshot: RoomSnapshot = {
+  ...fixtureSnapshot,
+  media: { ...fixtureSnapshot.media, ratingKey: "42" },
+};
 const playingSnapshot = structuredClone(fixtures.playingSnapshot) as RoomSnapshot;
 const roomId = envelope.snapshot.roomId;
 const playbackSession = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
