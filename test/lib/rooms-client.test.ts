@@ -85,6 +85,29 @@ describe("snapshot ordering", () => {
 });
 
 describe("recovery and liveness", () => {
+  it("keeps retrying when the first contact fails instead of staying connecting", async () => {
+    let failed = false;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (!failed) {
+        failed = true;
+        throw new TypeError("network down");
+      }
+      if (String(url).endsWith("/api/v1/clock")) return clockResponse();
+      return new Response(JSON.stringify(envelope), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = makeClient(fetchImpl);
+    const statuses: RoomClientState["status"][] = [];
+    client.subscribe((state) => statuses.push(state.status));
+
+    await client.start();
+    await vi.waitFor(() => expect(client.getState().status).toBe("connected"));
+    expect(statuses).toContain("reconnecting");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    client.stop();
+  });
   it("enters reconnecting after the stale threshold", async () => {
     vi.useFakeTimers();
     let now = 100;

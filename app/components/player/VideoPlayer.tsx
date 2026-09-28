@@ -524,9 +524,10 @@ export function VideoPlayer({
   const prepareRoomSourceReplacement = useCallback(
     async (positionMs: number) => {
       if (!room) return true;
+      const previous = roomPresenceRef.current;
       replacingSourceRef.current = true;
       roomPresenceRef.current = {
-        ...roomPresenceRef.current,
+        ...previous,
         ready: false,
         buffering: false,
         replacingSource: true,
@@ -536,7 +537,22 @@ export function VideoPlayer({
         playbackSessionId: playbackSession,
         positionMs,
       });
-      if (!acknowledged) replacingSourceRef.current = false;
+      if (!acknowledged) {
+        // This stream stays: restore the prior state so a queued or later report cannot strand the member.
+        replacingSourceRef.current = false;
+        roomPresenceRef.current = { ...previous, replacingSource: false };
+        const video = videoRef.current;
+        room.observePresence({
+          playbackSessionId: playbackSession,
+          positionMs:
+            video && Number.isFinite(video.currentTime)
+              ? Math.max(0, Math.round(video.currentTime * 1000))
+              : null,
+          ...roomPresenceRef.current,
+        });
+        lastReadyClaimRef.current = null;
+        evaluateRoomReadinessRef.current();
+      }
       return acknowledged;
     },
     [playbackSession, room]
@@ -870,11 +886,14 @@ export function VideoPlayer({
     ]
   );
 
+  // A coalesced seek belongs to the media generation it aimed at; drop it on change or unmount.
+  const roomMediaGeneration = room?.snapshot.mediaGeneration;
   useEffect(
     () => () => {
       if (pendingRoomSeekRef.current) clearTimeout(pendingRoomSeekRef.current.timer);
+      pendingRoomSeekRef.current = null;
     },
-    []
+    [roomMediaGeneration]
   );
 
   const expectEffect = useCallback(
