@@ -33,9 +33,23 @@ import io.github.jovalle.watchtower.tv.api.StopPlaybackRequest
 import io.github.jovalle.watchtower.tv.api.SubtitleTrack
 import io.github.jovalle.watchtower.tv.api.TimelineRequest
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
+import io.github.jovalle.watchtower.tv.rooms.ObservedMediaState
+import io.github.jovalle.watchtower.tv.rooms.PresenceObservation
+import io.github.jovalle.watchtower.tv.rooms.ReconciliationAction
+import io.github.jovalle.watchtower.tv.rooms.ReconciliationMemory
+import io.github.jovalle.watchtower.tv.rooms.RoomAuthority
+import io.github.jovalle.watchtower.tv.rooms.RoomCommand
+import io.github.jovalle.watchtower.tv.rooms.RoomConnectionStatus
+import io.github.jovalle.watchtower.tv.rooms.RoomPolicy
+import io.github.jovalle.watchtower.tv.rooms.RoomUiState
+import io.github.jovalle.watchtower.tv.rooms.estimatedServerNowMs
+import io.github.jovalle.watchtower.tv.rooms.reconcileRoomPlayback
+import io.github.jovalle.watchtower.tv.rooms.roomInvitationUrl
+import io.github.jovalle.watchtower.tv.rooms.targetPositionMs
 import io.github.jovalle.watchtower.tv.settings.ProfilePlaybackPrefs
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -68,6 +82,11 @@ data class PlaybackUiState(
     val diagnostics: List<String> = emptyList(),
     val nextDeadlineMs: Long? = null,
     val skipIntroTargetMs: Long? = null,
+    val room: RoomUiState? = null,
+    val roomPanelVisible: Boolean = false,
+    val confirmLeave: Boolean = false,
+    val roomMessage: String? = null,
+    val roomInviteUrl: String? = null,
 )
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -83,7 +102,16 @@ class PlaybackController(
         setAudioAttributes(DeviceCapabilityDetector.MEDIA_AUDIO_ATTRIBUTES, true)
         setHandleAudioBecomingNoisy(true)
     }
-    private val gate = PlaybackIntentGate(SoloAuthority, ::executeIntent)
+    private val roomSession = route.roomId?.let(graph.rooms::activeSession)
+    private val authority = roomSession?.let { session ->
+        RoomAuthority(
+            state = { session.state.value },
+            positionMs = ::absolutePosition,
+            send = { command -> scope.launch { session.send(command) } },
+            requestLeave = ::requestLeave,
+        )
+    } ?: SoloAuthority
+    private val gate = PlaybackIntentGate(authority, ::executeIntent)
     private val sessionPlayer = GatedPlayer(player, gate) { index, position ->
         mapper?.toAbsolute(index, position) ?: position
     }
@@ -117,6 +145,14 @@ class PlaybackController(
     private var droppedFrames = 0
     private var ticker: Job? = null
     private var replacementJob: Job? = null
+    private var scheduledPlayJob: Job? = null
+    private var bufferingPresenceJob: Job? = null
+    private var reconciliationMemory = ReconciliationMemory()
+    private var lastRoomObservationAtMs = Long.MIN_VALUE
+    private var roomMediaGeneration = roomSession?.state?.value?.snapshot?.mediaGeneration
+    private var roomPresence = PresenceObservation()
+    private var lastReadyClaim: Triple<Boolean, Long, Long>? = null
+    private var nextRequestedGeneration: Long? = null
 
     private val analyticsListener = object : AnalyticsListener {
         override fun onVideoDecoderInitialized(
@@ -146,7 +182,42 @@ class PlaybackController(
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         scope.launch {
             graph.session.identityChanges.collect { change ->
-                if (snapshot != null && change.current != snapshot) exit()
+                if (snapshot != null && change.current != snapshot) forceExit()
+            }
+        }
+        roomSession?.let { session ->
+            scope.launch {
+                session.state.collect { room ->
+                    _state.value = _state.value.copy(
+                        room = room,
+                        roomMessage = room.message,
+                        roomInviteUrl = room.invitation?.let { roomInvitationUrl(session.identity.baseUrl, it.secret) },
+                    )
+                    if (room.status in setOf(RoomConnectionStatus.RECONNECTING, RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR)) {
+                        scheduledPlayJob?.cancel()
+                        gate.applyState {
+                            player.pause()
+                            player.setPlaybackSpeed(1f)
+                        }
+                    }
+                    val roomSnapshot = room.snapshot
+                    val currentDescriptor = descriptor
+                    if (roomSnapshot != null && currentDescriptor != null &&
+                        roomSnapshot.mediaGeneration > (roomMediaGeneration ?: 0) &&
+                        (
+                            roomSnapshot.media.ratingKey != currentDescriptor.media.ratingKey ||
+                                roomSnapshot.media.mediaId != currentDescriptor.media.mediaId ||
+                                roomSnapshot.media.partId != currentDescriptor.media.partId ||
+                                roomSnapshot.media.serverMachineId != currentDescriptor.media.serverMachineId
+                            )
+                    ) {
+                        roomMediaGeneration = roomSnapshot.mediaGeneration
+                        openItem(roomSnapshot.media.ratingKey, roomSnapshot.media.mediaId)
+                    } else {
+                        reconcileRoom()
+                        evaluateRoomReadiness()
+                    }
+                }
             }
         }
         scope.launch { initialize() }
@@ -154,7 +225,9 @@ class PlaybackController(
 
     fun submit(intent: PlaybackIntent): AuthorityDecision {
         showControls()
-        return gate.submitUserIntent(intent)
+        return gate.submitUserIntent(intent).also { decision ->
+            if (decision is AuthorityDecision.Deny) _state.value = _state.value.copy(roomMessage = decision.reason)
+        }
     }
 
     fun toggleMenu(menu: PlayerMenu) {
@@ -164,10 +237,46 @@ class PlaybackController(
 
     fun handleBack() {
         when {
+            _state.value.confirmLeave -> cancelLeave()
+            _state.value.roomPanelVisible -> _state.value = _state.value.copy(roomPanelVisible = false)
             _state.value.menu != null -> _state.value = _state.value.copy(menu = null)
             _state.value.controlsVisible -> _state.value = _state.value.copy(controlsVisible = false)
             else -> exit()
         }
+    }
+
+    fun toggleRoomPanel() {
+        _state.value = _state.value.copy(roomPanelVisible = !_state.value.roomPanelVisible, controlsVisible = true)
+    }
+
+    fun requestLeave() {
+        if (roomSession == null) return forceExit()
+        _state.value = _state.value.copy(confirmLeave = true, controlsVisible = true)
+    }
+
+    fun cancelLeave() {
+        _state.value = _state.value.copy(confirmLeave = false)
+    }
+
+    fun confirmLeave() {
+        val session = roomSession ?: return forceExit()
+        _state.value = _state.value.copy(confirmLeave = false)
+        scope.launch {
+            runCatching { graph.rooms.leave() }
+            forceExit()
+        }
+    }
+
+    fun endRoom() {
+        roomSession?.let { session -> scope.launch { session.send(io.github.jovalle.watchtower.tv.rooms.RoomCommand.End) } }
+    }
+
+    fun rotateInvitation() {
+        roomSession?.let { session -> scope.launch { session.updateInvitation("rotate") } }
+    }
+
+    fun revokeInvitation() {
+        roomSession?.let { session -> scope.launch { session.updateInvitation("revoke") } }
     }
 
     fun beginScrub(direction: Int) {
@@ -184,8 +293,20 @@ class PlaybackController(
     }
 
     fun cancelNextCountdown() {
+        if (roomSession != null) {
+            scope.launch { roomSession.send(io.github.jovalle.watchtower.tv.rooms.RoomCommand.CancelNext) }
+            return
+        }
         nextCountdownCancelled = true
         _state.value = _state.value.copy(nextDeadlineMs = null)
+    }
+
+    fun playNextNow() {
+        if (roomSession != null) {
+            scope.launch { roomSession.send(io.github.jovalle.watchtower.tv.rooms.RoomCommand.SelectNext(0)) }
+        } else {
+            submit(PlaybackIntent.Next)
+        }
     }
 
     fun skipIntro() {
@@ -246,6 +367,11 @@ class PlaybackController(
     }
 
     fun exit() {
+        if (roomSession?.state?.value?.isActive == true) return requestLeave()
+        forceExit()
+    }
+
+    private fun forceExit() {
         if (!closed.compareAndSet(false, true)) return
         releaseAndStop()
         onExit()
@@ -282,6 +408,7 @@ class PlaybackController(
             val playback = withContext(Dispatchers.IO) { graph.api.createPlayback(captured, request) }
             install(playback)
         } catch (error: Exception) {
+            reportRoomPresence(ready = false, buffering = false, error = "stream_unavailable")
             if (!closed.get()) _state.value = _state.value.copy(
                 loading = false,
                 error = error.message ?: context.getString(R.string.player_error_start),
@@ -291,6 +418,32 @@ class PlaybackController(
 
     private fun install(playback: PlaybackDescriptor) {
         if (closed.get()) return
+        val roomSnapshot = roomSession?.state?.value?.snapshot
+        val roomMedia = roomSnapshot?.media
+        if (roomMedia != null && (
+            playback.media.serverMachineId != roomMedia.serverMachineId ||
+                playback.media.ratingKey != roomMedia.ratingKey ||
+                playback.media.mediaId != roomMedia.mediaId ||
+                playback.media.partId != roomMedia.partId
+            )
+        ) {
+            snapshot?.let { owner ->
+                graph.appScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        graph.api.stopPlayback(owner, playback.playbackId, StopPlaybackRequest(playback.startPositionMs, playback.durationMs, 1))
+                    }
+                }
+            }
+            if (roomSnapshot.mediaGeneration != roomMediaGeneration) {
+                // The room advanced while this item was loading; follow it instead of reporting an error.
+                roomMediaGeneration = roomSnapshot.mediaGeneration
+                openItem(roomMedia.ratingKey, roomMedia.mediaId)
+                return
+            }
+            _state.value = _state.value.copy(loading = false, error = context.getString(R.string.room_media_mismatch))
+            reportRoomPresence(ready = false, buffering = false, error = "unsupported_media", playbackSessionId = playback.playbackId)
+            return
+        }
         descriptor = playback
         nextCountdownCancelled = false
         decoderName = null
@@ -319,18 +472,23 @@ class PlaybackController(
             ::absolutePosition,
             onSessionExpired = { position -> scope.launch { replaceSessionExpired(position) } },
         ).also(ProgressReporter::start)
+        val previousState = _state.value
         _state.value = PlaybackUiState(
             loading = false,
             title = playback.item.title,
             subtitle = playback.item.showTitle,
             durationMs = playback.durationMs,
             positionMs = playback.startPositionMs,
-            playWhenReady = true,
+            playWhenReady = roomSession == null,
             buffering = true,
             descriptor = playback,
             diagnostics = playback.diagnostics + timelineDiagnostic(),
+            room = previousState.room,
+            roomPanelVisible = previousState.roomPanelVisible,
+            roomMessage = previousState.roomMessage,
+            roomInviteUrl = previousState.roomInviteUrl,
         )
-        player.playWhenReady = true
+        player.playWhenReady = roomSession == null
         player.prepare()
         ticker?.cancel()
         ticker = scope.launch { tick() }
@@ -365,6 +523,7 @@ class PlaybackController(
         val captured = snapshot ?: return
         val current = descriptor ?: return
         val loadedDetail = detail ?: return
+        reportRoomPresence(ready = false, buffering = false, replacingSource = true)
         player.pause()
         _state.value = _state.value.copy(loading = true, buffering = true, controlsVisible = true)
         replacementJob = scope.launch {
@@ -388,6 +547,7 @@ class PlaybackController(
                 oldReporter?.stopFinal(absolutePosition())
                 install(replacement)
             } catch (error: Exception) {
+                reportRoomPresence(ready = false, buffering = false, error = "stream_unavailable")
                 _state.value = _state.value.copy(
                     loading = false,
                     buffering = false,
@@ -468,14 +628,21 @@ class PlaybackController(
             val current = descriptor
             if (current != null) {
                 val position = absolutePosition()
-                var nextDeadline = _state.value.nextDeadlineMs
+                var nextDeadline = if (roomSession != null) {
+                    val room = roomSession.state.value
+                    val deadline = room.snapshot?.nextCountdown?.deadlineMs
+                    val offset = room.clock?.offsetMs
+                    if (deadline != null && offset != null) (deadline - offset).toLong() else null
+                } else {
+                    _state.value.nextDeadlineMs
+                }
                 val introEnd = current.markers.firstOrNull {
                     it.type == "intro" && position in it.startMs until it.endMs
                 }?.endMs
-                bingePolicy.skipTarget(position, current.markers, current.autoplay.autoSkipIntro)?.let {
+                if (roomSession == null) bingePolicy.skipTarget(position, current.markers, current.autoplay.autoSkipIntro)?.let {
                     gate.submitAutomaticIntent(PlaybackIntent.SeekTo(it))
                 }
-                if (nextDeadline == null && !nextCountdownCancelled) {
+                if (roomSession == null && nextDeadline == null && !nextCountdownCancelled) {
                     nextDeadline = bingePolicy.nextCountdown(
                         position,
                         current.durationMs,
@@ -485,7 +652,7 @@ class PlaybackController(
                         android.os.SystemClock.elapsedRealtime(),
                     )?.deadlineMs
                 }
-                if (nextDeadline != null && android.os.SystemClock.elapsedRealtime() >= nextDeadline) {
+                if (roomSession == null && nextDeadline != null && android.os.SystemClock.elapsedRealtime() >= nextDeadline) {
                     _state.value = _state.value.copy(nextDeadlineMs = null)
                     nextCountdownCancelled = true
                     gate.submitAutomaticIntent(PlaybackIntent.Next)
@@ -496,15 +663,22 @@ class PlaybackController(
                     nextDeadlineMs = nextDeadline,
                     skipIntroTargetMs = introEnd,
                 )
+                if (roomSession != null && android.os.SystemClock.elapsedRealtime() - lastRoomObservationAtMs >= RoomPolicy.OBSERVATION_INTERVAL_MS) {
+                    lastRoomObservationAtMs = android.os.SystemClock.elapsedRealtime()
+                    observeRoomPresence()
+                    reconcileRoom()
+                    evaluateRoomReadiness()
+                    requestRoomAutoAdvance(position, current)
+                }
             }
             delay(500)
         }
     }
 
-    private fun openItem(ratingKey: String) {
+    private fun openItem(ratingKey: String, mediaId: String? = null) {
         if (!closed.compareAndSet(false, true)) return
         releaseAndStop()
-        onOpenItem(PlayerRoute(ratingKey))
+        onOpenItem(PlayerRoute(ratingKey, mediaId = mediaId, roomId = route.roomId))
     }
 
     private fun showControls() {
@@ -524,15 +698,28 @@ class PlaybackController(
     override fun onPlaybackStateChanged(playbackState: Int) {
         val buffering = playbackState == Player.STATE_BUFFERING
         _state.value = _state.value.copy(buffering = buffering, loading = false)
+        bufferingPresenceJob?.cancel()
+        if (roomSession != null && buffering) {
+            bufferingPresenceJob = scope.launch {
+                delay(RoomPolicy.BUFFERING_REPORT_DELAY_MS)
+                if (player.playbackState == Player.STATE_BUFFERING) reportRoomPresence(ready = false, buffering = true)
+            }
+        }
         if (playbackState == Player.STATE_READY) {
             resolveHlsTimelineIfPossible()
             displayMode.requestOnce(player.videoFormat?.frameRate, prefs.matchFrameRate)
+            reconcileRoom()
+            evaluateRoomReadiness()
         }
         if (playbackState == Player.STATE_ENDED) {
             val current = descriptor ?: return
             val active = current.delivery.activePartIndex
             if (current.delivery.type == "hls" && active < current.delivery.parts.lastIndex) {
                 replace("part_change", current.delivery.parts[active + 1].startMs)
+            } else if (roomSession != null) {
+                // The room decides what follows; a host with auto-advance requests it from tick().
+                gate.applyState { player.pause() }
+                evaluateRoomReadiness()
             } else if (current.nextItem != null && current.autoplay.autoPlayNextEpisode && !nextCountdownCancelled) {
                 if (gate.submitAutomaticIntent(PlaybackIntent.Next) is AuthorityDecision.Deny) {
                     _state.value = _state.value.copy(controlsVisible = true, playWhenReady = false, isPlaying = false)
@@ -562,6 +749,7 @@ class PlaybackController(
 
     override fun onPlayerError(error: PlaybackException) {
         val current = descriptor ?: return
+        reportRoomPresence(ready = false, buffering = false, error = "media_error")
         when (recoveryPolicy.onFailure(current.delivery.method)) {
             RecoveryAction.DECODER_FALLBACK -> replace("decoder_fallback", absolutePosition(), forceTranscode = true)
             RecoveryAction.RETRY_HLS -> replace("retry", absolutePosition())
@@ -615,6 +803,9 @@ class PlaybackController(
 
     private fun release() {
         ticker?.cancel()
+        scheduledPlayJob?.cancel()
+        bufferingPresenceJob?.cancel()
+        if (roomSession != null) gate.applyState { player.setPlaybackSpeed(1f) }
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         displayMode.restore()
         player.removeListener(this)
@@ -623,6 +814,121 @@ class PlaybackController(
         player.release()
         scope.cancel()
     }
+
+    /** Sends a presence transition now (mirrors the web client's reportPresence). */
+    private fun reportRoomPresence(
+        ready: Boolean,
+        buffering: Boolean,
+        replacingSource: Boolean = false,
+        error: String? = null,
+        playbackSessionId: String? = descriptor?.playbackId,
+    ) {
+        val session = roomSession ?: return
+        roomPresence = PresenceObservation(
+            playbackSessionId = playbackSessionId,
+            positionMs = descriptor?.let { absolutePosition() },
+            ready = ready,
+            buffering = buffering,
+            replacingSource = replacingSource,
+            error = error,
+        )
+        if (!ready) {
+            lastReadyClaim = session.state.value.snapshot?.let { Triple(false, it.mediaGeneration, it.preparationGeneration) }
+        }
+        session.observePresence(roomPresence, reportImmediately = true)
+    }
+
+    /** Refreshes the position carried by the next presence heartbeat without sending a request. */
+    private fun observeRoomPresence() {
+        val session = roomSession ?: return
+        val current = descriptor ?: return
+        roomPresence = roomPresence.copy(playbackSessionId = current.playbackId, positionMs = absolutePosition())
+        session.observePresence(roomPresence)
+    }
+
+    /** Claims readiness only when positioned on the room target, like the web player's evaluateRoomReadiness. */
+    private fun evaluateRoomReadiness() {
+        val session = roomSession ?: return
+        val room = session.state.value
+        val roomSnapshot = room.snapshot ?: return
+        val clock = room.clock ?: return
+        if (room.status != RoomConnectionStatus.CONNECTED || descriptor == null) return
+        if (player.playbackState == Player.STATE_BUFFERING) return
+        val desiredMs = targetPositionMs(roomSnapshot, estimatedServerNowMs(clock, android.os.SystemClock.elapsedRealtime()))
+        val toleranceMs = if (roomSnapshot.phase == "playing") RoomPolicy.HARD_SEEK_MS else RoomPolicy.DEAD_BAND_MS
+        val ready = abs(absolutePosition() - desiredMs) <= toleranceMs &&
+            (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED) &&
+            replacementJob?.isActive != true &&
+            player.playerError == null
+        val claim = Triple(ready, roomSnapshot.mediaGeneration, roomSnapshot.preparationGeneration)
+        if (claim == lastReadyClaim) return
+        reportRoomPresence(ready = ready, buffering = false, error = if (ready) null else roomPresence.error)
+        lastReadyClaim = claim
+    }
+
+    /** The host asks the room for the next item at credits or the end, once per media generation (web parity). */
+    private fun requestRoomAutoAdvance(positionMs: Long, current: PlaybackDescriptor) {
+        val session = roomSession ?: return
+        val room = session.state.value
+        val roomSnapshot = room.snapshot ?: return
+        if (!room.isHost || room.status != RoomConnectionStatus.CONNECTED) return
+        if (!roomSnapshot.policy.autoAdvance || roomSnapshot.nextCountdown != null) return
+        val inCredits = current.markers.any { it.type == "credits" && positionMs in it.startMs until it.endMs }
+        if (!inCredits && player.playbackState != Player.STATE_ENDED) return
+        if (nextRequestedGeneration == roomSnapshot.mediaGeneration) return
+        nextRequestedGeneration = roomSnapshot.mediaGeneration
+        scope.launch { session.send(RoomCommand.SelectNext(RoomPolicy.NEXT_COUNTDOWN_MS)) }
+    }
+
+    private fun reconcileRoom() {
+        val session = roomSession ?: return
+        val room = session.state.value
+        val roomSnapshot = room.snapshot ?: return
+        val clock = room.clock ?: return
+        if (room.status != RoomConnectionStatus.CONNECTED || descriptor == null) return
+        val decision = reconcileRoomPlayback(
+            roomSnapshot,
+            ObservedMediaState(
+                positionMs = absolutePosition(),
+                paused = !player.playWhenReady,
+                buffering = player.playbackState == Player.STATE_BUFFERING,
+                // ExoPlayer masks seeks (position jumps at once, state turns BUFFERING until ready), so
+                // buffering covers an in-flight seek; isLoading only means background loading.
+                seeking = false,
+                playbackRate = player.playbackParameters.speed.toDouble(),
+                replacingSource = replacementJob?.isActive == true,
+                error = player.playerError != null,
+            ),
+            clock,
+            android.os.SystemClock.elapsedRealtime(),
+            reconciliationMemory,
+        )
+        reconciliationMemory = decision.memory
+        gate.applyState {
+            when (val action = decision.action) {
+                ReconciliationAction.HoldPaused -> {
+                    scheduledPlayJob?.cancel()
+                    player.pause()
+                    player.setPlaybackSpeed(1f)
+                }
+                is ReconciliationAction.SchedulePlay -> {
+                    player.pause()
+                    player.setPlaybackSpeed(1f)
+                    scheduledPlayJob?.cancel()
+                    scheduledPlayJob = scope.launch {
+                        delay((action.localTimeMs - android.os.SystemClock.elapsedRealtime()).toLong().coerceAtLeast(0))
+                        if (roomSession.state.value.snapshot?.revision == roomSnapshot.revision) {
+                            gate.applyState { player.play() }
+                        }
+                    }
+                }
+                ReconciliationAction.Play -> player.play()
+                is ReconciliationAction.Seek -> seekAbsolute(action.positionMs)
+                is ReconciliationAction.Rate -> player.setPlaybackSpeed(action.rate.toFloat())
+                ReconciliationAction.None -> Unit
+            }
+        }
+    }
 }
 
 /**
@@ -630,7 +936,7 @@ class PlaybackController(
  * stop) goes through the intent gate; commands that could swap media or change speed are not offered at all.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
-private class GatedPlayer(
+internal class GatedPlayer(
     player: Player,
     private val gate: PlaybackIntentGate,
     private val toAbsolute: (Int, Long) -> Long,
