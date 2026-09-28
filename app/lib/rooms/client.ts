@@ -377,7 +377,12 @@ export class BrowserRoomClient {
       window.addEventListener("online", this.handleResume);
       document.addEventListener("visibilitychange", this.handleVisibility);
     } catch (error) {
-      this.handleRequestFailure(error);
+      if (this.handleRequestFailure(error) || this.stopped) return;
+      // A failed first contact retries like any later disconnect instead of staying "connecting".
+      this.startTimers();
+      window.addEventListener("online", this.handleResume);
+      document.addEventListener("visibilitychange", this.handleVisibility);
+      this.beginReconnect();
     }
   }
 
