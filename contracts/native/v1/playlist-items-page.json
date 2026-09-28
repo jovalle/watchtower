@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "ratingKey": "5001",
+      "type": "movie",
+      "title": "Test Movie",
+      "year": 2021,
+      "posterUrl": null,
+      "backdropUrl": null,
+      "thumbUrl": null,
+      "durationMs": 7260000,
+      "viewOffsetMs": null,
+      "viewCount": 0,
+      "leafCount": null,
+      "viewedLeafCount": null,
+      "contentRating": null,
+      "showTitle": null,
+      "seasonNumber": null,
+      "episodeNumber": null,
+      "parentRatingKey": null,
+      "grandparentRatingKey": null,
+      "external": null,
+      "playlistItemId": "44"
+    }
+  ],
+  "nextCursor": null,
+  "totalCount": 1
+}
