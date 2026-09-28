@@ -1,3 +1,5 @@
+
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { nativePlexClient, plexData } from "~/lib/native/catalog.server";
 import { NativeError, nativeEmpty, requireMethod, withNativeErrors } from "~/lib/native/http.server";

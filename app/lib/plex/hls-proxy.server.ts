@@ -15,11 +15,13 @@ function validSplat(splat: string): boolean {
   return ["start.m3u8", "ping", "stop"].includes(splat) || /^session\/[^/]+\/.+/.test(splat);
 }
 
-function rewritePlaylistUrls(content: string, rewriteBase: string, upstreamUrl: string, serverUrl: string): string {
-  const serverOrigin = new URL(serverUrl).origin;
+export function rewritePlaylistUrls(
+  content: string,
+  rewriteBase: string,
+  upstreamUrl: string,
+): string {
   const rewrite = (uri: string) => {
     const url = new URL(uri, upstreamUrl);
-    if (url.origin !== serverOrigin) throw new Error("Cross-origin playlist resource");
     url.searchParams.delete("X-Plex-Token");
     const path = url.pathname
       .replace(/^\/video\/:?\/transcode\/universal\//, "")
@@ -70,7 +72,11 @@ export async function proxyHls(options: HlsProxyOptions): Promise<Response> {
     }
     const contentType = response.headers.get("Content-Type") || "";
     if (contentType.includes("mpegurl") || splat.endsWith(".m3u8")) {
-      const rewritten = rewritePlaylistUrls(await response.text(), options.rewriteBase, response.url || fetchUrl.toString(), options.serverUrl);
+      const rewritten = rewritePlaylistUrls(
+        await response.text(),
+        options.rewriteBase,
+        response.url || fetchUrl.toString(),
+      );
       return new Response(rewritten, { status: 200, headers: { "Content-Type": "application/vnd.apple.mpegurl", "Access-Control-Allow-Origin": "*", "Cache-Control": "private, no-store" } });
     }
     const headers = new Headers({ "Access-Control-Allow-Origin": "*", "Cache-Control": "private, no-store" });

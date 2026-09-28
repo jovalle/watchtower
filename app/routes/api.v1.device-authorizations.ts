@@ -3,6 +3,8 @@ import type { DeviceAuthorizationResponse } from "~/lib/native/contract";
 import { nativeJson, readJsonObject, requestClientIp, requireMethod, withNativeErrors } from "~/lib/native/http.server";
 import { createAuthorization, parseCreateAuthorization } from "~/lib/native/pairing.server";
 
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
+
 export async function action({ request, context }: ActionFunctionArgs) {
   return withNativeErrors(request, async (requestId) => {
     requireMethod(request, "POST");

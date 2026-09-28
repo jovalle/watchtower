@@ -4,6 +4,8 @@ import { NativeError, nativeEmpty, readJsonObject, requireMethod, withNativeErro
 import { requireNativePrincipal } from "~/lib/native/principal.server";
 import { requireOwnedPlayback, serializedTimeline, transcodeCommand } from "~/lib/native/playback-resources.server";
 
+export { nativeMethodNotAllowed as loader } from "~/lib/native/http.server";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   return withNativeErrors(request, async (requestId) => {
     requireMethod(request, "POST");

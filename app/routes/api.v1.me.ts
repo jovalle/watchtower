@@ -11,6 +11,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const token = request.headers.get("Authorization")!.slice("Bearer ".length);
     const record = await findDeviceSession(token);
     if (!record) throw new NativeError(401, "unauthenticated", "A valid device credential is required.");
-    return nativeJson(meResponse(principal, record), requestId);
+    return nativeJson(await meResponse(principal, record), requestId);
   });
 }
