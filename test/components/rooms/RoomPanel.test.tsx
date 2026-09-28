@@ -152,4 +152,14 @@ it("focuses a terminal message and exposes keyboard-reachable exit actions", () 
   fireEvent.click(backButton);
   expect(onContinueSolo).toHaveBeenCalledOnce();
   expect(onBack).toHaveBeenCalledOnce();
+
+  // Modal: Tab wraps inside the overlay instead of reaching covered player controls.
+  const dialog = screen.getByRole("alertdialog");
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  backButton.focus();
+  fireEvent.keyDown(backButton, { key: "Tab" });
+  expect(continueButton).toHaveFocus();
+  screen.getByRole("heading", { name: "This room has ended." }).focus();
+  fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+  expect(backButton).toHaveFocus();
 });
