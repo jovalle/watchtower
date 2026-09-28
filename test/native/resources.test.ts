@@ -54,8 +54,14 @@ describe("native me response", () => {
         profiles: true,
         requests: true,
         discovery: false,
-        rooms: false,
+        rooms: true,
       },
     });
+    process.env.WATCH_TOGETHER = "disabled";
+    try {
+      await expect(meResponse(principal, record as never)).resolves.toMatchObject({ features: { rooms: false } });
+    } finally {
+      delete process.env.WATCH_TOGETHER;
+    }
   });
 });

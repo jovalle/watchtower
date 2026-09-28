@@ -263,6 +263,7 @@ export const ERROR_STATUS = {
   stale_revision: 409,
   stale_membership: 409,
   stale_generation: 409,
+  identity_version_mismatch: 409,
   wrong_phase: 409,
   participants_not_ready: 409,
   command_conflict: 409,
