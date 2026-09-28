@@ -27,6 +27,7 @@ import {
   Subtitles,
   RotateCcw,
   Film,
+  Users,
 } from "lucide-react";
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
@@ -47,6 +48,7 @@ import type { TMDBRecommendation } from "~/lib/tmdb/types";
 import { externalTitle, externalImdbTitle } from "~/lib/title.server";
 import { RequestModal } from "~/components/media/RequestModal";
 import { ExternalTitle } from "~/components/media/ExternalTitle";
+import { isWatchTogetherEnabled } from "~/lib/rooms/coordinator.server";
 
 interface SeasonView {
   ratingKey: string;
@@ -174,6 +176,7 @@ interface LoaderData {
     codec?: string;
     selected?: boolean;
   }>;
+  watchTogetherEnabled: boolean;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -936,6 +939,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     videoStreams,
     audioStreams,
     subtitleStreams,
+    watchTogetherEnabled: isWatchTogetherEnabled(),
   };
 
   // Fetch seasons and episodes for TV shows
@@ -1169,6 +1173,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
     mediaInfo,
     audioStreams,
     subtitleStreams,
+    watchTogetherEnabled,
   } = data;
 
   // For TV shows/seasons, watched = all episodes watched. For movies/episodes, watched = viewCount > 0
@@ -1908,6 +1913,16 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           ? "Play Again"
                           : "Play"}
                       </Button>
+                      {watchTogetherEnabled &&
+                        (type === "movie" || type === "episode") && (
+                          <Link
+                            to={`/app/watch/${metadata.ratingKey}?together=1`}
+                            className="flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-background-elevated px-5 font-medium text-foreground-primary transition-colors hover:bg-background-hover"
+                          >
+                            <Users className="mr-2 h-5 w-5" />
+                            Watch together
+                          </Link>
+                        )}
                       {viewOffset && (
                         <Button
                           variant="secondary"
