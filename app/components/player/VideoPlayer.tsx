@@ -75,6 +75,8 @@ const SCROBBLE_THRESHOLD = 0.9; // Mark as watched at 90%
 const CONTROLS_HIDE_DELAY = 3000;
 const SKIP_DURATION = 10;
 const BUTTON_SKIP_DURATION = 30;
+// A fresh room source further than this from the room target means the room seeked during the load.
+const FRESH_SOURCE_RELOAD_MS = 30_000;
 
 // Webkit fullscreen types for iOS
 interface WebkitDocument extends Document {
@@ -339,6 +341,7 @@ export function VideoPlayer({
   const hasScrobbledRef = useRef(false);
   const scrobbleRetryAfterRef = useRef(0);
   const hasInitializedRef = useRef(false);
+  const roomSourceAlignedRef = useRef(false);
   const currentMethodRef = useRef(playbackMethod);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isNavigatingRef = useRef(false); // Prevents duplicate stream reloads
@@ -883,15 +886,24 @@ export function VideoPlayer({
       const requiresBufferedSeek =
         playbackMethod === "transcode" || playbackMethod === "direct_stream";
       if (requiresBufferedSeek && !isTimeBuffered(targetSeconds)) {
-        reloadStreamAtPosition(targetSeconds, true);
-        return false;
+        // The loader opened this source at the room position. Reloading it for load-time drift
+        // would chase a playing room forever; only a room seek during the load warrants one.
+        if (!hasInitializedRef.current) return false;
+        if (
+          roomSourceAlignedRef.current ||
+          Math.abs(targetPositionMs - resumePositionSeconds * 1000) >
+            FRESH_SOURCE_RELOAD_MS
+        ) {
+          reloadStreamAtPosition(targetSeconds, true);
+          return false;
+        }
       }
       expectEffect("seek", targetPositionMs);
       video.currentTime = targetSeconds;
       setCurrentTime(targetSeconds);
       return true;
     },
-    [expectEffect, isTimeBuffered, playbackMethod, reloadStreamAtPosition]
+    [expectEffect, isTimeBuffered, playbackMethod, reloadStreamAtPosition, resumePositionSeconds]
   );
 
   const reconcileRoom = useCallback(() => {
@@ -930,6 +942,13 @@ export function VideoPlayer({
     );
     reconciliationMemoryRef.current = decision.memory;
     const action = decision.action;
+    if (
+      hasInitializedRef.current &&
+      !isLoading &&
+      Math.abs(decision.driftMs) <= ROOM_POLICY.deadbandMs
+    ) {
+      roomSourceAlignedRef.current = true;
+    }
     onRoomDiagnostics?.({
       driftMs: decision.driftMs,
       correction:
@@ -1386,7 +1405,18 @@ export function VideoPlayer({
             setShowControls(true);
           });
         });
-      } else if (!room && wantsToPlay && video.paused) {
+      } else if (room) {
+        // A paused room never fires `playing`, so buffering recovery is reported here.
+        if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
+        setIsLoading(false);
+        if (roomPresenceRef.current.buffering) {
+          void reportRoomPresence({ buffering: false }).then(() =>
+            evaluateRoomReadinessRef.current()
+          );
+        } else {
+          evaluateRoomReadinessRef.current();
+        }
+      } else if (wantsToPlay && video.paused) {
         // Resume playback after buffering if user intended to play
         video.play().catch(() => {});
       }

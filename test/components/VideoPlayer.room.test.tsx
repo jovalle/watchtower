@@ -376,6 +376,50 @@ it("does not re-attach the media source when a new room snapshot arrives", () =>
   }
 });
 
+it("reports buffering recovery and readiness while the room stays paused", async () => {
+  vi.useFakeTimers();
+  const room = controller(false, {
+    ...baseSnapshot,
+    phase: "paused",
+    anchor: { positionMs: 0, effectiveAtMs: 0, rate: 1 },
+  });
+  renderPlayer(room);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "readyState", {
+    configurable: true,
+    value: HTMLMediaElement.HAVE_FUTURE_DATA,
+  });
+  fireEvent.canPlay(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true })
+  );
+
+  fireEvent.waiting(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ buffering: true, ready: false })
+  );
+
+  // Data arrives while paused: only `canplay` fires, never `playing`.
+  vi.mocked(room.reportPresence).mockClear();
+  fireEvent.canPlay(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(room.reportPresence).toHaveBeenCalledWith(
+    expect.objectContaining({ buffering: false })
+  );
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, buffering: false })
+  );
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+});
+
 it("automatically reclaims readiness when the preparation generation changes", async () => {
   const room = controller(false, {
     ...baseSnapshot,
@@ -537,7 +581,10 @@ it("reloads an unbuffered scheduled pre-seek without playing the old source", as
     playbackArmed: false,
   };
   renderPlayer(room, { playbackMethod: "transcode" });
+  await act(async () => Promise.resolve());
+  expect(room.prepareSourceReplacement).not.toHaveBeenCalled();
 
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
   await waitFor(() =>
     expect(room.prepareSourceReplacement).toHaveBeenCalledWith({
       playbackSessionId: session,
@@ -545,6 +592,50 @@ it("reloads an unbuffered scheduled pre-seek without playing the old source", as
     })
   );
   expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+});
+
+it("aligns a fresh transcode source in place instead of reloading it to chase the room", async () => {
+  const playingAt = (positionMs: number, reason: RoomSnapshot["reason"] = baseSnapshot.reason) =>
+    controller(true, {
+      ...baseSnapshot,
+      phase: "playing",
+      reason,
+      anchor: { positionMs, effectiveAtMs: performance.now() - 2000, rate: 1 },
+    });
+  const room = playingAt(52_000);
+  const props = {
+    src: `/api/plex/hls/42/start.m3u8?session=${session}`,
+    title: "Example",
+    ratingKey: "42",
+    durationMs: 100_000,
+    playbackMethod: "transcode" as const,
+    resumePositionSeconds: 52,
+  };
+  const { rerender } = render(<VideoPlayer {...props} room={room} />);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+  // A later snapshot observes the source at the room position, which marks it aligned.
+  rerender(<VideoPlayer {...props} room={{ ...room }} />);
+  await act(async () => Promise.resolve());
+
+  expect(room.prepareSourceReplacement).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(video.currentTime).toBeGreaterThanOrEqual(54);
+  expect(video.currentTime).toBeLessThan(54.5);
+
+  // Within the fresh-source window, so only alignment makes this a reload.
+  const seeked = playingAt(75_000, "host_seeked");
+  rerender(<VideoPlayer {...props} room={seeked} />);
+  await waitFor(() =>
+    expect(seeked.prepareSourceReplacement).toHaveBeenCalledWith({
+      playbackSessionId: session,
+      positionMs: expect.any(Number),
+    })
+  );
+  const [{ positionMs }] = vi.mocked(seeked.prepareSourceReplacement).mock.calls[0];
+  expect(positionMs).toBeGreaterThanOrEqual(77_000);
+  expect(positionMs).toBeLessThan(77_500);
 });
 
 it("seeks a late scheduled start to the live target without playing when unarmed", async () => {
