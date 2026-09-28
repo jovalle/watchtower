@@ -35,6 +35,15 @@ describe("room protocol v1 golden fixtures", () => {
   });
 
   it.each([
+    ["numeric ratingKey", { ...fixtures.playingSnapshot, media: { ...fixtures.playingSnapshot.media, ratingKey: 4242 } }],
+    ["missing media", { ...fixtures.playingSnapshot, media: null }],
+    ["forged host id", { ...fixtures.playingSnapshot, hostParticipantId: "host" }],
+    ["participant without flags", { ...fixtures.playingSnapshot, participants: [{ participantId: fixtures.playingSnapshot.participants[0].participantId, displayName: "X" }] }],
+  ])("rejects a snapshot with %s", (_, snapshot) => {
+    expect(parseSnapshot(snapshot).ok).toBe(false);
+  });
+
+  it.each([
     ["NaN position", { ...fixtures.seekCommand, payload: { positionMs: Number.NaN } }],
     ["fractional sequence", { ...fixtures.seekCommand, commandSequence: 1.5 }],
     ["negative revision", { ...fixtures.seekCommand, expectedRevision: -1 }],
