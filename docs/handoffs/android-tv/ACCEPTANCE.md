@@ -28,7 +28,7 @@ Status recorded 2026-09-28 from the Android TV branch and the combined Watch Tog
 | TV-20 | Timestamp trickplay and thumbnail previews | Partially verified | `10e402a`; `PlaybackPoliciesTest`, `TimelineMapperTest` | D-pad timestamp scrubbing and absolute seek mapping are covered. Plex thumbnail preview assets/endpoint qualification is not present. |
 | TV-21 | 4K, HDR, Dolby Vision, and surround capability matrix | Blocked | `10e402a`; `CapabilityMapperTest`, `DeviceCapabilityDetector.kt`; [`RESEARCH.md`](RESEARCH.md) | Capability reporting exists, but no physical display/audio chain or HDR/Dolby/4K media was available. Emulator output cannot close this gate. |
 | TV-22 | Lifecycle, recovery, network loss, and cleanup | Partially verified | `10e402a`, `e247361`; `PlaybackPoliciesTest`, `ProgressReporterTest`, `release-launch-smoke.txt` | Interruption decisions, final-position capture, replacement suppression, and room/player cleanup are tested. Process death, network switching, and physical lifecycle/audio focus were not run. |
-| TV-23 | Watch Together lobby, roles, sync, reconnect, and leave | Partially verified | `0438f96`, `e247361`, `91253ab`, `d006ca1`; room E2E JSON files | Google TV API 36 passed 27/27 checks. API 31 full run passed 12/14, with A6 and B0 failing; B-only rerun passed 16/16. The server branch and peers are scripted integration fixtures. |
+| TV-23 | Watch Together lobby, roles, sync, reconnect, and leave | Partially verified | `0438f96`, `e247361`, `91253ab`, `d006ca1`; room E2E JSON files | Google TV API 36 passed 27/27 checks. API 31 full run passed 13/14 (B0 failed: details focus stuck on `Retry` after scenario A); an earlier B-only rerun passed 16/16. The server branch and peers are scripted integration fixtures. |
 | TV-24 | Per-profile settings and connection diagnostics | Partially verified | `9751b0d`, `f07eb8e`; `SettingsLayoutTest`; `PlaybackController.kt` | Preferences, quality layout, and diagnostics state exist. A complete remote settings and connection-failure journey was not recorded. |
 | TV-25 | Seerr requests and issue reporting | Implemented, not verified | `9751b0d`; `WatchtowerApi` request methods; [`CONTRACT.md`](CONTRACT.md) | The client has request/issue surfaces and server capability checks. No live Seerr service was available. |
 | TV-26 | Remote navigation, focus, Back, and overlays | Partially verified | `2b529d5`, `c87a664`, `f07eb8e`; `NavigationRailLayoutTest`, `RemoteDialogTest`, `PlayerOverlayFocusTest`; API 31 app-shell 12/12 | Navigation rail, D-pad focus, dialog Back, player overlay focus, and large-text wrapping have emulator evidence. Physical remote key-repeat behavior remains unverified. |
@@ -45,11 +45,11 @@ Status recorded 2026-09-28 from the Android TV branch and the combined Watch Tog
 | TVT-05 | Media decisions and codec/HDR fallback | Blocked | `10e402a`; `CapabilityMapperTest`, `PlaybackPoliciesTest`; fake-PMS decision fixture | Client decisions and fallback policy have unit evidence. No real Plex decision, 4K, HEVC, HDR, VP9/AV1, or decoder-failure device run exists. |
 | TVT-06 | Audio formats, languages, description, and routes | Blocked | `10e402a`; `PlaybackRequestFactoryTest`, `TrackMapperTest` | Track intent mapping is tested. AAC fixture playback does not establish AC3/EAC3/DTS/TrueHD, multichannel, headphones, HDMI, or passthrough behavior. |
 | TVT-07 | Subtitle formats, timing, style, forced, and SDH | Partially verified | `10e402a`; `PlaybackRequestFactoryTest`, `TrackMapperTest`; fake-PMS SRT fixture | Text selection and embedded-order mapping are tested. Embedded styled/image formats, encoding, burn-in, and runtime timing were not verified. |
-| TVT-08 | Absolute timeline, seek, replacement, editions, and multipart | Partially verified | `10e402a`, `4058b9e`; `TimelineMapperTest`, `ProgressReporterTest`; `TVR-A5`, `TVR-A6`, `TVR-A8`, `TVR-A9` | Timeline and seek policies have JVM coverage and room seek checks. API 31 A6 failed with -636 ms skew; real transcode, edition, and long-seek coverage is absent. |
+| TVT-08 | Absolute timeline, seek, replacement, editions, and multipart | Partially verified | `10e402a`, `4058b9e`; `TimelineMapperTest`, `ProgressReporterTest`; `TVR-A5`, `TVR-A6`, `TVR-A8`, `TVR-A9` | Timeline and seek policies have JVM coverage and room seek checks, which pass on API 36 and API 31 in the final runs (A6 failed at -636 ms on API 31 before Watch Together's anchor fix). Real transcode, edition, and long-seek coverage is absent. |
 | TVT-09 | Session ownership, replacement, stop ordering, and progress | Partially verified | `10e402a`, `a97e127`, `2e29835`; `ProgressReporterTest`; `TVR-B4`, `TVR-B5` | Per-device room playback ownership and progress sequencing are covered. Same-account TV/browser replacement, Trakt behavior, and live retry ordering were not fully exercised. |
 | TVT-10 | D-pad, Back, media keys, repeat, IME, and focus | Partially verified | `2b529d5`, `c87a664`, `f07eb8e`; `NavigationRailLayoutTest`, `RemoteDialogTest`, `PlayerOverlayFocusTest`, `CatalogControlsTest`; API 31 app-shell 12/12 | Emulator UI tests cover focus, Back, drawer scrolling, details focus, and key actions. Physical remote repeat, IME, and voice input remain unverified. |
 | TVT-11 | Lifecycle, process recovery, network, and audio focus | Implemented, not verified | `10e402a`, `e247361`; `PlaybackPoliciesTest`, `release-launch-smoke.txt` | Lifecycle and interruption code is present and launch smoke is clean. Process kill/recreate, network switch, server restart, and audio-focus/output tests were not run. |
-| TVT-12 | Full Watch Together protocol and role enforcement | Partially verified | `0438f96`, `3a7bde7`, `e247361`, `91253ab`, `adc1756`, `d006ca1`; all room E2E JSON files | API 36 is 27/27; API 31 full run is 12/14 and B-only rerun is 16/16. WAN sync, host transfer under all paths, and the open WT hand-off findings remain. |
+| TVT-12 | Full Watch Together protocol and role enforcement | Partially verified | `0438f96`, `3a7bde7`, `e247361`, `91253ab`, `adc1756`, `d006ca1`; all room E2E JSON files | API 36 is 27/27; API 31 full run is 13/14 and an earlier B-only rerun is 16/16. WAN sync, host transfer under all paths, and the open WT hand-off findings remain. |
 | TVT-13 | Accessibility, privacy, and redacted diagnostics | Blocked | `f07eb8e`, `2e29835`; `WatchNextManagerTest`; [`CONTRACT.md`](CONTRACT.md) | Privacy cleanup and redaction-oriented code paths exist. TalkBack primary-flow, protected launcher, cache-clearing, and runtime diagnostics checks were not available. |
 | TVT-14 | Startup, seek, memory, jank, and long-session performance | Not implemented | `f07eb8e`; no performance evidence file | No measured p50/p95 startup or seek data, 30-minute soak, low-memory run, or leak-growth result was produced. |
 | TVT-15 | Release install/update, minification, AAB, ABI, and 16 KB gates | Partially verified | `9d3d8ad`, `d006ca1`; [`artifacts-SHA256SUMS`](evidence/artifacts-SHA256SUMS), [`artifacts-MANIFEST.tsv`](evidence/artifacts-MANIFEST.tsv), [`signing-compat-api36.txt`](evidence/signing-compat-api36.txt), [`native-libs-16kb-audit.txt`](evidence/native-libs-16kb-audit.txt) | Packaging, QA launch, signing compatibility, ABI listing, and 16 KB alignment are recorded. The release outputs are unsigned, and Play pre-launch/review was not run. |
@@ -63,14 +63,14 @@ Status recorded 2026-09-28 from the Android TV branch and the combined Watch Tog
 - There was no physical Android TV or Google TV device, HDMI/AVR/soundbar output chain, real Plex Media Server, Plex Home account, live Seerr service, Play Console access, or WAN room test.
 - Media was synthetic ffmpeg testsrc2 H.264/AAC MP4 (60 seconds), two-part MP4, MKV with SRT, and HLS from `scripts/tv-e2e/generate-media.ts`, served by `scripts/tv-e2e/fake-pms.ts` on `127.0.0.1:32499`. `plex.tv` was stubbed by `scripts/tv-e2e/plextv-shim.mjs`.
 - Output was the emulator virtual display and audio only.
-- TV work was on `codex/android-tv` at `d006ca1`. The combined Watch Together run was on `codex/tv-wt-integration` at `19daa48` (`codex/android-tv` `9d3d8ad` plus `codex/watch-together` `956ceee` plus `8c368d2` bearer room wiring with `test/integration/native-rooms.test.ts`). Nothing was merged to `main`, pushed, deployed, or published.
+- TV work was on `codex/android-tv` (final code `db27cf1`). The final combined Watch Together runs were on `codex/tv-wt-integration` at `b723d36` = `codex/android-tv` `db27cf1` + `codex/watch-together` `8299dc1` (includes Watch Together's play-anchor fix `3848e23`) + `8c368d2` bearer room wiring with `test/integration/native-rooms.test.ts`. Earlier runs used `19daa48` (Watch Together `956ceee`). Nothing was merged to `main`, pushed, deployed, or published.
 
 ## Commands run and results
 
-These are the recorded commands and results from 2026-09-27/28. They were not re-run while writing this document because this documentation task explicitly excludes builds, tests, emulators, and servers.
+These are the recorded commands and results from 2026-09-27/28, as run by the implementing agent.
 
 - TV branch `just check`: 47 files/255 tests pass; `just build`: pass.
-- Integration `just check`: 64 files/459 tests pass; `just build`: pass.
+- Integration `just check`: 64 files/461 tests pass at `07d3b1a` (with Watch Together `8299dc1`); 64 files/459 tests at `233ad6e`; `just build`: pass.
 - Android (f07eb8e, from `android-tv/`):
 
   ```text
@@ -86,7 +86,7 @@ These are the recorded commands and results from 2026-09-27/28. They were not re
 
 ## E2E check list
 
-`room-e2e.ts` records these checks. `PASS` and `FAIL` below are copied from the evidence JSON files. `not recorded` means the full API 31 run stopped after its failed `TVR-B0` check; the B-only rerun records those checks separately.
+`room-e2e.ts` records these checks. `PASS` and `FAIL` below are copied from the evidence JSON files: the API 36 and API 31 full-run columns are the final runs at `b723d36` ([`room-e2e-google-tv-api36.json`](evidence/room-e2e-google-tv-api36.json), [`room-e2e-android-tv-api31.json`](evidence/room-e2e-android-tv-api31.json)); the B-only column is an earlier API 31 rerun of scenario B at `19daa48` ([`room-e2e-android-tv-api31-scenarioB-rerun.json`](evidence/room-e2e-android-tv-api31-scenarioB-rerun.json)). `not recorded` means the full API 31 run stopped after its failed `TVR-B0` check.
 
 | Check | Google TV API 36 | Android TV API 31 full | Android TV API 31 B-only rerun |
 | --- | --- | --- | --- |
@@ -98,12 +98,12 @@ These are the recorded commands and results from 2026-09-27/28. They were not re
 | TVR-A3 TV player claims readiness at the room target | PASS | PASS | not recorded |
 | TVR-A4 web host play accepted | PASS | PASS | not recorded |
 | TVR-A5 TV follows host play | PASS | PASS | not recorded |
-| TVR-A6 TV stays within 500 ms while playing (loopback) | PASS | FAIL, skew -636 ms | not recorded |
+| TVR-A6 TV stays within 500 ms while playing (loopback) | PASS | PASS | not recorded |
 | TVR-A7 guest TV media key cannot pause the room | PASS | PASS | not recorded |
 | TVR-A8 TV follows host seek | PASS | PASS | not recorded |
 | TVR-A9 TV follows host pause | PASS | PASS | not recorded |
 | TVR-A10 host End reaches the TV | PASS | PASS | not recorded |
-| TVR-B0 details offers Watch together for a rooms-enabled profile | PASS | FAIL, D-pad selection timed out | PASS |
+| TVR-B0 details offers Watch together for a rooms-enabled profile | PASS | FAIL, last focus `Retry` | PASS |
 | TVR-B1 TV host lobby shows a fragment-only invite link | PASS | not recorded | PASS |
 | TVR-B2 web guest joins the TV-hosted room | PASS | not recorded | PASS |
 | TVR-B3 a second TV identity (bearer) joins the same room | PASS | not recorded | PASS |
@@ -118,7 +118,7 @@ These are the recorded commands and results from 2026-09-27/28. They were not re
 | TVR-B12 signing the TV out ends membership and transfers host | PASS | not recorded | PASS |
 | TVR-B13 signed-out TV stops room playback | PASS | not recorded | PASS |
 
-The API 31 full-run `TVR-A6` failure was skew `-636 ms` while rate-correcting after a hard seek forced by Watch Together finding 1. Its `TVR-B0` failure was a D-pad timeout selecting `Watch together` after scenario A. The scenario B-only rerun passed 16/16. The earlier API 31 full run at `233ad6e` was 26/27 with A6 at `-673 ms`.
+Final results: Google TV API 36 27/27; Android TV API 31 13/14. With Watch Together's anchor fix merged, `TVR-A6` passes on API 31 (a traced API 31 run measured -112 ms after play and -128 ms steady). Before that fix the API 31 full runs failed `TVR-A6` at -636 ms and -673 ms, because the room anchor jumped forward by the lobby wait and the TV had to hard-seek. The remaining API 31 failure is `TVR-B0` after scenario A: the details screen held focus on a `Retry` control (an error or retry state was showing) instead of the play actions, so D-pad selection never reached `Watch together`; the server log shows the details request itself returned 200. The same scenario passes when run alone (16/16) and on API 36. The root cause is not identified; treat it as an open API 31 defect in details loading/focus after returning from a terminal room. A traced API 31 run also failed `TVR-A8` because the harness waited a fixed 4 s while the room re-prepared after the host seek; `db27cf1` changed the check to wait for the room to resume, and the final run passed it.
 
 ## Independent review summary and dispositions
 
@@ -131,9 +131,9 @@ The API 31 full-run `TVR-A6` failure was skew `-636 ms` while rate-correcting af
 
 ## Watch Together hand-off findings
 
-Watch Together owns these findings. They were not changed in this Android TV documentation task:
+Watch Together owns these findings. They were not changed in this Android TV work:
 
-1. Coordinator `case "play"` sets `room.phase = "playing"` before computing `targetPositionMs`. Starting from lobby or paused therefore advances the anchor by the wait time. The trace showed lobby `positionMs 0` at 1666 ms and `play` at about 6413 ms producing `positionMs 4746`. Compute the position before changing the phase.
+1. Fixed upstream: coordinator `case "play"` set `room.phase = "playing"` before computing `targetPositionMs`, so starting from lobby or paused advanced the anchor by the wait time (trace: lobby `positionMs 0` at 1666 ms, `play` at about 6413 ms produced `positionMs 4746`). Watch Together fixed this in `3848e23` ("start and resume from the held position"); the final combined runs include it.
 2. `sync.ts` pre-start reconciliation schedules play without pre-seeking when a paused player is far from `anchor.positionMs`.
 3. Joining as a TV guest needs a Watch Together-designed short code as part of the shared contract. The TV currently accepts the full invite link or secret typed/pasted and `watchtower://join#i=<secret>` links.
 4. Native room memberships are not bound to `identityVersion`.
