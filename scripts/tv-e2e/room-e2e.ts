@@ -301,17 +301,27 @@ async function uiXml(): Promise<string> {
   return adb("shell", "cat", "/sdcard/wt-ui.xml");
 }
 
-async function tapText(text: string, timeoutMs: number): Promise<boolean> {
+/** TV components react to D-pad keys, not touch: move focus until the focused control shows `label`, then select it. */
+async function focusAndSelect(label: string, key: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  for (let moves = 0; Date.now() < deadline && moves < 12;) {
     const xml = await uiXml().catch(() => "");
-    const match = new RegExp(`text="${text}"[^>]*bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`).exec(xml);
-    if (match) {
-      const [x1, y1, x2, y2] = match.slice(1).map(Number);
-      await adb("shell", "input", "tap", String(Math.round((x1 + x2) / 2)), String(Math.round((y1 + y2) / 2)));
+    const focused = /focused="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
+    if (!focused) {
+      await sleep(1_000);
+      continue;
+    }
+    const [x1, y1, x2, y2] = focused.slice(1).map(Number);
+    const labels = [...xml.matchAll(/text="([^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)]
+      .filter((match) => Number(match[2]) >= x1 && Number(match[3]) >= y1 && Number(match[4]) <= x2 && Number(match[5]) <= y2)
+      .map((match) => match[1]);
+    if (labels.includes(label)) {
+      await adb("shell", "input", "keyevent", "KEYCODE_DPAD_CENTER");
       return true;
     }
-    await sleep(1_000);
+    await adb("shell", "input", "keyevent", key);
+    moves += 1;
+    await sleep(600);
   }
   return false;
 }
@@ -413,7 +423,8 @@ async function webHostTvGuest(cookie: string) {
 
 async function tvHostWithGuests(cookie: string, denToken: string, tvToken: string) {
   await launch("watchtower://media/1?server=fake-machine&action=details");
-  const tapped = await tapText("Watch together", 30_000);
+  await uiMatch(/text="Start over"/, 30_000);
+  const tapped = await focusAndSelect("Watch together", "KEYCODE_DPAD_RIGHT", 30_000);
   record("TVR-B0 details offers Watch together for a rooms-enabled profile", tapped);
   if (!tapped) return;
   const invite = await uiMatch(/#i=([A-Za-z0-9_-]{43})/, 20_000);
