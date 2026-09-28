@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "ratingKey": "5001",
+      "type": "movie",
+      "title": "Test Movie",
+      "year": 2021,
+      "posterUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fthumb%2F1700000000&w=400&h=600",
+      "backdropUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fart%2F1700000000&w=1280&h=720",
+      "thumbUrl": null,
+      "durationMs": 7260000,
+      "viewOffsetMs": 600000,
+      "viewCount": 1,
+      "leafCount": null,
+      "viewedLeafCount": null,
+      "contentRating": "PG-13",
+      "showTitle": null,
+      "seasonNumber": null,
+      "episodeNumber": null,
+      "parentRatingKey": null,
+      "grandparentRatingKey": null,
+      "external": null
+    },
+    {
+      "ratingKey": "7000",
+      "type": "show",
+      "title": "Test Show",
+      "year": 2020,
+      "posterUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F7000%2Fthumb%2F1700000000&w=400&h=600",
+      "backdropUrl": null,
+      "thumbUrl": null,
+      "durationMs": null,
+      "viewOffsetMs": null,
+      "viewCount": 0,
+      "leafCount": 10,
+      "viewedLeafCount": 2,
+      "contentRating": "TV-14",
+      "showTitle": null,
+      "seasonNumber": null,
+      "episodeNumber": null,
+      "parentRatingKey": null,
+      "grandparentRatingKey": null,
+      "external": null
+    }
+  ],
+  "nextCursor": "eyJvIjo1MCwicSI6ImFiYyJ9",
+  "totalCount": 212
+}

@@ -1,0 +1,6 @@
+{
+  "status": "partially_available",
+  "status4k": "unknown",
+  "requests": [{ "id": 17, "status": "approved", "is4k": false, "mine": true }],
+  "seasons": [{ "number": 1, "status": "available", "status4k": "unknown" }]
+}
