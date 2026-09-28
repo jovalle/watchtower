@@ -425,6 +425,48 @@ it("keeps the outgoing media paused and inert when the room moves to another tit
   expect(navigate).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["AbortError", false],
+  ["NotAllowedError", true],
+])("treats a room play() rejected with %s as autoplay blocked: %s", async (name, blocked) => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(() =>
+    Promise.reject(new DOMException("play() failed", name))
+  );
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 0, effectiveAtMs: performance.now(), rate: 1 },
+  });
+  renderPlayer(room);
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
+  await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+  await act(async () => Promise.resolve());
+
+  const disarmed = vi.mocked(room.setPlaybackArmed).mock.calls.some(([armed]) => armed === false);
+  const reported = vi.mocked(room.reportPresence).mock.calls.some(
+    ([report]) => report.error === "autoplay_blocked"
+  );
+  expect(disarmed).toBe(blocked);
+  expect(reported).toBe(blocked);
+});
+
+it("stays at the end of ended media while the room runs out the title", async () => {
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 100_000, effectiveAtMs: performance.now() - 5000, rate: 1 },
+  });
+  renderPlayer(room);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "ended", { configurable: true, value: true });
+  video.currentTime = 100;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  expect(video.currentTime).toBe(100);
+});
+
 it("reports buffering recovery and readiness while the room stays paused", async () => {
   vi.useFakeTimers();
   const room = controller(false, {
