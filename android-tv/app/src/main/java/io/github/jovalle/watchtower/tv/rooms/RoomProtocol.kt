@@ -298,7 +298,11 @@ object RoomProtocol {
             snapshot.preparationGeneration >= 0 && snapshot.serverNowMs >= 0 &&
             snapshot.durationMs >= 0 && snapshot.phase in phases &&
             snapshot.anchor.positionMs >= 0 && snapshot.anchor.effectiveAtMs >= 0 &&
-            snapshot.anchor.rate == 1 && snapshot.participants.size <= RoomPolicy.MAX_PARTICIPANTS
+            snapshot.anchor.rate == 1 && snapshot.participants.size <= RoomPolicy.MAX_PARTICIPANTS &&
+            // Mirrors WT parseSnapshot: exact media identity, host and participant IDs.
+            with(snapshot.media) { listOf(serverMachineId, ratingKey, mediaId, partId).none(String::isEmpty) } &&
+            (snapshot.hostParticipantId == null || isUuid(snapshot.hostParticipantId)) &&
+            snapshot.participants.all { isUuid(it.participantId) }
 }
 
 fun targetPositionMs(snapshot: RoomSnapshot, serverNowMs: Double): Long {
