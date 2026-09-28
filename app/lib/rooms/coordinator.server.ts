@@ -573,8 +573,10 @@ export class RoomCoordinator {
           if (room.phase !== "lobby" && room.phase !== "paused") semanticError = failure("wrong_phase", "The room cannot play from its current phase.", this.snapshot(room));
           else if (!this.barrierReady(room)) semanticError = failure("participants_not_ready", "Blocking participants are not ready.", this.snapshot(room));
           else {
+            // Read the held position before switching phase; a playing phase would add the wait time.
+            const positionMs = targetPositionMs(this.snapshot(room, now), now);
             room.phase = "playing";
-            room.anchor = { positionMs: targetPositionMs(this.snapshot(room, now), now), effectiveAtMs: now + ROOM_POLICY.startLeadMs, rate: 1 };
+            room.anchor = { positionMs, effectiveAtMs: now + ROOM_POLICY.startLeadMs, rate: 1 };
             room.reason = "host_played";
             room.resumeAfterPrepare = false;
           }

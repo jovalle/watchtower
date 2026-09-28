@@ -2,10 +2,22 @@
 // Usage: node docs/handoffs/watch-together/harness/run.mjs protocol|browser
 import { spawn } from "node:child_process";
 import { createWriteStream, readFileSync } from "node:fs";
-import { APP_PORT, ART, BASE, HARNESS, ROOT, WORK } from "./paths.mjs";
+import { connect } from "node:net";
+import { APP_PORT, ART, BASE, HARNESS, PLEX, PLEX_PORT, ROOT, WORK } from "./paths.mjs";
 
 const suite = process.argv[2];
 if (!["protocol", "browser"].includes(suite)) throw new Error("usage: run.mjs protocol|browser");
+const listening = (port) => new Promise((resolve) => {
+  const socket = connect({ host: "127.0.0.1", port });
+  socket.once("connect", () => { socket.destroy(); resolve(true); });
+  socket.once("error", () => resolve(false));
+});
+// Another local harness on the same port would silently answer for synthetic Plex or Watchtower.
+for (const port of [APP_PORT, PLEX_PORT]) {
+  if (await listening(port)) throw new Error(`port ${port} is already in use; set WT_HARNESS_APP_PORT / WT_HARNESS_PLEX_PORT`);
+}
+const configured = JSON.parse(readFileSync(`${WORK}data/config/server.json`, "utf8")).serverUrl;
+if (configured !== PLEX) throw new Error(`server.json points at ${configured}; rerun setup.mjs for ${PLEX}`);
 const serverLog = createWriteStream(`${ART}server.log`, { flags: "a" });
 
 export function startServer() {
@@ -39,6 +51,12 @@ export async function waitForServer() {
 }
 
 const plex = spawn(process.execPath, [`${HARNESS}fake-plex.mjs`], { stdio: "inherit" });
+let plexExited = false;
+plex.once("exit", () => { plexExited = true; });
+for (let attempt = 0; !(await listening(PLEX_PORT)); attempt += 1) {
+  if (plexExited || attempt > 50) throw new Error("synthetic Plex did not start");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
 const server = { current: startServer() };
 let exitCode = 1;
 try {
