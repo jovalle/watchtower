@@ -16,6 +16,7 @@ import io.github.jovalle.watchtower.tv.api.WatchtowerApi
 import io.github.jovalle.watchtower.tv.auth.CredentialStore
 import io.github.jovalle.watchtower.tv.auth.DeviceInfo
 import io.github.jovalle.watchtower.tv.auth.SessionManager
+import io.github.jovalle.watchtower.tv.settings.LocalPlaybackPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,6 +49,8 @@ class AppGraph(private val app: Application) {
     )
 
     private val _deepLinks = MutableStateFlow<Uri?>(null)
+
+    val localPlaybackPrefs = LocalPlaybackPreferences(app)
 
     /** Latest unconsumed watchtower:// link; the UI resolves it only after sign-in and profile checks. */
     val deepLinks: StateFlow<Uri?> = _deepLinks.asStateFlow()
