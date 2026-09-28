@@ -12,6 +12,7 @@ import {
   resetPairingForTests,
 } from "~/lib/native/pairing.server";
 import { resetNativeRateLimitsForTests } from "~/lib/native/rate-limit.server";
+import { createPairingClientIpResolver } from "~/lib/native/client-ip.server";
 
 const dataPath = path.resolve("tmp/native-pairing-test");
 const approval = {
@@ -143,5 +144,39 @@ describe("native pairing", () => {
         "after-prune-client",
       ),
     ).not.toThrow();
+  });
+
+  it("ignores forwarded addresses for pairing limits when TRUST_PROXY is unset", () => {
+    const clientIp = createPairingClientIpResolver("");
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      createAuthorization(
+        { deviceName: `TV ${attempt}`, platform: "android-tv", model: null, appVersion: null },
+        "https://watchtower.test",
+        clientIp("127.0.0.1", `198.51.100.${attempt + 1}`),
+      );
+    }
+
+    expect(() =>
+      createAuthorization(
+        { deviceName: "Blocked", platform: "android-tv", model: null, appVersion: null },
+        "https://watchtower.test",
+        clientIp("127.0.0.1", "198.51.100.200"),
+      ),
+    ).toThrowError(expect.objectContaining({ status: 429, code: "rate_limited" }));
+  });
+
+  it("uses forwarded clients for pairing limits when loopback is trusted", () => {
+    const clientIp = createPairingClientIpResolver("loopback");
+
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      expect(() =>
+        createAuthorization(
+          { deviceName: `TV ${attempt}`, platform: "android-tv", model: null, appVersion: null },
+          "https://watchtower.test",
+          clientIp("127.0.0.1", `198.51.100.${attempt + 1}`),
+        ),
+      ).not.toThrow();
+    }
   });
 });

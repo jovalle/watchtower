@@ -1,6 +1,35 @@
 package io.github.jovalle.watchtower.tv.playback
 
+import androidx.media3.common.Player
 import io.github.jovalle.watchtower.tv.api.Marker
+
+enum class PlaybackRouteMode { SOLO, ROOM, TERMINAL_ROOM }
+
+fun playbackRouteMode(roomId: String?, hasActiveRoomSession: Boolean): PlaybackRouteMode = when {
+    roomId == null -> PlaybackRouteMode.SOLO
+    hasActiveRoomSession -> PlaybackRouteMode.ROOM
+    else -> PlaybackRouteMode.TERMINAL_ROOM
+}
+
+data class LocalInterruptionDecision(
+    val interrupted: Boolean,
+    val reconcile: Boolean,
+    val ready: Boolean,
+)
+
+fun localInterruptionDecision(
+    lifecycleStopped: Boolean,
+    playbackSuppressionReason: Int,
+    playWhenReadyChangeReason: Int?,
+    transportInterruptionLatched: Boolean,
+): LocalInterruptionDecision {
+    val transportInterrupted = transportInterruptionLatched || playWhenReadyChangeReason in setOf(
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS,
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY,
+    )
+    val interrupted = lifecycleStopped || playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE || transportInterrupted
+    return LocalInterruptionDecision(interrupted, reconcile = !interrupted, ready = !interrupted)
+}
 
 sealed interface PlaybackIntent {
     data object Play : PlaybackIntent

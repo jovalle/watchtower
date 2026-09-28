@@ -1,11 +1,57 @@
 package io.github.jovalle.watchtower.tv.playback
 
+import androidx.media3.common.Player
 import io.github.jovalle.watchtower.tv.api.Marker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PlaybackPoliciesTest {
+    @Test fun `room route without active membership fails closed`() {
+        assertEquals(PlaybackRouteMode.SOLO, playbackRouteMode(roomId = null, hasActiveRoomSession = false))
+        assertEquals(PlaybackRouteMode.ROOM, playbackRouteMode(roomId = "room", hasActiveRoomSession = true))
+        assertEquals(PlaybackRouteMode.TERMINAL_ROOM, playbackRouteMode(roomId = "room", hasActiveRoomSession = false))
+    }
+
+    @Test fun `lifecycle suppression and transport loss block reconciliation and readiness`() {
+        val lifecycle = localInterruptionDecision(
+            lifecycleStopped = true,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+            playWhenReadyChangeReason = null,
+            transportInterruptionLatched = false,
+        )
+        val suppression = localInterruptionDecision(
+            lifecycleStopped = false,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS,
+            playWhenReadyChangeReason = null,
+            transportInterruptionLatched = false,
+        )
+        val noisy = localInterruptionDecision(
+            lifecycleStopped = false,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+            playWhenReadyChangeReason = Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY,
+            transportInterruptionLatched = false,
+        )
+
+        listOf(lifecycle, suppression, noisy).forEach { decision ->
+            assertEquals(true, decision.interrupted)
+            assertEquals(false, decision.reconcile)
+            assertEquals(false, decision.ready)
+        }
+    }
+
+    @Test fun `cleared interruption permits reconciliation and readiness`() {
+        assertEquals(
+            LocalInterruptionDecision(interrupted = false, reconcile = true, ready = true),
+            localInterruptionDecision(
+                lifecycleStopped = false,
+                playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+                playWhenReadyChangeReason = null,
+                transportInterruptionLatched = false,
+            ),
+        )
+    }
+
     @Test fun `solo authority allows transport intents`() {
         val executed = mutableListOf<PlaybackIntent>()
         val gate = PlaybackIntentGate(SoloAuthority, executed::add)

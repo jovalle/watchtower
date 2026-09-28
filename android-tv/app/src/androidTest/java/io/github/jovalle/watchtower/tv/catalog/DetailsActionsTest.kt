@@ -1,6 +1,7 @@
 package io.github.jovalle.watchtower.tv.catalog
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
@@ -18,6 +19,8 @@ class DetailsActionsTest {
     @Test fun playAndStartOverProduceDistinctRoutes() {
         val routes = mutableListOf<PlayerRoute>()
         compose.setContent { MaterialTheme { DetailsPlaybackActions(detail(), routes::add) } }
+
+        compose.onNodeWithText("Play").assertIsFocused()
 
         compose.onNodeWithText("Play").performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("Start over").performSemanticsAction(SemanticsActions.OnClick)
