@@ -27,7 +27,7 @@ class PlaybackMediaSourceFactory(
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                 .build()
         }
-        fun item(url: String) = MediaItem.Builder()
+        fun item(url: String, withSidecar: Boolean) = MediaItem.Builder()
             .setUri(snapshot.resolve(url).toString())
             .setMimeType(descriptor.delivery.mimeType)
             .setMediaId(descriptor.playbackId)
@@ -37,17 +37,18 @@ class PlaybackMediaSourceFactory(
                     .setArtist(descriptor.item.showTitle)
                     .build(),
             )
-            .apply { if (subtitle != null) setSubtitleConfigurations(listOf(subtitle)) }
+            .apply { if (subtitle != null && withSidecar) setSubtitleConfigurations(listOf(subtitle)) }
             .build()
 
         return when (descriptor.delivery.type) {
+            // Plex sidecar subtitles belong to the part whose streams were validated (the first part).
             "file" -> descriptor.delivery.parts.map { part ->
-                ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(item(requireNotNull(part.url)))
+                ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(item(requireNotNull(part.url), part.index == 0))
             }
             "hls" -> {
                 val active = descriptor.delivery.parts.firstOrNull { it.index == descriptor.delivery.activePartIndex }
                     ?: error("HLS descriptor has no active part.")
-                listOf(HlsMediaSource.Factory(dataSourceFactory).createMediaSource(item(requireNotNull(active.url))))
+                listOf(HlsMediaSource.Factory(dataSourceFactory).createMediaSource(item(requireNotNull(active.url), true)))
             }
             else -> error("Unsupported delivery type: ${descriptor.delivery.type}")
         }

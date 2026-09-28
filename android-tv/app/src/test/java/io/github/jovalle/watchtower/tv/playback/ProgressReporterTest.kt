@@ -27,11 +27,27 @@ class ProgressReporterTest {
         position = 3_000
         reporter.seekCompleted()
         reporter.transition("paused")
-        reporter.stopFinal()
+        reporter.stopFinal(3_500)
 
         assertEquals(listOf(1L, 2L, 3L, 4L), fake.timeline.map { it.sequence })
         assertEquals(listOf(1_000L, 2_000L, 3_000L, 3_000L), fake.timeline.map { it.positionMs })
         assertEquals(5L, fake.stops.single().sequence)
+        assertEquals(3_500L, fake.stops.single().positionMs)
+    }
+
+    @Test fun `final stop uses the captured position and never reads the released player`() = runTest {
+        val fake = FakeTransport(stopFailure = ApiExceptionFactory.expired())
+        var expiredCallbacks = 0
+        val reporter = ProgressReporter(
+            "p1", 10_000, 1_000, 5_000, this, fake,
+            positionMs = { error("player already released") },
+            onSessionExpired = { expiredCallbacks += 1 },
+        )
+
+        reporter.stopFinal(9_000)
+
+        assertEquals(9_000L, fake.stopAttempts.single().positionMs)
+        assertEquals(0, expiredCallbacks)
     }
 
     @Test fun `replacement drops queued reports`() = runTest {
@@ -59,9 +75,14 @@ class ProgressReporterTest {
         assertEquals(2, fake.timelineAttempts)
     }
 
-    private class FakeTransport(private var failTimeline: Int = 0) : PlaybackProgressTransport {
+    private object ApiExceptionFactory {
+        fun expired() = io.github.jovalle.watchtower.tv.api.ApiException(409, "playback_session_expired", "expired", false, null, null)
+    }
+
+    private class FakeTransport(private var failTimeline: Int = 0, private val stopFailure: IOException? = null) : PlaybackProgressTransport {
         val timeline = mutableListOf<TimelineRequest>()
         val stops = mutableListOf<StopPlaybackRequest>()
+        val stopAttempts = mutableListOf<StopPlaybackRequest>()
         var timelineAttempts = 0
         var heartbeats = 0
 
@@ -76,6 +97,8 @@ class ProgressReporterTest {
         }
 
         override suspend fun stop(playbackId: String, request: StopPlaybackRequest) {
+            stopAttempts += request
+            stopFailure?.let { throw it }
             stops += request
         }
     }
