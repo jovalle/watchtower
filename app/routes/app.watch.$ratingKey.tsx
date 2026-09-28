@@ -299,7 +299,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     quality: selectedQuality,
     forceTranscode,
     subtitles: trackNeeds.burnSubtitleId !== null ? "burn" : "none",
-    deviceScope: device.deviceSessionId,
+    // Room readiness needs sessions owned by this device; solo playback keeps its original shared scope.
+    deviceScope: room ? device.deviceSessionId : undefined,
   });
 
   // Logging
