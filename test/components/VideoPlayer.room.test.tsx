@@ -27,7 +27,12 @@ vi.mock("hls.js", () => ({
 }));
 
 const session = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
-const baseSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+const fixtureSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+// The room is on the title the player under test shows.
+const baseSnapshot: RoomSnapshot = {
+  ...fixtureSnapshot,
+  media: { ...fixtureSnapshot.media, ratingKey: "42" },
+};
 const handlers = new Map<MediaSessionAction, MediaSessionActionHandler | null>();
 let paused = true;
 
@@ -141,7 +146,8 @@ describe("room intent gate", () => {
     expect(video.currentTime).toBe(0);
   });
 
-  it("dispatches exactly one command for each host intent", () => {
+  it("dispatches one command per host intent and coalesces relative seek bursts", () => {
+    vi.useFakeTimers();
     const room = controller(true);
     renderPlayer(room);
     const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
@@ -152,18 +158,20 @@ describe("room intent gate", () => {
     expect(room.sendIntent).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.click(screen.getByRole("button", { name: "Forward 30 seconds" }));
+    expect(room.sendIntent).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
     expect(room.sendIntent).toHaveBeenLastCalledWith({
       type: "seek",
-      payload: { positionMs: 10_000 },
+      payload: { positionMs: 40_000 },
     });
     expect(room.sendIntent).toHaveBeenCalledTimes(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Forward 30 seconds" }));
-    expect(room.sendIntent).toHaveBeenCalledTimes(3);
-
     act(() => handlers.get("pause")?.({ action: "pause" }));
     expect(room.sendIntent).toHaveBeenLastCalledWith({ type: "pause", payload: {} });
-    expect(room.sendIntent).toHaveBeenCalledTimes(4);
+    expect(room.sendIntent).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -374,6 +382,47 @@ it("does not re-attach the media source when a new room snapshot arrives", () =>
   } finally {
     Object.defineProperty(HTMLMediaElement.prototype, "src", descriptor);
   }
+});
+
+it("keeps the outgoing media paused and inert when the room moves to another title", async () => {
+  const playing = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 120_000, effectiveAtMs: performance.now() - 1000, rate: 1 },
+  });
+  const props = {
+    src: `/api/plex/hls/42/start.m3u8?session=${session}`,
+    title: "Example",
+    ratingKey: "42",
+    durationMs: 130_000,
+    playbackMethod: "transcode" as const,
+    resumePositionSeconds: 120,
+    markers: [{ type: "credits" as const, start: 118, end: 130 }],
+  };
+  const { rerender } = render(<VideoPlayer {...props} room={playing} />);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+  paused = false;
+
+  const advanced = controller(true, {
+    ...baseSnapshot,
+    media: { ...baseSnapshot.media, ratingKey: "43" },
+    mediaGeneration: baseSnapshot.mediaGeneration + 1,
+    preparationGeneration: baseSnapshot.preparationGeneration + 1,
+    phase: "preparing",
+    anchor: { positionMs: 0, effectiveAtMs: performance.now(), rate: 1 },
+  });
+  rerender(<VideoPlayer {...props} room={advanced} />);
+  await act(async () => Promise.resolve());
+
+  expect(paused).toBe(true);
+  expect(advanced.prepareSourceReplacement).not.toHaveBeenCalled();
+  expect(advanced.sendIntent).not.toHaveBeenCalled();
+  expect(advanced.reportPresence).not.toHaveBeenCalledWith(
+    expect.objectContaining({ ready: true })
+  );
+  expect(navigate).not.toHaveBeenCalled();
 });
 
 it("reports buffering recovery and readiness while the room stays paused", async () => {
