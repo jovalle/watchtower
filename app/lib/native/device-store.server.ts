@@ -282,23 +282,81 @@ export async function replaceDeviceProfile(
 
 export async function replaceServerToken(
   accessToken: string,
+  expected: DeviceSessionRecord,
   serverToken: string,
-): Promise<void> {
+): Promise<DeviceSessionRecord | null | "stale"> {
   await ensureLoaded();
   const tokenHash = sha256(accessToken);
   const current = records.get(tokenHash);
-  if (!current) return;
-  const sealed = await sealCredential(serverToken, accessToken, current.deviceSessionId, "serverToken");
+  if (!current) return null;
+  const sealed = await sealCredential(serverToken, accessToken, expected.deviceSessionId, "serverToken");
   const record = records.get(tokenHash);
-  if (!record) return;
+  if (!record) return null;
+  if (!matchesVerificationIdentity(record, expected)) return "stale";
   record.serverToken = sealed;
   record.verifiedAtMs = Date.now();
   record.verifyImmediately = false;
   await queuePersist();
+  return structuredClone(record);
+}
+
+function matchesSealedValue(left: SealedValue, right: SealedValue): boolean {
+  return (
+    left.iv === right.iv &&
+    left.ciphertext === right.ciphertext &&
+    left.tag === right.tag
+  );
+}
+
+function matchesVerificationIdentity(
+  current: DeviceSessionRecord,
+  expected: DeviceSessionRecord,
+): boolean {
+  return (
+    current.tokenHash === expected.tokenHash &&
+    current.deviceSessionId === expected.deviceSessionId &&
+    current.identityVersion === expected.identityVersion &&
+    current.profile.userId === expected.profile.userId &&
+    current.serverMachineId === expected.serverMachineId &&
+    current.revokedAtMs === null &&
+    current.expiresAtMs > Date.now() &&
+    matchesSealedValue(current.plexToken, expected.plexToken)
+  );
+}
+
+export async function currentDeviceSessionAfterVerification(
+  expected: DeviceSessionRecord,
+): Promise<DeviceSessionRecord | null> {
+  await ensureLoaded();
+  const current = records.get(expected.tokenHash);
+  return current && matchesVerificationIdentity(current, expected)
+    ? structuredClone(current)
+    : null;
+}
+
+export async function revokeDeviceSessionAfterVerification(
+  expected: DeviceSessionRecord,
+): Promise<boolean> {
+  await ensureLoaded();
+  const current = records.get(expected.tokenHash);
+  if (!current || !matchesVerificationIdentity(current, expected)) return false;
+  current.revokedAtMs = Date.now();
+  await queuePersist();
+  notifyIdentityEnded(current.profile.userId, current.deviceSessionId);
+  return true;
 }
 
 export function resetDeviceStoreForTests(): void {
   loadedPath = undefined;
   records = new Map();
   writeQueue = Promise.resolve();
+}
+
+/** Test helper: resolves after every queued write, including fire-and-forget last-seen updates, has finished. */
+export async function settleDeviceStoreForTests(): Promise<void> {
+  for (let pending = writeQueue; ; pending = writeQueue) {
+    await pending;
+    await new Promise((resolve) => setImmediate(resolve));
+    if (pending === writeQueue) return;
+  }
 }

@@ -134,10 +134,14 @@ export async function readJsonObject(request: Request): Promise<Record<string, u
   return value as Record<string, unknown>;
 }
 
-export function requestClientIp(request: Request, context?: unknown): string {
+export function requestClientIp(_request: Request, context?: unknown): string {
+  if (context && typeof context === "object" && "pairingClientIp" in context) {
+    const value = (context as { pairingClientIp?: unknown }).pairingClientIp;
+    if (typeof value === "string" && value) return value;
+  }
   if (context && typeof context === "object" && "clientIp" in context) {
     const value = (context as { clientIp?: unknown }).clientIp;
     if (typeof value === "string" && value) return value;
   }
-  return request.headers.get("X-Forwarded-For")?.split(",", 1)[0].trim() || "unknown";
+  return "unknown";
 }
