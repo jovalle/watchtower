@@ -3,10 +3,13 @@ package io.github.jovalle.watchtower.tv.pairing
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.tv.material3.MaterialTheme
+import io.github.jovalle.watchtower.tv.api.HomeProfile
 import io.github.jovalle.watchtower.tv.auth.PairingState
 import org.junit.Rule
 import org.junit.Test
@@ -44,5 +47,35 @@ class PairingScreenTest {
         }
         compose.onNodeWithText("Try again").assertIsDisplayed()
         compose.onNodeWithText("Change server").assertIsDisplayed()
+    }
+
+    @Test fun serverAddressFieldReceivesInitialFocus() {
+        compose.setContent {
+            MaterialTheme {
+                Column {
+                    ServerAddressContent(
+                        address = "https://watchtower.test",
+                        error = null,
+                        submitting = false,
+                        onAddressChange = {},
+                        onSubmit = {},
+                    )
+                }
+            }
+        }
+
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+    }
+
+    @Test fun firstProfileReceivesInitialFocus() {
+        val profiles = listOf(
+            HomeProfile("first", "Jay", restricted = false, protected = false, admin = true, current = false),
+            HomeProfile("second", "Guest", restricted = false, protected = false, admin = false, current = false),
+        )
+        compose.setContent {
+            MaterialTheme { Column { ProfileList(profiles, error = null, onChoose = {}) } }
+        }
+
+        compose.onNodeWithText("Jay").assertIsFocused()
     }
 }
