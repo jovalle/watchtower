@@ -1,6 +1,6 @@
 import { getPlexToken, getServerToken, getSession, isServerOwner } from "~/lib/auth/session.server";
 import { getCurrentUser } from "~/lib/auth/user.server";
-import { verifyServerAccess } from "~/lib/auth/plex.server";
+import { checkServerAccessDetailed } from "~/lib/auth/plex.server";
 import { getServerConfig } from "~/lib/config/server-config.server";
 import { sha256 } from "./crypto.server";
 import {
@@ -14,7 +14,10 @@ import {
 import { NativeError } from "./http.server";
 
 const VERIFY_INTERVAL_MS = 15 * 60 * 1000;
+const MAX_VERIFICATION_AGE_MS = 24 * 60 * 60 * 1000;
+const VERIFICATION_RETRY_MS = 60 * 1000;
 const LAST_SEEN_WRITE_MS = 60 * 1000;
+const verificationRetryAt = new Map<string, number>();
 
 export interface NativePrincipal {
   deviceSessionId: string;
@@ -89,22 +92,53 @@ export async function requireNativePrincipal(
     await revokeDeviceSession(record.deviceSessionId);
     throw new NativeError(401, "session_revoked", "This device credential can no longer be opened.");
   }
-  if (record.verifyImmediately || Date.now() - record.verifiedAtMs >= VERIFY_INTERVAL_MS) {
-    const access = await verifyServerAccess(credentials.plexToken);
-    if (!access.hasAccess || !access.serverToken) {
+  const now = Date.now();
+  const verificationAgeMs = now - record.verifiedAtMs;
+  const retryAtMs = verificationRetryAt.get(record.tokenHash) ?? 0;
+  if (
+    (record.verifyImmediately || verificationAgeMs >= VERIFY_INTERVAL_MS) &&
+    retryAtMs <= now
+  ) {
+    const access = await checkServerAccessDetailed(credentials.plexToken);
+    if (access.status === "denied") {
+      verificationRetryAt.delete(record.tokenHash);
       await revokeDeviceSession(record.deviceSessionId);
       throw new NativeError(401, "upstream_auth_failed", "Plex access could not be verified.");
     }
-    record = (await updateDeviceSession(record.tokenHash, (stored) => {
-      stored.verifiedAtMs = Date.now();
-      stored.verifyImmediately = false;
-    }))!;
-    credentials.serverToken = access.serverToken;
-    await replaceServerToken(token, access.serverToken);
+    if (access.status === "unavailable") {
+      verificationRetryAt.set(record.tokenHash, now + VERIFICATION_RETRY_MS);
+      if (verificationAgeMs >= MAX_VERIFICATION_AGE_MS) {
+        throw new NativeError(
+          503,
+          "upstream_unavailable",
+          "Plex access verification is temporarily unavailable.",
+          true,
+          Math.ceil(VERIFICATION_RETRY_MS / 1000),
+        );
+      }
+    } else {
+      verificationRetryAt.delete(record.tokenHash);
+      record = (await updateDeviceSession(record.tokenHash, (stored) => {
+        stored.verifiedAtMs = Date.now();
+        stored.verifyImmediately = false;
+      }))!;
+      credentials.serverToken = access.serverToken;
+      await replaceServerToken(token, access.serverToken);
+    }
+  } else if (verificationAgeMs >= MAX_VERIFICATION_AGE_MS) {
+    throw new NativeError(
+      503,
+      "upstream_unavailable",
+      "Plex access verification is temporarily unavailable.",
+      true,
+      Math.max(1, Math.ceil((retryAtMs - now) / 1000)),
+    );
   }
   if (record.lastSeenAtMs === null || Date.now() - record.lastSeenAtMs >= LAST_SEEN_WRITE_MS) {
     void updateDeviceSession(record.tokenHash, (stored) => {
       stored.lastSeenAtMs = Date.now();
+    }).catch(() => {
+      console.error("[Native Auth] Failed to update device last seen time.");
     });
   }
   return Object.freeze({
@@ -126,7 +160,13 @@ export async function recheckPrincipal(principal: NativePrincipal): Promise<void
   const records = await devices.listAccountDevices(principal.accountUserId);
   const record = records.find((item) => item.deviceSessionId === principal.deviceSessionId);
   const config = getServerConfig();
-  if (!record || record.identityVersion !== principal.identityVersion || config?.machineIdentifier !== principal.serverMachineId) {
+  if (
+    !record ||
+    record.revokedAtMs !== null ||
+    record.expiresAtMs <= Date.now() ||
+    record.identityVersion !== principal.identityVersion ||
+    config?.machineIdentifier !== principal.serverMachineId
+  ) {
     throw new NativeError(409, "identity_version_mismatch", "The active profile changed. Retry from the current identity.");
   }
 }

@@ -4,6 +4,7 @@ import { sha256 } from "~/lib/native/crypto.server";
 import { NativeError, requireMethod, withNativeErrors, withNativeResponseHeaders } from "~/lib/native/http.server";
 import { requireNativePrincipal } from "~/lib/native/principal.server";
 import { resolveImageUrl } from "~/lib/plex/image-proxy.server";
+import { requireNativePlexResponse } from "~/lib/native/catalog.server";
 
 function dimension(value: string | null): number | null {
   if (value === null) return null;
@@ -32,7 +33,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (cached?.contentType.startsWith("image/")) {
       return withNativeResponseHeaders(new Response(new Uint8Array(cached.data), { headers: { "Content-Type": cached.contentType, "Content-Length": String(cached.data.length), "X-Cache": "HIT" } }), requestId, "private, max-age=3600");
     }
-    const response = await fetch(upstream, { headers: { Accept: "image/*" }, signal: AbortSignal.timeout(10_000) });
+    const response = await requireNativePlexResponse(
+      await fetch(upstream, { headers: { Accept: "image/*" }, signal: AbortSignal.timeout(10_000) }),
+      principal,
+    );
     if (!response.ok) throw new NativeError(response.status === 404 ? 404 : 502, response.status === 404 ? "not_found" : "upstream_unavailable", "Image unavailable.");
     const contentType = response.headers.get("Content-Type") ?? "";
     if (!contentType.startsWith("image/")) throw new NativeError(502, "upstream_unavailable", "Image upstream returned invalid content.");

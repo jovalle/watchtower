@@ -93,6 +93,16 @@ export async function withNativeErrors(
   }
 }
 
+export async function nativeMethodNotAllowed({
+  request,
+}: {
+  request: Request;
+}): Promise<Response> {
+  return withNativeErrors(request, async () => {
+    throw new NativeError(405, "method_not_allowed", "Method not allowed.");
+  });
+}
+
 export function requireMethod(request: Request, ...methods: string[]): void {
   if (!methods.includes(request.method)) {
     throw new NativeError(405, "method_not_allowed", "Method not allowed.");

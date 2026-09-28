@@ -1,6 +1,7 @@
 import { activatePlaybackSession, ownedNativePlaybackSession, playbackSessionExists, type PlaybackSession } from "~/lib/plex/playback-session.server";
 import { NativeError } from "./http.server";
 import type { NativePrincipal } from "./principal.server";
+import { requireNativePlexResponse } from "./catalog.server";
 
 export function requireOwnedPlayback(
   playbackId: string | undefined,
@@ -46,10 +47,10 @@ export async function proxyNativeFile(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
-    const upstream = await fetch(url, {
+    const upstream = await requireNativePlexResponse(await fetch(url, {
       headers: { Accept: "*/*", ...(request.headers.has("Range") ? { Range: request.headers.get("Range")! } : {}) },
       signal: AbortSignal.any([request.signal, controller.signal]),
-    });
+    }), principal);
     const headers = new Headers();
     for (const name of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {
       const value = upstream.headers.get(name);
@@ -68,7 +69,7 @@ export async function transcodeCommand(
   session: PlaybackSession,
   command: "ping" | "stop",
 ): Promise<void> {
-  if (session.native?.delivery !== "hls") return;
+  if (session.native?.delivery !== "hls" || session.native.replaced) return;
   const url = new URL(`/video/:/transcode/universal/${command}`, principal.serverUrl);
   url.searchParams.set("session", session.native ? session.clientId.split("-").slice(-5).join("-") : "");
   url.searchParams.set("X-Plex-Token", principal.serverToken);
