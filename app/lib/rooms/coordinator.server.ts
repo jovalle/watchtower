@@ -429,7 +429,9 @@ export class RoomCoordinator {
       const roomId = this.invites.get(hash);
       const room = roomId ? this.rooms.get(roomId) : undefined;
       if (!room || !room.invite || room.invite.hash !== hash || room.invite.expiresAtMs <= sampledNow || room.phase === "ended") {
-        if (this.rateLimited(`invite:${principal.userId}`, 20, 60_000, sampledNow)) {
+        // Only invalid attempts count, so a flood of guesses cannot block valid invitations.
+        const globallyLimited = this.rateLimited("invite:*", 300, 60_000, sampledNow);
+        if (this.rateLimited(`invite:${principal.userId}`, 20, 60_000, sampledNow) || globallyLimited) {
           return failure("rate_limited", "Too many invitation attempts. Try again later.");
         }
         return failure("not_found", "Invitation not found.");
