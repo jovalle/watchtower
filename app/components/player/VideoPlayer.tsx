@@ -250,6 +250,7 @@ export function VideoPlayer({
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledReadyRequestRef = useRef(room?.readyRequest ?? 0);
   const replacingSourceRef = useRef(false);
+  const unlockingRef = useRef(false);
   const bufferingRef = useRef(false);
   const roomPresenceRef = useRef({
     ready: false,
@@ -609,6 +610,9 @@ export function VideoPlayer({
     console.log(`[VideoPlayer] Switching to transcode at ${currentPos}ms`);
     navigate(`/app/watch/${ratingKey}?${params.toString()}`, { replace: true });
   }, [hasTriedTranscode, navigate, ratingKey, resumePositionSeconds, prepareRoomSourceReplacement, room, roomParams]);
+  // The source effect reads the latest callback without re-attaching media on every room snapshot.
+  const retryWithTranscodeRef = useRef(retryWithTranscode);
+  retryWithTranscodeRef.current = retryWithTranscode;
 
   /**
    * Reload stream at a specific position (in seconds).
@@ -892,7 +896,7 @@ export function VideoPlayer({
 
   const reconcileRoom = useCallback(() => {
     const video = videoRef.current;
-    if (!room || !video) return;
+    if (!room || !video || unlockingRef.current) return;
     expectedEffectsRef.current = expectedEffectsRef.current.filter(
       (effect) => effect.expiresAt > performance.now()
     );
@@ -1129,8 +1133,14 @@ export function VideoPlayer({
     const prepare = async () => {
       try {
         if (video.paused) {
+          // Reconciliation would pause mid-unlock and reject play() with AbortError.
+          unlockingRef.current = true;
           expectEffect("play");
-          await video.play();
+          try {
+            await video.play();
+          } finally {
+            unlockingRef.current = false;
+          }
           expectEffect("pause");
           video.pause();
         }
@@ -1161,8 +1171,8 @@ export function VideoPlayer({
         }
         if (cancelled) return;
         evaluateRoomReadinessRef.current();
-      } catch {
-        if (!cancelled) {
+      } catch (error) {
+        if (!cancelled && error instanceof DOMException && error.name === "NotAllowedError") {
           reportAutoplayBlockedRef.current();
         }
       }
@@ -1248,7 +1258,7 @@ export function VideoPlayer({
                 console.log(
                   "[VideoPlayer] Direct play failed, trying transcode"
                 );
-                retryWithTranscode();
+                void retryWithTranscodeRef.current();
               } else {
                 setError("Failed to load video. Try a different quality.");
                 setIsLoading(false);
@@ -1271,7 +1281,7 @@ export function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, playbackMethod, hasTriedTranscode, retryWithTranscode]);
+  }, [src, playbackMethod, hasTriedTranscode]);
 
   // A stopped timeline only reports progress; explicitly release the Plex transcoder.
   useEffect(() => {

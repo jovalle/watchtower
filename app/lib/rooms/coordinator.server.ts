@@ -115,6 +115,9 @@ type RoomRecord = {
 type RateBucket = { startedAtMs: number; count: number };
 
 const MUTATION_CACHE_LIMIT = ROOM_POLICY.maxRooms * ROOM_POLICY.commandResultsPerRoom;
+const SWEEP_INTERVAL_MS = 750;
+// Due one sweep early so the observed gap stays within sseHeartbeatMs despite tick quantization.
+const HEARTBEAT_DUE_MS = ROOM_POLICY.sseHeartbeatMs - SWEEP_INTERVAL_MS;
 const encoder = new TextEncoder();
 
 function digest(value: unknown): string {
@@ -169,7 +172,7 @@ export class RoomCoordinator {
     this.secretFn = options.secret ?? (() => randomBytes(32).toString("base64url"));
     this.epoch = options.epoch ?? this.idFn();
     if (options.startSweep !== false) {
-      this.sweepTimer = setInterval(() => this.sweep(), 750);
+      this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
       this.sweepTimer.unref?.();
     }
   }
@@ -923,7 +926,7 @@ export class RoomCoordinator {
           closed: false,
           pendingSnapshot: null,
           backedUpAtMs: null,
-          nextHeartbeatAtMs: now + ROOM_POLICY.sseHeartbeatMs,
+          nextHeartbeatAtMs: now + HEARTBEAT_DUE_MS,
           nextAuthAtMs: now + ROOM_POLICY.authRevalidateMs,
           nextMediaAtMs: now + ROOM_POLICY.mediaRevalidateMs,
           validatingAuth: false,
@@ -1113,7 +1116,7 @@ export class RoomCoordinator {
             presenceRevision: room.presenceRevision,
           };
           this.enqueueRaw(subscriber, this.frame("heartbeat", heartbeat));
-          subscriber.nextHeartbeatAtMs = now + ROOM_POLICY.sseHeartbeatMs;
+          subscriber.nextHeartbeatAtMs = now + HEARTBEAT_DUE_MS;
         }
         if (now >= subscriber.nextAuthAtMs) void this.revalidateSubscriber(room, participant, subscriber);
         if (now >= subscriber.nextMediaAtMs) void this.revalidateMedia(room, participant, subscriber);

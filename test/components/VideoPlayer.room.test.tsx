@@ -318,6 +318,64 @@ it("reports autoplay_blocked when the ready gesture cannot start media", async (
   expect(room.setPlaybackArmed).toHaveBeenCalledWith(false);
 });
 
+it("does not report autoplay_blocked when the unlock play() is interrupted rather than refused", async () => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(
+    new DOMException("The play() request was interrupted by a new load request.", "AbortError")
+  );
+  const room = { ...controller(false), playbackArmed: false };
+  const view = renderPlayer(room);
+  view.rerender(
+    <VideoPlayer
+      src={`/api/plex/stream/42?session=${session}`}
+      title="Example"
+      ratingKey="42"
+      durationMs={100_000}
+      room={{ ...room, readyRequest: 1 }}
+    />
+  );
+  await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1));
+  await act(async () => {});
+  expect(room.reportPresence).not.toHaveBeenCalledWith(
+    expect.objectContaining({ error: "autoplay_blocked" })
+  );
+  expect(room.setPlaybackArmed).not.toHaveBeenCalledWith(false);
+});
+
+it("does not re-attach the media source when a new room snapshot arrives", () => {
+  const srcSetter = vi.fn();
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
+  Object.defineProperty(HTMLMediaElement.prototype, "src", {
+    configurable: true,
+    get: descriptor.get,
+    set(value: string) {
+      srcSetter(value);
+      descriptor.set!.call(this, value);
+    },
+  });
+  try {
+    const view = renderPlayer(controller(true));
+    expect(srcSetter).toHaveBeenCalledTimes(1);
+    // Presence acks, SSE snapshots and the ready gesture each create a new controller object.
+    for (const room of [
+      controller(true, { ...baseSnapshot, presenceRevision: baseSnapshot.presenceRevision + 1 }),
+      { ...controller(true), readyRequest: 1 },
+    ]) {
+      view.rerender(
+        <VideoPlayer
+          src={`/api/plex/stream/42?session=${session}`}
+          title="Example"
+          ratingKey="42"
+          durationMs={100_000}
+          room={room}
+        />
+      );
+    }
+    expect(srcSetter).toHaveBeenCalledTimes(1);
+  } finally {
+    Object.defineProperty(HTMLMediaElement.prototype, "src", descriptor);
+  }
+});
+
 it("automatically reclaims readiness when the preparation generation changes", async () => {
   const room = controller(false, {
     ...baseSnapshot,
