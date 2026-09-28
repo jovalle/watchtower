@@ -52,6 +52,80 @@ class RoomSessionTest {
         session.stop()
     }
 
+    @Test fun `not host command rejection stays connected and applies returned snapshot`() = runTest {
+        assertAnsweredCommandRejection(403, "not_host")
+    }
+
+    @Test fun `not found command rejection stays connected and applies returned snapshot`() = runTest {
+        assertAnsweredCommandRejection(404, "not_found")
+    }
+
+    @Test fun `membership ended command rejection terminates the session`() = runTest {
+        val transport = FakeRoomTransport().apply {
+            commandFailure = RoomApiException(410, "membership_ended", "ended")
+        }
+        val session = RoomSession(identity(), ROOM_ID, envelope(), transport, backgroundScope, { testScheduler.currentTime }, ::uuid)
+        session.start()
+
+        assertFalse(session.send(RoomCommand.Play))
+
+        assertEquals(RoomConnectionStatus.ENDED, session.state.value.status)
+        assertEquals("membership_ended", session.state.value.endedReason)
+        assertTrue(requireNotNull(transport.stream).cancelled)
+    }
+
+    @Test fun `invitation rejection stays connected and applies returned snapshot`() = runTest {
+        val transport = FakeRoomTransport().apply {
+            invitationFailure = RoomApiException(403, "not_host", "host only", snapshot(revision = 2))
+        }
+        val session = RoomSession(identity(), ROOM_ID, envelope(), transport, backgroundScope, { testScheduler.currentTime }, ::uuid)
+        session.start()
+
+        assertFalse(session.updateInvitation("rotate"))
+
+        assertEquals(RoomConnectionStatus.CONNECTED, session.state.value.status)
+        assertEquals("not_host", session.state.value.errorCode)
+        assertEquals(2L, session.state.value.snapshot?.revision)
+        assertFalse(requireNotNull(transport.stream).cancelled)
+        session.stop()
+    }
+
+    @Test fun `presence rate limit retries latest observation without reconnecting`() = runTest {
+        val transport = FakeRoomTransport().apply {
+            presenceFailures += RoomApiException(429, "rate_limited", "slow down", retryAfterMs = 1_500)
+        }
+        val session = RoomSession(identity(), ROOM_ID, envelope(), transport, backgroundScope, { testScheduler.currentTime }, ::uuid)
+        session.start()
+
+        assertFalse(session.reportPresence(PresenceObservation(positionMs = 1_000)))
+        session.observePresence(PresenceObservation(positionMs = 2_000))
+        advanceTimeBy(1_499)
+        runCurrent()
+        assertEquals(1, transport.presences.size)
+
+        advanceTimeBy(1)
+        runCurrent()
+
+        assertEquals(listOf(1_000L, 2_000L), transport.presences.map { it.positionMs })
+        assertEquals(RoomConnectionStatus.CONNECTED, session.state.value.status)
+        assertEquals(0, session.state.value.reconnects)
+        assertEquals(0, transport.recoverCalls)
+        session.stop()
+    }
+
+    @Test fun `manager replacement leaves previous membership`() = runTest {
+        val changes = MutableSharedFlow<IdentityChange>(extraBufferCapacity = 1)
+        val transport = FakeRoomTransport()
+        val manager = RoomManager(transport, backgroundScope, ::identity, { true }, changes, { testScheduler.currentTime }, ::uuid)
+        manager.recover(ROOM_ID)
+
+        manager.create(CreateMedia("42", "7", "9"), 0, true)
+
+        assertEquals(1, transport.leaveCalls)
+        assertEquals(RoomConnectionStatus.CONNECTED, requireNotNull(manager.activeSession()).state.value.status)
+        manager.leave()
+    }
+
     @Test fun `control and presence revisions advance independently and older events are dropped`() = runTest {
         val transport = FakeRoomTransport()
         val session = RoomSession(identity(), ROOM_ID, envelope(), transport, backgroundScope, { testScheduler.currentTime }, ::uuid)
@@ -122,15 +196,34 @@ class RoomSessionTest {
         assertTrue(requireNotNull(transport.stream).cancelled)
     }
 
+    private suspend fun kotlinx.coroutines.test.TestScope.assertAnsweredCommandRejection(status: Int, code: String) {
+        val transport = FakeRoomTransport().apply {
+            commandFailure = RoomApiException(status, code, "rejected", snapshot(revision = 2))
+        }
+        val session = RoomSession(identity(), ROOM_ID, envelope(), transport, backgroundScope, { testScheduler.currentTime }, ::uuid)
+        session.start()
+
+        assertFalse(session.send(RoomCommand.Play))
+
+        assertEquals(RoomConnectionStatus.CONNECTED, session.state.value.status)
+        assertEquals(code, session.state.value.errorCode)
+        assertEquals(2L, session.state.value.snapshot?.revision)
+        assertFalse(requireNotNull(transport.stream).cancelled)
+        session.stop()
+    }
+
     private class FakeRoomTransport : RoomTransport {
         val commands = mutableListOf<CommandEnvelope>()
         val presences = mutableListOf<PresenceReport>()
         val requestIdentities = mutableListOf<SessionSnapshot>()
         var commandFailure: RoomApiException? = null
+        var invitationFailure: RoomApiException? = null
         var stream: FakeStream? = null
         var listener: RoomEventListener? = null
         var recoverCalls = 0
+        var leaveCalls = 0
         var presenceBlock: CompletableDeferred<Unit>? = null
+        val presenceFailures = ArrayDeque<RoomApiException>()
 
         override suspend fun sampleClock(snapshot: SessionSnapshot, samples: Int): ClockEstimate {
             requestIdentities += snapshot
@@ -153,11 +246,24 @@ class RoomSessionTest {
         override suspend fun presence(snapshot: SessionSnapshot, roomId: String, body: PresenceReport): PresenceResult {
             requestIdentities += snapshot
             presences += body
+            if (presenceFailures.isNotEmpty()) throw presenceFailures.removeFirst()
             presenceBlock?.await()
             return PresenceResult(PresenceAck(body.presenceSequence, EPOCH, 1, false), snapshot())
         }
-        override suspend fun invitation(snapshot: SessionSnapshot, roomId: String, membershipVersion: Long, action: String, requestId: String) = envelope()
-        override suspend fun leave(snapshot: SessionSnapshot, roomId: String, body: LeaveRequest) { requestIdentities += snapshot }
+        override suspend fun invitation(
+            snapshot: SessionSnapshot,
+            roomId: String,
+            membershipVersion: Long,
+            action: String,
+            requestId: String,
+        ): RoomEnvelope {
+            invitationFailure?.let { throw it }
+            return envelope()
+        }
+        override suspend fun leave(snapshot: SessionSnapshot, roomId: String, body: LeaveRequest) {
+            requestIdentities += snapshot
+            leaveCalls++
+        }
         override fun events(snapshot: SessionSnapshot, roomId: String, listener: RoomEventListener): RoomEventStream {
             requestIdentities += snapshot
             this.listener = listener

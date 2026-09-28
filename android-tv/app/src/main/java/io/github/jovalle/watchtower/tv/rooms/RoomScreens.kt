@@ -1,6 +1,7 @@
 package io.github.jovalle.watchtower.tv.rooms
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -25,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import io.github.jovalle.watchtower.tv.AppGraph
 import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 
@@ -83,6 +86,7 @@ fun JoinRoomScreen(graph: AppGraph, initialValue: String = "", onJoined: (String
     var error by remember { mutableStateOf<String?>(null) }
     val invalidInvite = stringResource(R.string.room_invalid_invite)
     val joinFailed = stringResource(R.string.room_join_failed)
+    val scope = rememberCoroutineScope()
     JoinRoomForm(
         value = input,
         onValueChange = { input = it; error = null },
@@ -94,15 +98,17 @@ fun JoinRoomScreen(graph: AppGraph, initialValue: String = "", onJoined: (String
                 error = invalidInvite
             } else if (!busy) {
                 busy = true
-                graph.appScope.launch {
+                scope.launch {
                     try {
                         val session = graph.rooms.join(secret)
-                        input = ""
-                        onJoined(session.roomId)
+                        if (isActive) {
+                            input = ""
+                            onJoined(session.roomId)
+                        }
                     } catch (failure: Exception) {
-                        error = failure.message ?: joinFailed
+                        if (isActive) error = failure.message ?: joinFailed
                     } finally {
-                        busy = false
+                        if (isActive) busy = false
                     }
                 }
             }
@@ -149,6 +155,18 @@ fun JoinRoomForm(
 fun RoomLobbyScreen(graph: AppGraph, onPlay: (PlayerRoute) -> Unit, onExit: () -> Unit) {
     val state by graph.rooms.state.collectAsStateWithLifecycle()
     val session = state.snapshot?.roomId?.let(graph.rooms::activeSession)
+    val scope = rememberCoroutineScope()
+    var leaving by remember { mutableStateOf(false) }
+    val leave = {
+        if (!leaving) {
+            leaving = true
+            scope.launch {
+                runCatching { graph.rooms.leave() }
+                if (isActive) onExit()
+            }
+        }
+    }
+    BackHandler(onBack = leave)
     RoomLobbyContent(
         state = state,
         inviteUrl = state.invitation?.let { invitation -> graph.session.current()?.baseUrl?.let { roomInvitationUrl(it, invitation.secret) } },
@@ -156,11 +174,11 @@ fun RoomLobbyScreen(graph: AppGraph, onPlay: (PlayerRoute) -> Unit, onExit: () -
             val room = state.snapshot ?: return@RoomLobbyContent
             onPlay(PlayerRoute(room.media.ratingKey, room.media.mediaId, targetPositionMs(room, room.serverNowMs.toDouble()), room.roomId))
         },
-        onPlay = { session?.let { graph.appScope.launch { it.send(RoomCommand.Play) } } },
-        onRotate = { session?.let { graph.appScope.launch { it.updateInvitation("rotate") } } },
-        onRevoke = { session?.let { graph.appScope.launch { it.updateInvitation("revoke") } } },
-        onEnd = { session?.let { graph.appScope.launch { it.send(RoomCommand.End) } } },
-        onLeave = { graph.appScope.launch { graph.rooms.leave(); onExit() } },
+        onPlay = { session?.let { scope.launch { it.send(RoomCommand.Play) } } },
+        onRotate = { session?.let { scope.launch { it.updateInvitation("rotate") } } },
+        onRevoke = { session?.let { scope.launch { it.updateInvitation("revoke") } } },
+        onEnd = { session?.let { scope.launch { it.send(RoomCommand.End) } } },
+        onLeave = leave,
     )
 }
 
