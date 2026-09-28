@@ -27,6 +27,7 @@ class RoomApiException(
     val code: String?,
     override val message: String,
     val snapshot: RoomSnapshot? = null,
+    val retryAfterMs: Long? = null,
 ) : IOException(message)
 
 sealed interface RoomEvent {
@@ -267,6 +268,7 @@ class RoomApi(
                 code = parsed?.error?.code,
                 message = parsed?.error?.message ?: "Room request failed (${response.code}).",
                 snapshot = parsed?.snapshot,
+                retryAfterMs = response.header("Retry-After")?.toLongOrNull()?.times(1_000),
             )
         }
         if (serializer == null) return@use null

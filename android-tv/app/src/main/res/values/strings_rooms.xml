@@ -46,4 +46,7 @@
     <string name="room_ended_by_host">The host ended the room.</string>
     <string name="room_ended_host_lost">The host did not reconnect, so the room ended.</string>
     <string name="room_left">You left the room.</string>
+    <string name="room_session_unavailable">This Watch Together session is no longer available.</string>
+    <string name="room_replacement_not_acknowledged">The room did not acknowledge the playback change. The current stream was kept.</string>
+    <string name="room_left_for_solo_playback">Left Watch Together before starting playback.</string>
 </resources>

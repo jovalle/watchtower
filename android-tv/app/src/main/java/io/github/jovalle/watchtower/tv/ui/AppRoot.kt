@@ -140,6 +140,7 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
     val roomsUnavailable = stringResource(R.string.room_unavailable_profile)
     val roomJoinFailed = stringResource(R.string.room_join_failed)
     val roomCreateFailed = stringResource(R.string.room_create_failed)
+    val roomLeftForSoloPlayback = stringResource(R.string.room_left_for_solo_playback)
 
     LaunchedEffect(graph) {
         graph.session.identityChanges.collect {
@@ -303,14 +304,27 @@ private fun MainExperience(graph: AppGraph, watchNext: WatchNextManager) {
             }
             composable<SettingsRoute> { SettingsScreen(graph) }
             composable<PlayerRoute> { entry ->
-                PlayerScreen(
-                    graph = graph,
-                    route = entry.toRoute(),
-                    onExit = { navController.popBackStack() },
-                    onOpenItem = { next ->
-                        navController.navigate(next) { popUpTo<PlayerRoute> { inclusive = true } }
-                    },
-                )
+                val route = entry.toRoute<PlayerRoute>()
+                var readyForPlayback by remember(route) {
+                    mutableStateOf(route.roomId != null || graph.rooms.activeSession() == null)
+                }
+                LaunchedEffect(route) {
+                    if (route.roomId == null && graph.rooms.activeSession() != null) {
+                        runCatching { graph.rooms.leave() }
+                        notice = roomLeftForSoloPlayback
+                    }
+                    readyForPlayback = true
+                }
+                if (readyForPlayback) {
+                    PlayerScreen(
+                        graph = graph,
+                        route = route,
+                        onExit = { navController.popBackStack() },
+                        onOpenItem = { next ->
+                            navController.navigate(next) { popUpTo<PlayerRoute> { inclusive = true } }
+                        },
+                    )
+                }
             }
         }
         }

@@ -72,6 +72,7 @@ class RoomSession(
     private var reconnectJob: Job? = null
     private var livenessJob: Job? = null
     private var presenceJob: Job? = null
+    private var presenceRetryJob: Job? = null
     private var lastAcknowledgementMs = nowMs()
     private var stopped = false
 
@@ -112,15 +113,12 @@ class RoomSession(
             acknowledge()
             true
         } catch (error: RoomApiException) {
-            if (error.code in setOf("identity_version_mismatch", "stale_epoch")) {
-                handleFailure(error)
-                false
-            } else if (error.status == 409) {
-                error.snapshot?.let { applySnapshot(it) } ?: recoverOnce()
-                update { it.copy(errorCode = error.code, message = roomErrorMessage(error.code, error.message)) }
+            if (handleTerminalFailure(error)) {
                 false
             } else {
-                handleFailure(error)
+                error.snapshot?.let { applySnapshot(it) }
+                    ?: if (error.status == 409) recoverOnce() else Unit
+                update { it.copy(errorCode = error.code, message = roomErrorMessage(error.code, error.message)) }
                 false
             }
         } catch (error: Throwable) {
@@ -158,6 +156,13 @@ class RoomSession(
             applySnapshot(result.snapshot)
             acknowledge()
             !result.ack.ignored
+        } catch (error: RoomApiException) {
+            if (error.status == 429) {
+                schedulePresenceRetry(error.retryAfterMs ?: PRESENCE_RETRY_DELAY_MS)
+            } else {
+                handleFailure(error)
+            }
+            false
         } catch (error: Throwable) {
             handleFailure(error)
             false
@@ -169,6 +174,12 @@ class RoomSession(
         return try {
             applyEnvelope(transport.invitation(identity, roomId, membership.membershipVersion, action, newId()))
             true
+        } catch (error: RoomApiException) {
+            if (!handleTerminalFailure(error)) {
+                error.snapshot?.let { applySnapshot(it) }
+                update { it.copy(errorCode = error.code, message = roomErrorMessage(error.code, error.message)) }
+            }
+            false
         } catch (error: Throwable) {
             handleFailure(error)
             false
@@ -355,16 +366,12 @@ class RoomSession(
     }
 
     private fun handleTerminalFailure(error: Throwable): Boolean {
-        if (error !is RoomApiException || (
-            error.status !in setOf(401, 403, 404, 410) &&
-                error.code !in setOf("identity_version_mismatch", "stale_epoch")
-            )
-        ) return false
+        if (error !is RoomApiException || (error.status != 410 && error.code !in TERMINAL_ERROR_CODES)) return false
         if (error.code == "stale_epoch") {
             terminate("server_restarted")
             return true
         }
-        val ended = error.status == 410 || error.code in setOf("removed", "media_forbidden")
+        val ended = error.status == 410 || error.code in setOf("removed", "room_ended", "membership_ended")
         updateNow {
             it.copy(
                 status = if (ended) RoomConnectionStatus.ENDED else RoomConnectionStatus.ERROR,
@@ -377,15 +384,26 @@ class RoomSession(
         return true
     }
 
+    private fun schedulePresenceRetry(delayMs: Long) {
+        presenceRetryJob?.cancel()
+        presenceRetryJob = scope.launch {
+            delay(delayMs.coerceAtLeast(0))
+            presenceRetryJob = null
+            reportPresence(latestPresence)
+        }
+    }
+
     private fun closeTransport() {
         stream?.cancel()
         stream = null
         reconnectJob?.cancel()
         livenessJob?.cancel()
         presenceJob?.cancel()
+        presenceRetryJob?.cancel()
         reconnectJob = null
         livenessJob = null
         presenceJob = null
+        presenceRetryJob = null
     }
 
     private suspend fun update(transform: (RoomUiState) -> RoomUiState) {
@@ -408,6 +426,18 @@ class RoomSession(
 
     private companion object {
         const val RECONNECT_DELAY_MS = 1_000L
+        const val PRESENCE_RETRY_DELAY_MS = 1_000L
+        val TERMINAL_ERROR_CODES = setOf(
+            "unauthenticated",
+            "identity_version_mismatch",
+            "identity_ambiguous",
+            "server_changed",
+            "removed",
+            "room_ended",
+            "membership_ended",
+            "stale_epoch",
+            "feature_disabled",
+        )
     }
 }
 
@@ -466,11 +496,14 @@ class RoomManager(
 
     suspend fun leave() = operationMutex.withLock {
         val session = active ?: return@withLock
-        session.leave()
-        active = null
-        stateJob?.cancel()
-        stateJob = null
-        _state.value = session.state.value
+        try {
+            session.leave()
+        } finally {
+            active = null
+            stateJob?.cancel()
+            stateJob = null
+            _state.value = session.state.value
+        }
     }
 
     fun endForIdentityChange() {
@@ -481,7 +514,7 @@ class RoomManager(
     }
 
     private suspend fun replace(identity: SessionSnapshot, envelope: RoomEnvelope): RoomSession {
-        active?.stop()
+        active?.leave()
         stateJob?.cancel()
         val session = RoomSession(identity, envelope.snapshot.roomId, envelope, transport, appScope, nowMs, newId)
         active = session
