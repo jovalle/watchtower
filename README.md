@@ -125,6 +125,7 @@ All optional. The Plex server and token are configured at `/setup`, not through 
 | `PLEX_CLIENT_ID`  | Client identifier (default: `watchtower-001`)                                                 |
 | `PORT`            | Server port (default: `9001`)                                                                 |
 | `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
+| `TRUST_PROXY`     | Trusted proxies for native pairing limits (Express names/CIDRs or hop count; unset trusts only the socket peer) |
 | `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
 
 Trakt is enabled only by a saved client ID and secret in Settings → Integrations. A legacy `TRAKT_CLIENT_ID` environment value no longer enables requests; move existing credentials into Integrations to keep using Trakt. Users also need a watchlist username for list imports.

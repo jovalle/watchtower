@@ -20,6 +20,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Harness-only credential hook; scripts/tv-e2e/room-e2e.ts invokes it directly with `am instrument -e class`.
+        testInstrumentationRunnerArguments["notClass"] = "io.github.jovalle.watchtower.tv.e2e.SeedCredentialTest"
     }
 
     signingConfigs {

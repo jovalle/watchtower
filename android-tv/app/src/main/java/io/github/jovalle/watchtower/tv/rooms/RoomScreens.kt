@@ -1,6 +1,7 @@
 package io.github.jovalle.watchtower.tv.rooms
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -25,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import io.github.jovalle.watchtower.tv.AppGraph
 import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 
@@ -83,6 +86,7 @@ fun JoinRoomScreen(graph: AppGraph, initialValue: String = "", onJoined: (String
     var error by remember { mutableStateOf<String?>(null) }
     val invalidInvite = stringResource(R.string.room_invalid_invite)
     val joinFailed = stringResource(R.string.room_join_failed)
+    val scope = rememberCoroutineScope()
     JoinRoomForm(
         value = input,
         onValueChange = { input = it; error = null },
@@ -94,15 +98,17 @@ fun JoinRoomScreen(graph: AppGraph, initialValue: String = "", onJoined: (String
                 error = invalidInvite
             } else if (!busy) {
                 busy = true
-                graph.appScope.launch {
+                scope.launch {
                     try {
                         val session = graph.rooms.join(secret)
-                        input = ""
-                        onJoined(session.roomId)
+                        if (isActive) {
+                            input = ""
+                            onJoined(session.roomId)
+                        }
                     } catch (failure: Exception) {
-                        error = failure.message ?: joinFailed
+                        if (isActive) error = failure.message ?: joinFailed
                     } finally {
-                        busy = false
+                        if (isActive) busy = false
                     }
                 }
             }
@@ -119,6 +125,7 @@ fun JoinRoomForm(
     onJoin: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val invitationDescription = stringResource(R.string.room_invitation_description)
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(52.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -131,7 +138,7 @@ fun JoinRoomForm(
             modifier = Modifier.fillMaxWidth().background(Color.White)
                 .border(if (focused) 4.dp else 2.dp, MaterialTheme.colorScheme.primary)
                 .onFocusChanged { focused = it.isFocused }.padding(16.dp).focusable()
-                .semantics { contentDescription = "Watch Together invitation" },
+                .semantics { contentDescription = invitationDescription },
             textStyle = TextStyle(color = Color.Black, fontSize = 20.sp),
             singleLine = true,
         )
@@ -148,6 +155,18 @@ fun JoinRoomForm(
 fun RoomLobbyScreen(graph: AppGraph, onPlay: (PlayerRoute) -> Unit, onExit: () -> Unit) {
     val state by graph.rooms.state.collectAsStateWithLifecycle()
     val session = state.snapshot?.roomId?.let(graph.rooms::activeSession)
+    val scope = rememberCoroutineScope()
+    var leaving by remember { mutableStateOf(false) }
+    val leave = {
+        if (!leaving) {
+            leaving = true
+            scope.launch {
+                runCatching { graph.rooms.leave() }
+                if (isActive) onExit()
+            }
+        }
+    }
+    BackHandler(onBack = leave)
     RoomLobbyContent(
         state = state,
         inviteUrl = state.invitation?.let { invitation -> graph.session.current()?.baseUrl?.let { roomInvitationUrl(it, invitation.secret) } },
@@ -155,11 +174,11 @@ fun RoomLobbyScreen(graph: AppGraph, onPlay: (PlayerRoute) -> Unit, onExit: () -
             val room = state.snapshot ?: return@RoomLobbyContent
             onPlay(PlayerRoute(room.media.ratingKey, room.media.mediaId, targetPositionMs(room, room.serverNowMs.toDouble()), room.roomId))
         },
-        onPlay = { session?.let { graph.appScope.launch { it.send(RoomCommand.Play) } } },
-        onRotate = { session?.let { graph.appScope.launch { it.updateInvitation("rotate") } } },
-        onRevoke = { session?.let { graph.appScope.launch { it.updateInvitation("revoke") } } },
-        onEnd = { session?.let { graph.appScope.launch { it.send(RoomCommand.End) } } },
-        onLeave = { graph.appScope.launch { graph.rooms.leave(); onExit() } },
+        onPlay = { session?.let { scope.launch { it.send(RoomCommand.Play) } } },
+        onRotate = { session?.let { scope.launch { it.updateInvitation("rotate") } } },
+        onRevoke = { session?.let { scope.launch { it.updateInvitation("revoke") } } },
+        onEnd = { session?.let { scope.launch { it.send(RoomCommand.End) } } },
+        onLeave = leave,
     )
 }
 
@@ -251,6 +270,11 @@ fun roomInvitationUrl(base: HttpUrl, secret: String): String? {
 
 @Composable
 private fun roomStatus(state: RoomUiState): String = when {
+    state.errorCode != null || state.endedReason != null -> localizedRoomMessage(
+        state.errorCode,
+        state.endedReason,
+        state.message,
+    )
     state.message != null -> state.message
     state.status == RoomConnectionStatus.RECONNECTING -> stringResource(R.string.room_reconnecting)
     state.snapshot?.reason == "host_transferred" -> stringResource(R.string.room_host_transferred)
@@ -258,4 +282,25 @@ private fun roomStatus(state: RoomUiState): String = when {
     state.snapshot?.phase == "preparing" -> stringResource(R.string.room_preparing)
     state.snapshot?.phase == "playing" -> stringResource(R.string.room_playing)
     else -> stringResource(R.string.room_waiting_for_start)
+}
+
+@Composable
+fun localizedRoomMessage(errorCode: String?, endedReason: String?, fallback: String?): String = when {
+    errorCode == "not_host" -> stringResource(R.string.room_error_not_host)
+    errorCode == "participants_not_ready" -> stringResource(R.string.room_error_participants_not_ready)
+    errorCode == "stale_revision" -> stringResource(R.string.room_error_stale_revision)
+    errorCode == "stale_epoch" || endedReason == "server_restarted" -> stringResource(R.string.room_ended_server_restarted)
+    errorCode == "removed" || endedReason == "removed" -> stringResource(R.string.room_ended_removed)
+    errorCode == "access_denied" || errorCode == "media_forbidden" || endedReason == "access_denied" ->
+        stringResource(R.string.room_error_access_denied)
+    errorCode == "room_ended" || errorCode == "membership_ended" -> stringResource(R.string.room_ended_generic)
+    errorCode == "identity_version_mismatch" || errorCode == "unauthenticated" || endedReason == "identity_changed" ->
+        stringResource(R.string.room_ended_identity_changed)
+    errorCode == "feature_disabled" -> stringResource(R.string.room_error_feature_disabled)
+    errorCode == "upstream_unavailable" -> stringResource(R.string.room_error_upstream_unavailable)
+    endedReason == "host_ended" -> stringResource(R.string.room_ended_by_host)
+    endedReason == "host_lost" -> stringResource(R.string.room_ended_host_lost)
+    endedReason == "left" -> stringResource(R.string.room_left)
+    fallback != null -> fallback
+    else -> stringResource(R.string.room_ended_generic)
 }

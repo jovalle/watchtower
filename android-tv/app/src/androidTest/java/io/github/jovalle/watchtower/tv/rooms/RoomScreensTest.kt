@@ -1,10 +1,12 @@
 package io.github.jovalle.watchtower.tv.rooms
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.SemanticsActions
@@ -48,6 +50,25 @@ class RoomScreensTest {
         compose.onNodeWithText("Open player").assertIsDisplayed().assertIsFocused()
         compose.onNodeWithText("Host Viewer", substring = true).assertIsDisplayed()
         compose.onNodeWithText("End for everyone").assertIsDisplayed()
+    }
+
+    @Test fun lobbyMapsKnownRoomErrorCodeInsteadOfRenderingFallback() {
+        compose.setContent {
+            MaterialTheme {
+                RoomLobbyContent(
+                    state = RoomUiState(
+                        status = RoomConnectionStatus.ERROR,
+                        errorCode = "not_host",
+                        message = "backend fallback",
+                    ),
+                    inviteUrl = null,
+                    onOpenPlayer = {}, onPlay = {}, onRotate = {}, onRevoke = {}, onEnd = {}, onLeave = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText("Only the room host can do that.").assertIsDisplayed()
+        compose.onAllNodesWithText("backend fallback").assertCountEquals(0)
     }
 
     private fun state(): RoomUiState {
