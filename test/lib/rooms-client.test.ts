@@ -85,6 +85,29 @@ describe("snapshot ordering", () => {
 });
 
 describe("recovery and liveness", () => {
+  it("keeps retrying when the first contact fails instead of staying connecting", async () => {
+    let failed = false;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (!failed) {
+        failed = true;
+        throw new TypeError("network down");
+      }
+      if (String(url).endsWith("/api/v1/clock")) return clockResponse();
+      return new Response(JSON.stringify(envelope), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = makeClient(fetchImpl);
+    const statuses: RoomClientState["status"][] = [];
+    client.subscribe((state) => statuses.push(state.status));
+
+    await client.start();
+    await vi.waitFor(() => expect(client.getState().status).toBe("connected"));
+    expect(statuses).toContain("reconnecting");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    client.stop();
+  });
   it("enters reconnecting after the stale threshold", async () => {
     vi.useFakeTimers();
     let now = 100;
@@ -168,6 +191,131 @@ describe("commands", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(client.getState().snapshot?.revision).toBe(playing.revision);
     expect(client.getState().lastErrorCode).toBe("stale_revision");
+  });
+
+  it.each([
+    [403, "not_host"],
+    [404, "not_found"],
+    [429, "rate_limited"],
+    [503, "upstream_unavailable"],
+  ])("keeps the room connected after a %s %s command rejection", async (status, code) => {
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      urls.push(String(url));
+      if (String(url).endsWith("/commands")) {
+        return new Response(
+          JSON.stringify({ error: { code, message: "Rejected" } }),
+          { status, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify(envelope), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "select-next", payload: { delayMs: 0 } })
+    ).resolves.toBe(false);
+    await Promise.resolve();
+
+    expect(client.getState()).toMatchObject({ status: "connected", lastErrorCode: code });
+    expect(urls.filter((url) => url.endsWith("/commands"))).toHaveLength(1);
+    // Only not_found is ambiguous with a missing room, so only it re-reads the room.
+    expect(urls.includes(`/api/v1/rooms/${roomId}`)).toBe(code === "not_found");
+  });
+
+  it("ends the client when a not_found command is confirmed by a missing room", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: { code: "not_found", message: "Room not found." } }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "pause", payload: {} })
+    ).resolves.toBe(false);
+    await vi.waitFor(() => expect(client.getState().status).toBe("error"));
+    expect(client.getState().lastErrorCode).toBe("not_found");
+  });
+
+  it.each([
+    [401, "unauthenticated", "error"],
+    [403, "removed", "error"],
+    [410, "room_ended", "ended"],
+  ])("ends the client after a terminal %s %s command rejection", async (status, code, terminal) => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: { code, message: "Ended" } }),
+        { status, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+
+    await expect(
+      client.sendCommand({ type: "pause", payload: {} })
+    ).rejects.toMatchObject({ status, code });
+    expect(client.getState()).toMatchObject({ status: terminal, lastErrorCode: code });
+  });
+});
+
+describe("presence", () => {
+  it("resends the latest report after a throttle instead of reconnecting", async () => {
+    vi.useFakeTimers();
+    const bodies: Array<{ ready: boolean }> = [];
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({ error: { code: "rate_limited", message: "Slow down" } }),
+          { status: 429, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ack: { presenceSequence: 1, epoch: playing.epoch, serverNowMs: 1, ignored: false },
+          snapshot: playing,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    const client = makeClient(fetchImpl);
+    (client as unknown as { state: RoomClientState }).state = {
+      ...client.getState(),
+      status: "connected",
+    };
+    const report = {
+      playbackSessionId: null,
+      positionMs: 1000,
+      buffering: false,
+      replacingSource: false,
+      error: null,
+    };
+
+    await expect(client.reportPresence({ ...report, ready: false })).resolves.toBe(false);
+    client.observePresence({ ...report, ready: true });
+    expect(client.getState().status).toBe("connected");
+    expect(FakeEventSource.instances).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(bodies.map((body) => body.ready)).toEqual([false, true]);
+    expect(client.getState().status).toBe("connected");
+    client.stop();
   });
 });
 

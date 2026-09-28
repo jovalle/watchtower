@@ -75,6 +75,10 @@ const SCROBBLE_THRESHOLD = 0.9; // Mark as watched at 90%
 const CONTROLS_HIDE_DELAY = 3000;
 const SKIP_DURATION = 10;
 const BUTTON_SKIP_DURATION = 30;
+// A fresh room source further than this from the room target means the room seeked during the load.
+const FRESH_SOURCE_RELOAD_MS = 30_000;
+// Relative host seeks closer together than this become one room seek.
+const ROOM_SEEK_COALESCE_MS = 250;
 
 // Webkit fullscreen types for iOS
 interface WebkitDocument extends Document {
@@ -339,6 +343,11 @@ export function VideoPlayer({
   const hasScrobbledRef = useRef(false);
   const scrobbleRetryAfterRef = useRef(0);
   const hasInitializedRef = useRef(false);
+  const roomSourceAlignedRef = useRef(false);
+  const pendingRoomSeekRef = useRef<{
+    positionMs: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
   const currentMethodRef = useRef(playbackMethod);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isNavigatingRef = useRef(false); // Prevents duplicate stream reloads
@@ -515,9 +524,10 @@ export function VideoPlayer({
   const prepareRoomSourceReplacement = useCallback(
     async (positionMs: number) => {
       if (!room) return true;
+      const previous = roomPresenceRef.current;
       replacingSourceRef.current = true;
       roomPresenceRef.current = {
-        ...roomPresenceRef.current,
+        ...previous,
         ready: false,
         buffering: false,
         replacingSource: true,
@@ -527,7 +537,22 @@ export function VideoPlayer({
         playbackSessionId: playbackSession,
         positionMs,
       });
-      if (!acknowledged) replacingSourceRef.current = false;
+      if (!acknowledged) {
+        // This stream stays: restore the prior state so a queued or later report cannot strand the member.
+        replacingSourceRef.current = false;
+        roomPresenceRef.current = { ...previous, replacingSource: false };
+        const video = videoRef.current;
+        room.observePresence({
+          playbackSessionId: playbackSession,
+          positionMs:
+            video && Number.isFinite(video.currentTime)
+              ? Math.max(0, Math.round(video.currentTime * 1000))
+              : null,
+          ...roomPresenceRef.current,
+        });
+        lastReadyClaimRef.current = null;
+        evaluateRoomReadinessRef.current();
+      }
       return acknowledged;
     },
     [playbackSession, room]
@@ -798,10 +823,33 @@ export function VideoPlayer({
       );
 
       if (room) {
-        sendRoomIntent({
-          type: "seek",
-          payload: { positionMs: Math.round(clampedTime * 1000) },
-        });
+        const pending = pendingRoomSeekRef.current;
+        if (pending) clearTimeout(pending.timer);
+        pendingRoomSeekRef.current = null;
+        // Relative seeks in a burst move from the pending target, not the not-yet-seeked media.
+        const targetSeconds =
+          pending && !immediate
+            ? Math.max(
+                0,
+                Math.min(
+                  pending.positionMs / 1000 + (targetTime - video.currentTime),
+                  duration || video.duration
+                )
+              )
+            : clampedTime;
+        const positionMs = Math.round(targetSeconds * 1000);
+        const send = () => {
+          pendingRoomSeekRef.current = null;
+          sendRoomIntent({ type: "seek", payload: { positionMs } });
+        };
+        if (immediate || !room.isHost) {
+          send();
+        } else {
+          pendingRoomSeekRef.current = {
+            positionMs,
+            timer: setTimeout(send, ROOM_SEEK_COALESCE_MS),
+          };
+        }
         return;
       }
 
@@ -836,6 +884,16 @@ export function VideoPlayer({
       room,
       sendRoomIntent,
     ]
+  );
+
+  // A coalesced seek belongs to the media generation it aimed at; drop it on change or unmount.
+  const roomMediaGeneration = room?.snapshot.mediaGeneration;
+  useEffect(
+    () => () => {
+      if (pendingRoomSeekRef.current) clearTimeout(pendingRoomSeekRef.current.timer);
+      pendingRoomSeekRef.current = null;
+    },
+    [roomMediaGeneration]
   );
 
   const expectEffect = useCallback(
@@ -883,15 +941,24 @@ export function VideoPlayer({
       const requiresBufferedSeek =
         playbackMethod === "transcode" || playbackMethod === "direct_stream";
       if (requiresBufferedSeek && !isTimeBuffered(targetSeconds)) {
-        reloadStreamAtPosition(targetSeconds, true);
-        return false;
+        // The loader opened this source at the room position. Reloading it for load-time drift
+        // would chase a playing room forever; only a room seek during the load warrants one.
+        if (!hasInitializedRef.current) return false;
+        if (
+          roomSourceAlignedRef.current ||
+          Math.abs(targetPositionMs - resumePositionSeconds * 1000) >
+            FRESH_SOURCE_RELOAD_MS
+        ) {
+          reloadStreamAtPosition(targetSeconds, true);
+          return false;
+        }
       }
       expectEffect("seek", targetPositionMs);
       video.currentTime = targetSeconds;
       setCurrentTime(targetSeconds);
       return true;
     },
-    [expectEffect, isTimeBuffered, playbackMethod, reloadStreamAtPosition]
+    [expectEffect, isTimeBuffered, playbackMethod, reloadStreamAtPosition, resumePositionSeconds]
   );
 
   const reconcileRoom = useCallback(() => {
@@ -904,13 +971,15 @@ export function VideoPlayer({
       clearTimeout(scheduledPlayRef.current);
       scheduledPlayRef.current = null;
     }
-    if (room.status !== "connected") {
+    // The route is switching to the room's new title; never align the outgoing media to it.
+    const outgoingMedia = room.snapshot.media.ratingKey !== ratingKey;
+    if (room.status !== "connected" || outgoingMedia) {
       if (video.playbackRate !== 1) video.playbackRate = 1;
       if (!video.paused) {
         expectEffect("pause");
         video.pause();
       }
-      evaluateRoomReadinessRef.current();
+      if (!outgoingMedia) evaluateRoomReadinessRef.current();
       return;
     }
     const decision = reconcileRoomPlayback(
@@ -930,6 +999,28 @@ export function VideoPlayer({
     );
     reconciliationMemoryRef.current = decision.memory;
     const action = decision.action;
+    if (
+      hasInitializedRef.current &&
+      !isLoading &&
+      Math.abs(decision.driftMs) <= ROOM_POLICY.deadbandMs
+    ) {
+      roomSourceAlignedRef.current = true;
+    }
+    // play() on ended media restarts it from 0; while the room runs out the title, stay at the end.
+    if (
+      video.ended &&
+      decision.desiredPositionMs >=
+        (duration || video.duration) * 1000 - ROOM_POLICY.hardSeekMs
+    ) {
+      evaluateRoomReadinessRef.current();
+      return;
+    }
+    // Only a refused gesture blocks autoplay; play() interrupted by pause, seek or load is not.
+    const onPlayRejected = (playError: unknown) => {
+      if (playError instanceof DOMException && playError.name === "NotAllowedError") {
+        reportAutoplayBlockedRef.current();
+      }
+    };
     onRoomDiagnostics?.({
       driftMs: decision.driftMs,
       correction:
@@ -965,7 +1056,7 @@ export function VideoPlayer({
           return;
         }
         expectEffect("play");
-        void video.play().catch(() => reportAutoplayBlockedRef.current());
+        void video.play().catch(onPlayRejected);
       }, delay);
     } else if (action.kind === "play") {
       if (!room.playbackArmed) {
@@ -974,7 +1065,7 @@ export function VideoPlayer({
         return;
       }
       expectEffect("play");
-      void video.play().catch(() => reportAutoplayBlockedRef.current());
+      void video.play().catch(onPlayRejected);
     } else if (action.kind === "seek") {
       seekRoomPlayback(action.positionMs);
     } else if (action.kind === "rate") {
@@ -982,12 +1073,14 @@ export function VideoPlayer({
     }
     evaluateRoomReadinessRef.current();
   }, [
+    duration,
     error,
     expectEffect,
     isLoading,
     isSeeking,
     room,
     onRoomDiagnostics,
+    ratingKey,
     seekRoomPlayback,
   ]);
   reconcileRoomRef.current = reconcileRoom;
@@ -1049,6 +1142,7 @@ export function VideoPlayer({
   const evaluateRoomReadiness = useCallback(() => {
     const video = videoRef.current;
     if (!room?.playbackArmed || !video || room.status !== "connected") return;
+    if (room.snapshot.media.ratingKey !== ratingKey) return;
     if (bufferingRef.current) return;
     const desiredPositionMs = reconcileRoomPlayback(
       room.snapshot,
@@ -1095,7 +1189,7 @@ export function VideoPlayer({
       replacingSource: false,
       error: ready ? null : roomPresenceRef.current.error,
     });
-  }, [error, isSeeking, playbackSession, reportRoomPresence, room]);
+  }, [error, isSeeking, playbackSession, ratingKey, reportRoomPresence, room]);
   evaluateRoomReadinessRef.current = evaluateRoomReadiness;
 
   const reportAutoplayBlocked = useCallback(() => {
@@ -1386,7 +1480,18 @@ export function VideoPlayer({
             setShowControls(true);
           });
         });
-      } else if (!room && wantsToPlay && video.paused) {
+      } else if (room) {
+        // A paused room never fires `playing`, so buffering recovery is reported here.
+        if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
+        setIsLoading(false);
+        if (roomPresenceRef.current.buffering) {
+          void reportRoomPresence({ buffering: false }).then(() =>
+            evaluateRoomReadinessRef.current()
+          );
+        } else {
+          evaluateRoomReadinessRef.current();
+        }
+      } else if (wantsToPlay && video.paused) {
         // Resume playback after buffering if user intended to play
         video.play().catch(() => {});
       }
@@ -1985,6 +2090,7 @@ export function VideoPlayer({
   useEffect(() => {
     if (
       !room?.isHost ||
+      room.snapshot.media.ratingKey !== ratingKey ||
       !room.snapshot.policy.autoAdvance ||
       room.snapshot.nextCountdown ||
       (!hasEnded && activeMarker?.type !== "credits") ||
@@ -1997,7 +2103,7 @@ export function VideoPlayer({
       type: "select-next",
       payload: { delayMs: ROOM_POLICY.nextCountdownMs },
     });
-  }, [activeMarker?.type, hasEnded, room]);
+  }, [activeMarker?.type, hasEnded, ratingKey, room]);
 
   useEffect(() => {
     if (!room || !("mediaSession" in navigator)) return;

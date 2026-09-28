@@ -27,7 +27,12 @@ vi.mock("hls.js", () => ({
 }));
 
 const session = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
-const baseSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+const fixtureSnapshot = structuredClone(fixtures.createResponse.snapshot) as RoomSnapshot;
+// The room is on the title the player under test shows.
+const baseSnapshot: RoomSnapshot = {
+  ...fixtureSnapshot,
+  media: { ...fixtureSnapshot.media, ratingKey: "42" },
+};
 const handlers = new Map<MediaSessionAction, MediaSessionActionHandler | null>();
 let paused = true;
 
@@ -141,7 +146,8 @@ describe("room intent gate", () => {
     expect(video.currentTime).toBe(0);
   });
 
-  it("dispatches exactly one command for each host intent", () => {
+  it("dispatches one command per host intent and coalesces relative seek bursts", () => {
+    vi.useFakeTimers();
     const room = controller(true);
     renderPlayer(room);
     const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
@@ -152,18 +158,20 @@ describe("room intent gate", () => {
     expect(room.sendIntent).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.click(screen.getByRole("button", { name: "Forward 30 seconds" }));
+    expect(room.sendIntent).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
     expect(room.sendIntent).toHaveBeenLastCalledWith({
       type: "seek",
-      payload: { positionMs: 10_000 },
+      payload: { positionMs: 40_000 },
     });
     expect(room.sendIntent).toHaveBeenCalledTimes(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Forward 30 seconds" }));
-    expect(room.sendIntent).toHaveBeenCalledTimes(3);
-
     act(() => handlers.get("pause")?.({ action: "pause" }));
     expect(room.sendIntent).toHaveBeenLastCalledWith({ type: "pause", payload: {} });
-    expect(room.sendIntent).toHaveBeenCalledTimes(4);
+    expect(room.sendIntent).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -376,6 +384,133 @@ it("does not re-attach the media source when a new room snapshot arrives", () =>
   }
 });
 
+it("keeps the outgoing media paused and inert when the room moves to another title", async () => {
+  const playing = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 120_000, effectiveAtMs: performance.now() - 1000, rate: 1 },
+  });
+  const props = {
+    src: `/api/plex/hls/42/start.m3u8?session=${session}`,
+    title: "Example",
+    ratingKey: "42",
+    durationMs: 130_000,
+    playbackMethod: "transcode" as const,
+    resumePositionSeconds: 120,
+    markers: [{ type: "credits" as const, start: 118, end: 130 }],
+  };
+  const { rerender } = render(<VideoPlayer {...props} room={playing} />);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+  paused = false;
+
+  const advanced = controller(true, {
+    ...baseSnapshot,
+    media: { ...baseSnapshot.media, ratingKey: "43" },
+    mediaGeneration: baseSnapshot.mediaGeneration + 1,
+    preparationGeneration: baseSnapshot.preparationGeneration + 1,
+    phase: "preparing",
+    anchor: { positionMs: 0, effectiveAtMs: performance.now(), rate: 1 },
+  });
+  rerender(<VideoPlayer {...props} room={advanced} />);
+  await act(async () => Promise.resolve());
+
+  expect(paused).toBe(true);
+  expect(advanced.prepareSourceReplacement).not.toHaveBeenCalled();
+  expect(advanced.sendIntent).not.toHaveBeenCalled();
+  expect(advanced.reportPresence).not.toHaveBeenCalledWith(
+    expect.objectContaining({ ready: true })
+  );
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["AbortError", false],
+  ["NotAllowedError", true],
+])("treats a room play() rejected with %s as autoplay blocked: %s", async (name, blocked) => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(() =>
+    Promise.reject(new DOMException("play() failed", name))
+  );
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 0, effectiveAtMs: performance.now(), rate: 1 },
+  });
+  renderPlayer(room);
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
+  await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+  await act(async () => Promise.resolve());
+
+  const disarmed = vi.mocked(room.setPlaybackArmed).mock.calls.some(([armed]) => armed === false);
+  const reported = vi.mocked(room.reportPresence).mock.calls.some(
+    ([report]) => report.error === "autoplay_blocked"
+  );
+  expect(disarmed).toBe(blocked);
+  expect(reported).toBe(blocked);
+});
+
+it("stays at the end of ended media while the room runs out the title", async () => {
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "playing",
+    anchor: { positionMs: 100_000, effectiveAtMs: performance.now() - 5000, rate: 1 },
+  });
+  renderPlayer(room);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "ended", { configurable: true, value: true });
+  video.currentTime = 100;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  expect(video.currentTime).toBe(100);
+});
+
+it("reports buffering recovery and readiness while the room stays paused", async () => {
+  vi.useFakeTimers();
+  const room = controller(false, {
+    ...baseSnapshot,
+    phase: "paused",
+    anchor: { positionMs: 0, effectiveAtMs: 0, rate: 1 },
+  });
+  renderPlayer(room);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "readyState", {
+    configurable: true,
+    value: HTMLMediaElement.HAVE_FUTURE_DATA,
+  });
+  fireEvent.canPlay(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true })
+  );
+
+  fireEvent.waiting(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ buffering: true, ready: false })
+  );
+
+  // Data arrives while paused: only `canplay` fires, never `playing`.
+  vi.mocked(room.reportPresence).mockClear();
+  fireEvent.canPlay(video);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(room.reportPresence).toHaveBeenCalledWith(
+    expect.objectContaining({ buffering: false })
+  );
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, buffering: false })
+  );
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+});
+
 it("automatically reclaims readiness when the preparation generation changes", async () => {
   const room = controller(false, {
     ...baseSnapshot,
@@ -537,7 +672,10 @@ it("reloads an unbuffered scheduled pre-seek without playing the old source", as
     playbackArmed: false,
   };
   renderPlayer(room, { playbackMethod: "transcode" });
+  await act(async () => Promise.resolve());
+  expect(room.prepareSourceReplacement).not.toHaveBeenCalled();
 
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
   await waitFor(() =>
     expect(room.prepareSourceReplacement).toHaveBeenCalledWith({
       playbackSessionId: session,
@@ -545,6 +683,50 @@ it("reloads an unbuffered scheduled pre-seek without playing the old source", as
     })
   );
   expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+});
+
+it("aligns a fresh transcode source in place instead of reloading it to chase the room", async () => {
+  const playingAt = (positionMs: number, reason: RoomSnapshot["reason"] = baseSnapshot.reason) =>
+    controller(true, {
+      ...baseSnapshot,
+      phase: "playing",
+      reason,
+      anchor: { positionMs, effectiveAtMs: performance.now() - 2000, rate: 1 },
+    });
+  const room = playingAt(52_000);
+  const props = {
+    src: `/api/plex/hls/42/start.m3u8?session=${session}`,
+    title: "Example",
+    ratingKey: "42",
+    durationMs: 100_000,
+    playbackMethod: "transcode" as const,
+    resumePositionSeconds: 52,
+  };
+  const { rerender } = render(<VideoPlayer {...props} room={room} />);
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  fireEvent.canPlay(video);
+  await act(async () => Promise.resolve());
+  // A later snapshot observes the source at the room position, which marks it aligned.
+  rerender(<VideoPlayer {...props} room={{ ...room }} />);
+  await act(async () => Promise.resolve());
+
+  expect(room.prepareSourceReplacement).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(video.currentTime).toBeGreaterThanOrEqual(54);
+  expect(video.currentTime).toBeLessThan(54.5);
+
+  // Within the fresh-source window, so only alignment makes this a reload.
+  const seeked = playingAt(75_000, "host_seeked");
+  rerender(<VideoPlayer {...props} room={seeked} />);
+  await waitFor(() =>
+    expect(seeked.prepareSourceReplacement).toHaveBeenCalledWith({
+      playbackSessionId: session,
+      positionMs: expect.any(Number),
+    })
+  );
+  const [{ positionMs }] = vi.mocked(seeked.prepareSourceReplacement).mock.calls[0];
+  expect(positionMs).toBeGreaterThanOrEqual(77_000);
+  expect(positionMs).toBeLessThan(77_500);
 });
 
 it("seeks a late scheduled start to the live target without playing when unarmed", async () => {
@@ -603,6 +785,70 @@ it("acknowledges source replacement before quality navigation and preserves room
   expect(
     vi.mocked(room.prepareSourceReplacement).mock.invocationCallOrder[0]
   ).toBeLessThan(navigate.mock.invocationCallOrder[0]);
+});
+
+it("restores readiness when the room does not acknowledge a source replacement", async () => {
+  const room = controller(true, {
+    ...baseSnapshot,
+    phase: "paused",
+    anchor: { positionMs: 0, effectiveAtMs: 0, rate: 1 },
+  });
+  vi.mocked(room.prepareSourceReplacement).mockResolvedValue(false);
+  renderPlayer(room, {
+    quality: { id: "original", label: "Original", isOriginal: true },
+    availableQualities: [
+      { id: "original", label: "Original", isOriginal: true },
+      { id: "720p-4", label: "720p", isOriginal: false },
+    ],
+  });
+  const video = screen.getByLabelText("Video player: Example") as HTMLVideoElement;
+  Object.defineProperty(video, "readyState", { configurable: true, value: HTMLMediaElement.HAVE_FUTURE_DATA });
+  fireEvent.canPlay(video);
+  await waitFor(() =>
+    expect(room.reportPresence).toHaveBeenLastCalledWith(expect.objectContaining({ ready: true }))
+  );
+  vi.mocked(room.reportPresence).mockClear();
+
+  fireEvent.click(screen.getByLabelText("Settings"));
+  fireEvent.click(screen.getByText("720p"));
+  await waitFor(() => expect(room.prepareSourceReplacement).toHaveBeenCalledOnce());
+  await act(async () => Promise.resolve());
+
+  expect(navigate).not.toHaveBeenCalled();
+  expect(room.observePresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, replacingSource: false })
+  );
+  expect(room.reportPresence).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ready: true, replacingSource: false })
+  );
+});
+
+it("drops a pending coalesced seek when the room media generation changes", () => {
+  vi.useFakeTimers();
+  const room = controller(true);
+  const view = renderPlayer(room);
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+
+  const nextGeneration = controller(true, {
+    ...baseSnapshot,
+    mediaGeneration: baseSnapshot.mediaGeneration + 1,
+  });
+  view.rerender(
+    <VideoPlayer
+      src={`/api/plex/stream/42?session=${session}`}
+      title="Example"
+      ratingKey="42"
+      durationMs={100_000}
+      room={nextGeneration}
+    />
+  );
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+
+  expect(room.sendIntent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
+  expect(nextGeneration.sendIntent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
 });
 
 it("disables automatic intro and next actions but lets the host share Skip Intro", async () => {

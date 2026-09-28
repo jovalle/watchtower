@@ -51,12 +51,85 @@ it("distinguishes loading, ready, buffering and reconnecting members", () => {
       onInvitation={() => {}}
     />
   );
+  const toggle = screen.getByRole("button", { name: "Watch Together" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+  expect(screen.getByText("Room is playing.")).toBeInTheDocument();
+  fireEvent.click(toggle);
   expect(screen.getByText("Loading")).toBeInTheDocument();
   expect(screen.getByText("Ready")).toBeInTheDocument();
   expect(screen.getByText("Buffering - blocking")).toBeInTheDocument();
   expect(screen.getByText("Reconnecting")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Room details"));
   expect(screen.getByText(snapshot.roomId.slice(0, 8))).toBeInTheDocument();
+});
+
+it("collapses while playing, keeps the countdown visible, and reopens when paused", () => {
+  const panel = (roomSnapshot: RoomSnapshot) => {
+    const controller: WatchRoomController = {
+      roomId: roomSnapshot.roomId,
+      status: "connected",
+      snapshot: roomSnapshot,
+      participantId: roomSnapshot.participants[0].participantId,
+      isHost: true,
+      clockOffsetMs: 0,
+      clockRttMs: 40,
+      clockUncertaintyMs: 20,
+      readyRequest: 0,
+      playbackArmed: true,
+      message: null,
+      sendIntent: vi.fn().mockResolvedValue(true),
+      reportPresence: vi.fn().mockResolvedValue(true),
+      observePresence: vi.fn(),
+      prepareSourceReplacement: vi.fn().mockResolvedValue(true),
+      setPlaybackArmed: vi.fn(),
+      explainHostOnly: vi.fn(),
+    };
+    return (
+      <RoomPanel
+        controller={controller}
+        title="Example"
+        invitation={null}
+        pending={false}
+        message={null}
+        reconnects={0}
+        diagnostics={{ driftMs: 0, hardSeeks: 0, rateCorrections: 0 }}
+        lastErrorCode={null}
+        onReady={() => {}}
+        onLeave={() => {}}
+        onContinueSolo={() => {}}
+        onInvitation={() => {}}
+      />
+    );
+  };
+  const playing: RoomSnapshot = {
+    ...snapshot,
+    nextCountdown: { deadlineMs: performance.now() + 10_000 },
+  };
+  const { rerender } = render(panel(playing));
+
+  const toggle = screen.getByRole("button", { name: "Watch Together" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("list", { name: "Room members" })).not.toBeInTheDocument();
+  expect(screen.getByText("Next episode in")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+  // A late joiner must reach its ready gesture without expanding the panel.
+  rerender(
+    panel({
+      ...playing,
+      participants: playing.participants.map((participant, index) =>
+        index === 0 ? { ...participant, ready: false } : participant
+      ),
+    })
+  );
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("button", { name: "I'm ready" })).toBeInTheDocument();
+
+  rerender(panel({ ...playing, phase: "paused", nextCountdown: null }));
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("list", { name: "Room members" })).toBeInTheDocument();
+  expect(screen.getByText("Room is paused.")).toBeInTheDocument();
 });
 
 it("focuses a terminal message and exposes keyboard-reachable exit actions", () => {
@@ -79,4 +152,14 @@ it("focuses a terminal message and exposes keyboard-reachable exit actions", () 
   fireEvent.click(backButton);
   expect(onContinueSolo).toHaveBeenCalledOnce();
   expect(onBack).toHaveBeenCalledOnce();
+
+  // Modal: Tab wraps inside the overlay instead of reaching covered player controls.
+  const dialog = screen.getByRole("alertdialog");
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  backButton.focus();
+  fireEvent.keyDown(backButton, { key: "Tab" });
+  expect(continueButton).toHaveFocus();
+  screen.getByRole("heading", { name: "This room has ended." }).focus();
+  fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+  expect(backButton).toHaveFocus();
 });

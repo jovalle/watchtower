@@ -22,15 +22,29 @@ export async function run({ server, startServer, waitForServer }) {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   out.browser = `Google Chrome ${browser.version()} headless via playwright-core (macOS host)`;
   const commands = [];
+  const presence = [];
+  const consoleLines = [];
+  const viewers = [];
 
   async function viewer(name) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     await context.addCookies([{ name: "__plex_session", value: encodeURIComponent(cookies[name]), domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Lax" }]);
     const page = await context.newPage();
+    viewers.push({ name, page });
+    page.on("console", (message) => {
+      if (/\[VideoPlayer\]|Room|room/.test(message.text())) consoleLines.push(`${new Date().toISOString().slice(11, 23)} ${name}: ${message.text().slice(0, 200)}`);
+      if (consoleLines.length > 600) consoleLines.shift();
+    });
     page.on("response", async (response) => {
+      if (response.url().includes("/presence")) {
+        const report = response.request().postDataJSON() ?? {};
+        const body = await response.json().catch(() => null);
+        presence.push({ viewer: name, at: new Date().toISOString().slice(11, 23), seq: report.presenceSequence, generation: `${report.mediaGeneration}:${report.preparationGeneration}`, ready: report.ready, buffering: report.buffering, replacing: report.replacingSource, error: report.error, status: response.status(), ignored: body?.ack?.ignored ?? body?.error?.code });
+        return;
+      }
       if (!response.url().includes("/commands")) return;
       const body = await response.json().catch(() => null);
-      commands.push({ viewer: name, type: response.request().postDataJSON()?.type, status: response.status(), result: body?.error?.code ?? body?.snapshot?.phase });
+      commands.push({ viewer: name, at: new Date().toISOString().slice(11, 23), type: response.request().postDataJSON()?.type, status: response.status(), result: body?.error?.code ?? body?.snapshot?.phase });
     });
     return { name, context, page };
   }
@@ -55,7 +69,12 @@ export async function run({ server, startServer, waitForServer }) {
     }
     return values;
   }
-  const panel = (page) => page.evaluate(() => document.querySelector("aside")?.innerText ?? "").catch(() => "");
+  // The panel collapses while playing; expand it before reading the member list.
+  const panel = (page) => page.evaluate(() => {
+    const aside = document.querySelector("aside");
+    aside?.querySelector(':scope > button[aria-expanded="false"]')?.click();
+    return aside?.innerText ?? "";
+  }).catch(() => "");
   const body = (page) => page.evaluate(() => document.body.innerText).catch(() => "");
   async function until(check, timeoutMs, label) {
     const start = Date.now();
@@ -70,7 +89,10 @@ export async function run({ server, startServer, waitForServer }) {
     try {
       await fn();
     } catch (error) {
-      record(id, false, { error: String(error).slice(0, 300) });
+      const screens = Object.fromEntries(await Promise.all(viewers.map(async ({ name, page }) => [name, await page.evaluate(() =>
+        [document.querySelector("aside")?.innerText, document.querySelector('[role="alertdialog"]')?.innerText].filter(Boolean).join(" | ").replace(/\s+/g, " ").slice(0, 400)
+      ).catch(() => "closed")])));
+      record(id, false, { error: String(error).slice(0, 300), screens });
     }
   }
   // Keyboard seeks use the progress slider: arrow keys elsewhere drive focus navigation (useRemoteNavigation).
@@ -182,8 +204,8 @@ export async function run({ server, startServer, waitForServer }) {
 
     await step("WT-09 blocking member buffering pauses the room once; host resumes", async () => {
       await throttle("alice-token", 6000);
-      const paused = await until(async () => { const y = await media(B.page); return y.paused && /buffering/i.test(await panel(B.page)) && y; }, 120000, "room paused for buffering");
-      const reason = await A.page.evaluate(() => document.querySelector("aside dl")?.innerText ?? "");
+      const paused = await until(async () => { const y = await media(B.page); return y.paused && /buffering/i.test(await panel(B.page)) && y; }, 45000, "room paused for buffering");
+      const reason = await panel(B.page);
       await throttle("alice-token", 0);
       await until(async () => /Alice \(Host\)\s*Ready/.test(await panel(A.page)), 60000, "alice ready again");
       await sleep(5000);
@@ -191,7 +213,7 @@ export async function run({ server, startServer, waitForServer }) {
       const pauses = commands.filter((command) => command.type === "pause").length;
       await A.page.keyboard.press("Space");
       await until(() => bothPlaying(A, B), 15000, "resumed by host");
-      record("WT-09 blocking member buffering pauses the room once; host resumes", stillPaused, { msToGroupPause: paused.ms, reasonShown: /buffering/.test(reason), noAutoResumeAfterReady: stillPaused, hostPauseCommandsDuringBuffering: pauses });
+      record("WT-09 blocking member buffering pauses the room once; host resumes", stillPaused, { msToGroupPause: paused.ms, memberSeesBlockingBuffering: /Buffering - blocking/.test(reason), noAutoResumeAfterReady: stillPaused, hostPauseCommandsDuringBuffering: pauses });
     });
 
     await step("WT-10 member offline: reconnecting, local pause, recovery", async () => {
@@ -207,6 +229,12 @@ export async function run({ server, startServer, waitForServer }) {
 
     const D = await viewer("dave");
     await step("WT-08 late join during playback does not pause others", async () => {
+      // Rewind well before the credits so the late join happens mid-title.
+      const at = (await media(A.page)).t;
+      if (at > 40) {
+        await sliderKeys(A.page, "ArrowLeft", Math.ceil((at - 20) / 10));
+        await until(() => bothPlaying(A, B), 20000, "playing after rewind");
+      }
       await sleep(2000);
       const count = commands.length;
       await D.page.goto(invite);
@@ -256,11 +284,15 @@ export async function run({ server, startServer, waitForServer }) {
       const byUser = Object.groupBy(timelines, (entry) => entry.user);
       const shared = (byUser.Alice ?? []).filter((entry) => (byUser.Bob ?? []).some((other) => other.clientId === entry.clientId)).length;
       const scrobbles = upstream.filter((entry) => entry.kind === "scrobble").map((entry) => entry.user);
-      const ownerTokenUse = upstream.filter((entry) => entry.kind === "rejected-token").length;
+      // app/lib/startup.server.ts validates the configured owner token once ("/" then "/library/sections");
+      // that pre-existing check is reported separately. Any other unknown-token request fails WT-16.
+      const unknownToken = upstream.filter((entry) => entry.kind === "rejected-token");
+      const startupChecks = unknownToken.filter((entry) => entry.path === "/" || entry.path === "/library/sections").length;
+      const ownerTokenUse = unknownToken.length - startupChecks;
       record("WT-16 progress isolation in upstream timeline log", (byUser.Alice?.length ?? 0) > 0 && (byUser.Bob?.length ?? 0) > 0 && shared === 0 && ownerTokenUse === 0, {
         timelineReports: Object.fromEntries(Object.entries(byUser).map(([user, entries]) => [user, entries.length])),
         clientIdsPerUser: Object.fromEntries(Object.entries(byUser).map(([user, entries]) => [user, new Set(entries.map((entry) => entry.clientId)).size])),
-        clientIdsSharedAcrossUsers: shared, scrobbles, upstreamRequestsWithUnknownToken: ownerTokenUse,
+        clientIdsSharedAcrossUsers: shared, scrobbles, upstreamRequestsWithUnknownToken: ownerTokenUse, startupOwnerTokenChecks: startupChecks,
       });
     });
 
@@ -281,12 +313,14 @@ export async function run({ server, startServer, waitForServer }) {
       await waitForServer();
       await until(async () => /server restarted|has ended|no longer available|expired/i.test(await body(B.page)), 45000, "bob sees ended");
       const bobMedia = await media(B.page);
-      const message = await B.page.evaluate(() => document.querySelector('[role="alert"]')?.textContent ?? "");
-      const actions = await B.page.evaluate(() => [...document.querySelectorAll('[role="alert"] button')].map((button) => button.textContent));
+      const message = await B.page.evaluate(() => document.querySelector('[role="alertdialog"] h2')?.textContent ?? "");
+      const actions = await B.page.evaluate(() => [...document.querySelectorAll('[role="alertdialog"] button')].map((button) => button.textContent));
       record("WT-18 coordinator restart ends the room visibly", bobMedia?.paused !== false, { msFromRestart: Date.now() - restartedAt, message, actions, playerPaused: bobMedia?.paused });
     });
   } finally {
     out.commands = commands;
+    out.presence = presence;
+    out.console = consoleLines;
     writeFileSync(`${ART}browser-e2e.json`, JSON.stringify(out, null, 2));
     await browser.close();
   }
