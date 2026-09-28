@@ -987,6 +987,21 @@ export function VideoPlayer({
     ) {
       roomSourceAlignedRef.current = true;
     }
+    // play() on ended media restarts it from 0; while the room runs out the title, stay at the end.
+    if (
+      video.ended &&
+      decision.desiredPositionMs >=
+        (duration || video.duration) * 1000 - ROOM_POLICY.hardSeekMs
+    ) {
+      evaluateRoomReadinessRef.current();
+      return;
+    }
+    // Only a refused gesture blocks autoplay; play() interrupted by pause, seek or load is not.
+    const onPlayRejected = (playError: unknown) => {
+      if (playError instanceof DOMException && playError.name === "NotAllowedError") {
+        reportAutoplayBlockedRef.current();
+      }
+    };
     onRoomDiagnostics?.({
       driftMs: decision.driftMs,
       correction:
@@ -1022,7 +1037,7 @@ export function VideoPlayer({
           return;
         }
         expectEffect("play");
-        void video.play().catch(() => reportAutoplayBlockedRef.current());
+        void video.play().catch(onPlayRejected);
       }, delay);
     } else if (action.kind === "play") {
       if (!room.playbackArmed) {
@@ -1031,7 +1046,7 @@ export function VideoPlayer({
         return;
       }
       expectEffect("play");
-      void video.play().catch(() => reportAutoplayBlockedRef.current());
+      void video.play().catch(onPlayRejected);
     } else if (action.kind === "seek") {
       seekRoomPlayback(action.positionMs);
     } else if (action.kind === "rate") {
@@ -1039,6 +1054,7 @@ export function VideoPlayer({
     }
     evaluateRoomReadinessRef.current();
   }, [
+    duration,
     error,
     expectEffect,
     isLoading,
