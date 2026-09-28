@@ -645,6 +645,8 @@ export class PlexClient {
       quality?: QualityProfile;
       forceTranscode?: boolean;
       subtitles?: "burn" | "none";
+      /** Device/player scope for independent progress ordering. */
+      deviceScope?: string;
     } = {}
   ): PlexPlaybackInfo {
     const {
@@ -652,6 +654,7 @@ export class PlexClient {
       quality,
       forceTranscode = false,
       subtitles = "none",
+      deviceScope = "",
     } = options;
     const selectedQuality = quality || QUALITY_PROFILES[0];
     const useDirectPlay =
@@ -659,7 +662,7 @@ export class PlexClient {
 
     // Plex must not reuse a stale session when retrying, seeking, or opening another player.
     const session = randomUUID();
-    registerPlaybackSession(session, ratingKey, this.serverUrl, this.token, `${this.clientId}-${session}`);
+    registerPlaybackSession(session, ratingKey, this.serverUrl, this.token, `${this.clientId}-${session}`, deviceScope);
     const streamUrl = buildPlexTranscodeUrl({
       serverUrl: this.serverUrl,
       token: this.token,

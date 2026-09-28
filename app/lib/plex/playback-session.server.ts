@@ -9,7 +9,8 @@ export interface PlaybackSession {
   generation: number;
   sequence: number;
   queue: { pending: Promise<void> };
-  generationScope?: string;
+  /** Device/player context; replacement ordering applies only within one device. */
+  scope: string;
   native?: {
     deviceSessionId: string;
     identityVersion: number;
@@ -27,16 +28,19 @@ const latest = new LRUCache<string, string>({ max: 5000, ttl: 6 * 60 * 60 * 1000
 const active = new LRUCache<string, number>({ max: 5000, ttl: 6 * 60 * 60 * 1000, updateAgeOnGet: true });
 let generation = 0;
 const ownerKey = (server: string, token: string) => createHash("sha256").update(`${server.replace(/\/$/, "")}:${token}`).digest("hex");
+const generationKey = (owner: string, scope: string, ratingKey: string) => `${owner}:${scope}:${ratingKey}`;
 
-export function registerPlaybackSession(session: string, ratingKey: string, server: string, token: string, clientId: string) {
+// `scope` is the device/player context; replacements order only within one device.
+export function registerPlaybackSession(session: string, ratingKey: string, server: string, token: string, clientId: string, scope = "") {
   const owner = ownerKey(server, token);
-  const previous = sessions.get(latest.get(`${owner}:${ratingKey}`) ?? "");
-  sessions.set(session, { owner, ratingKey, clientId, generation: ++generation, sequence: -1, queue: previous?.queue ?? { pending: Promise.resolve() }, generationScope: `${owner}:${ratingKey}` });
-  latest.set(`${owner}:${ratingKey}`, session);
+  const key = generationKey(owner, scope, ratingKey);
+  const previous = sessions.get(latest.get(key) ?? "");
+  sessions.set(session, { owner, ratingKey, clientId, scope, generation: ++generation, sequence: -1, queue: previous?.queue ?? { pending: Promise.resolve() } });
+  latest.set(key, session);
 }
 
 export function activatePlaybackSession(entry: PlaybackSession) {
-  const scope = entry.generationScope ?? `${entry.owner}:${entry.ratingKey}`;
+  const scope = generationKey(entry.owner, entry.scope, entry.ratingKey);
   if ((active.get(scope) ?? -1) > entry.generation) return false;
   active.set(scope, entry.generation);
   return true;
@@ -62,8 +66,8 @@ export function registerNativePlaybackSession(
   },
 ): PlaybackSession {
   const owner = ownerKey(principal.serverUrl, principal.serverToken);
-  const scope = `${owner}:${principal.deviceSessionId}:${input.ratingKey}`;
-  const previous = sessions.get(latest.get(scope) ?? "");
+  const key = generationKey(owner, principal.deviceSessionId, input.ratingKey);
+  const previous = sessions.get(latest.get(key) ?? "");
   const entry: PlaybackSession = {
     owner,
     ratingKey: input.ratingKey,
@@ -71,7 +75,7 @@ export function registerNativePlaybackSession(
     generation: ++generation,
     sequence: -1,
     queue: previous?.queue ?? { pending: Promise.resolve() },
-    generationScope: scope,
+    scope: principal.deviceSessionId,
     native: {
       deviceSessionId: principal.deviceSessionId,
       identityVersion: principal.identityVersion,
@@ -85,7 +89,7 @@ export function registerNativePlaybackSession(
     },
   };
   sessions.set(session, entry);
-  latest.set(scope, session);
+  latest.set(key, session);
   return entry;
 }
 
