@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 interface TrailerModalProps {
@@ -12,19 +12,18 @@ export function TrailerModal({
   title,
   onClose,
 }: TrailerModalProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialogRef}
+      onCancel={onClose}
+      className="fixed inset-0 z-[60] m-0 hidden h-dvh max-h-none w-screen max-w-none items-center justify-center border-0 bg-black/90 p-4 open:flex"
       aria-label={`${title} trailer`}
     >
       <button
@@ -52,6 +51,6 @@ export function TrailerModal({
           />
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
