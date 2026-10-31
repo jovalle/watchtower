@@ -5,6 +5,7 @@
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import * as fs from "fs/promises";
+import { constants } from "fs";
 import * as path from "path";
 import { env } from "~/lib/env.server";
 
@@ -25,18 +26,16 @@ export async function loader({ params }: LoaderFunctionArgs) {
     return new Response("Not found", { status: 404 });
   }
 
-  // Prevent directory traversal attacks
-  const normalizedPath = path.normalize(requestedPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  const fullPath = path.resolve(env.DATA_PATH, normalizedPath);
-  const dataPathResolved = path.resolve(env.DATA_PATH);
-
-  // Ensure the path is within DATA_PATH
-  if (!fullPath.startsWith(dataPathResolved)) {
-    return new Response("Forbidden", { status: 403 });
-  }
+  const match = /^tmdb\/logos\/([^/\\]+\.(?:png|jpe?g|webp|svg|gif))$/i.exec(requestedPath);
+  if (!match) return new Response("Not found", { status: 404 });
+  const fullPath = path.join(env.DATA_PATH, "tmdb", "logos", match[1]);
 
   try {
-    const data = await fs.readFile(fullPath);
+    const root = await fs.realpath(env.DATA_PATH);
+    const directory = await fs.realpath(path.dirname(fullPath));
+    if (directory !== path.join(root, "tmdb", "logos")) return new Response("Not found", { status: 404 });
+    const file = await fs.open(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const data = await file.readFile().finally(() => file.close());
     const ext = path.extname(fullPath).toLowerCase();
     const contentType = CONTENT_TYPES[ext] || "application/octet-stream";
 
