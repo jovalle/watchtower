@@ -13,9 +13,9 @@ const FAQ_ITEMS = [
       "Watchtower is a private streaming interface for our household media library. It provides a modern, Netflix-style experience for browsing and enjoying movies and TV shows.",
   },
   {
-    question: "What is wrong with Netflix?",
+    question: "Who can use Watchtower?",
     answer:
-      "What's great about Netflix today? Prices keep going up, content quality keeps going down. With Watchtower, you get a curated collection without the ads or subscriptions.",
+      "Watchtower is for friends and family with access to this Plex library. Ask the server owner if you need an invitation.",
   },
   {
     question: "How do I sign in?",
@@ -25,12 +25,12 @@ const FAQ_ITEMS = [
   {
     question: "What devices can I watch on?",
     answer:
-      "Stream on any device with a web browser — smart TVs, laptops, tablets, and phones. For the best TV experience, use the Plex app on Roku, Apple TV, Android TV, or Fire TV.",
+      "Watch in a compatible browser on a laptop, phone, or tablet. Playback support varies by device and media format. For TV viewing, the Plex app is recommended.",
   },
   {
     question: "How do I request something to watch?",
     answer:
-      "Have a movie or show you'd like to see? Just let us know and we'll look into adding it to the collection.",
+      "Search for a movie or show and open its details to request it when requests are enabled. You can check your requests from your profile menu.",
   },
 ];
 
@@ -41,6 +41,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
     <div className="mb-2">
       <button
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
         className="flex w-full items-center justify-between bg-[#2d2d2d] px-6 py-5 text-left text-lg font-normal text-foreground-primary transition-colors hover:bg-[#3d3d3d] md:text-xl"
       >
         {question}
@@ -51,6 +52,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
         )}
       </button>
       <div
+        hidden={!isOpen}
         className={`overflow-hidden bg-[#2d2d2d] transition-all duration-300 ${
           isOpen ? "max-h-96" : "max-h-0"
         }`}
@@ -147,11 +149,12 @@ export default function Index() {
                 ) : (
                   <>
                     <Play className="h-5 w-5 fill-current" />
-                    Start Watching
+                    Sign in with Plex
                   </>
                 )}
               </button>
             </Form>
+            <p className="text-sm text-foreground-muted">A Plex account with access to this library is required.</p>
           </div>
         </main>
 
@@ -202,8 +205,8 @@ export default function Index() {
                 Watch Anywhere
               </h3>
               <p className="text-foreground-secondary">
-                Stream on your TV, laptop, phone, or tablet — wherever you feel
-                like watching.
+                Watch on a compatible laptop, phone, or tablet. For TV viewing,
+                use the Plex app.
               </p>
             </div>
 
