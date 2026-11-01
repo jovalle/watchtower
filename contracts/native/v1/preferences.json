@@ -1,0 +1,9 @@
+{
+  "autoSkipIntro": false,
+  "autoPlayNextEpisode": true,
+  "showContinueWatching": true,
+  "showRecentlyAdded": true,
+  "showTrending": true,
+  "showCollections": true,
+  "discoveryDisabled": false
+}

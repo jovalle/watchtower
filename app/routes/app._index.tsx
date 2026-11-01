@@ -23,7 +23,11 @@ import {
   DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
 import { createSeerrClient } from "~/lib/integrations/seerr.server";
-import { personalRecommendations } from "~/lib/home.server";
+import {
+  personalRecommendations,
+  resolveTrendingLibraryMatches,
+  splitContinueWatching,
+} from "~/lib/home.server";
 
 
 export const meta: MetaFunction = () => {
@@ -177,10 +181,12 @@ async function getTrendingRow(
   const trending = tmdb ? await tmdb.getTrending() : null;
   if (!trending?.success) return [];
 
-  const items = await Promise.all(
-    trending.data.slice(0, 20).map(async (rec): Promise<RowItem> => {
-      const matches = await client.findByTmdbId(rec.type, rec.id);
-      const match = matches.success ? matches.data[0] : undefined;
+  const resolved = await resolveTrendingLibraryMatches(
+    client,
+    trending.data.slice(0, 20),
+  );
+  const items = resolved.map(
+    ({ recommendation: rec, match }): RowItem => {
       if (match) return libraryRowItem(match);
       return {
         key: `tmdb-${rec.type}-${rec.id}`,
@@ -190,7 +196,7 @@ async function getTrendingRow(
         href: `/app/media/${rec.type}/tmdb-${rec.id}`,
         tmdb: { id: rec.id, type: rec.type, posterUrl: rec.posterUrl },
       };
-    })
+    },
   );
   if (items.length > 0) await setCache(cacheKey, items);
   return items;
@@ -235,8 +241,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       createSeerrClient(),
       personalRecommendations(extrasClient).catch(() => null),
     ]);
-    const nextEpisodes = prefs.showContinueWatching ? data.continueWatching.filter((item) => item.type === "episode" && !item.viewOffset && !item.viewCount) : [];
-    const continueItems = prefs.showContinueWatching ? data.continueWatching.filter((item) => !!item.viewOffset) : [];
+    const split = splitContinueWatching(
+      prefs.showContinueWatching ? data.continueWatching : [],
+    );
+    const nextEpisodes = split.nextEpisodes;
+    const continueItems = split.continuing;
     const used = new Set(continueItems.map((item) => item.ratingKey));
     const extraRows: ExtraRow[] = [
       ...(nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : []),

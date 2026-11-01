@@ -1,0 +1,9 @@
+{
+  "apiVersion": 1,
+  "product": "Watchtower",
+  "serverVersion": "1.8.0",
+  "configured": true,
+  "features": { "pairing": true, "profiles": false, "rooms": false },
+  "compatibility": { "minClientVersionCode": null, "upgradeMessage": null },
+  "pairing": { "verificationPath": "/link" }
+}

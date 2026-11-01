@@ -1,0 +1,139 @@
+package io.github.jovalle.watchtower.tv.playback
+
+import androidx.media3.common.Player
+import io.github.jovalle.watchtower.tv.api.Marker
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class PlaybackPoliciesTest {
+    @Test fun `room route without active membership fails closed`() {
+        assertEquals(PlaybackRouteMode.SOLO, playbackRouteMode(roomId = null, hasActiveRoomSession = false))
+        assertEquals(PlaybackRouteMode.ROOM, playbackRouteMode(roomId = "room", hasActiveRoomSession = true))
+        assertEquals(PlaybackRouteMode.TERMINAL_ROOM, playbackRouteMode(roomId = "room", hasActiveRoomSession = false))
+    }
+
+    @Test fun `lifecycle suppression and transport loss block reconciliation and readiness`() {
+        val lifecycle = localInterruptionDecision(
+            lifecycleStopped = true,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+            playWhenReadyChangeReason = null,
+            transportInterruptionLatched = false,
+        )
+        val suppression = localInterruptionDecision(
+            lifecycleStopped = false,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS,
+            playWhenReadyChangeReason = null,
+            transportInterruptionLatched = false,
+        )
+        val noisy = localInterruptionDecision(
+            lifecycleStopped = false,
+            playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+            playWhenReadyChangeReason = Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY,
+            transportInterruptionLatched = false,
+        )
+
+        listOf(lifecycle, suppression, noisy).forEach { decision ->
+            assertEquals(true, decision.interrupted)
+            assertEquals(false, decision.reconcile)
+            assertEquals(false, decision.ready)
+        }
+    }
+
+    @Test fun `cleared interruption permits reconciliation and readiness`() {
+        assertEquals(
+            LocalInterruptionDecision(interrupted = false, reconcile = true, ready = true),
+            localInterruptionDecision(
+                lifecycleStopped = false,
+                playbackSuppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+                playWhenReadyChangeReason = null,
+                transportInterruptionLatched = false,
+            ),
+        )
+    }
+
+    @Test fun `solo authority allows transport intents`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        val gate = PlaybackIntentGate(SoloAuthority, executed::add)
+
+        assertEquals(AuthorityDecision.Allow, gate.submitUserIntent(PlaybackIntent.SeekTo(42)))
+        assertEquals(listOf(PlaybackIntent.SeekTo(42)), executed)
+    }
+
+    @Test fun `denied authority blocks keys and media session commands`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        val gate = PlaybackIntentGate(TransportAuthority { AuthorityDecision.Deny("host only") }, executed::add)
+
+        assertEquals(AuthorityDecision.Deny("host only"), gate.submitUserIntent(PlaybackIntent.Play))
+        assertEquals(AuthorityDecision.Deny("host only"), gate.submitUserIntent(PlaybackIntent.SeekBy(10_000)))
+        assertEquals(emptyList<PlaybackIntent>(), executed)
+    }
+
+    @Test fun `state application does not emit an intent`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        var applied = false
+        val gate = PlaybackIntentGate(SoloAuthority, executed::add)
+
+        gate.applyState { applied = true }
+
+        assertEquals(true, applied)
+        assertEquals(emptyList<PlaybackIntent>(), executed)
+    }
+
+    @Test fun `automatic skip and next are authorized separately from user intents`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        val roomLike = object : TransportAuthority {
+            override fun authorize(intent: PlaybackIntent) = AuthorityDecision.Allow
+            override fun authorizeAutomatic(intent: PlaybackIntent) = AuthorityDecision.Deny("room controls advance")
+        }
+        val gate = PlaybackIntentGate(roomLike, executed::add)
+
+        assertEquals(AuthorityDecision.Deny("room controls advance"), gate.submitAutomaticIntent(PlaybackIntent.Next))
+        assertEquals(AuthorityDecision.Deny("room controls advance"), gate.submitAutomaticIntent(PlaybackIntent.SeekTo(90_000)))
+        assertEquals(AuthorityDecision.Allow, gate.submitUserIntent(PlaybackIntent.Next))
+        assertEquals(listOf<PlaybackIntent>(PlaybackIntent.Next), executed)
+    }
+
+    @Test fun `solo authority allows automatic intents by default`() {
+        val executed = mutableListOf<PlaybackIntent>()
+        PlaybackIntentGate(SoloAuthority, executed::add).submitAutomaticIntent(PlaybackIntent.SeekTo(90_000))
+        assertEquals(listOf<PlaybackIntent>(PlaybackIntent.SeekTo(90_000)), executed)
+    }
+
+    @Test fun `repeat acceleration commits one final seek`() {
+        val scrub = ScrubController()
+        scrub.begin(60_000)
+        repeat(5) { scrub.repeat(1, 300_000) }
+
+        assertEquals(130_000L, scrub.preview())
+        assertEquals(130_000L, scrub.commit())
+        assertNull(scrub.commit())
+    }
+
+    @Test fun `intro marker auto skips only once`() {
+        val policy = BingePolicy()
+        val markers = listOf(Marker("intro", 30_000, 90_000, false))
+
+        assertEquals(90_000L, policy.skipTarget(45_000, markers, true))
+        assertNull(policy.skipTarget(50_000, markers, true))
+        assertNull(policy.skipTarget(45_000, markers, false))
+    }
+
+    @Test fun `next countdown uses credits or final thirty seconds`() {
+        val policy = BingePolicy(10_000)
+
+        assertEquals(110_000L, policy.nextCountdown(91_000, 120_000, emptyList(), true, true, 100_000)?.deadlineMs)
+        assertNull(policy.nextCountdown(89_000, 120_000, emptyList(), true, true, 100_000))
+        assertEquals(110_000L, policy.nextCountdown(81_000, 120_000, listOf(Marker("credits", 80_000, 120_000, true)), true, true, 100_000)?.deadlineMs)
+    }
+
+    @Test fun `fallback chain is bounded`() {
+        val direct = RecoveryPolicy()
+        assertEquals(RecoveryAction.DECODER_FALLBACK, direct.onFailure("direct_play"))
+        assertEquals(RecoveryAction.SHOW_ERROR, direct.onFailure("direct_play"))
+
+        val hls = RecoveryPolicy()
+        assertEquals(RecoveryAction.RETRY_HLS, hls.onFailure("transcode"))
+        assertEquals(RecoveryAction.SHOW_ERROR, hls.onFailure("transcode"))
+    }
+}
