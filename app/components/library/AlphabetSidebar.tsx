@@ -54,6 +54,7 @@ export function AlphabetSidebar({
   const containerRef = useRef<HTMLDivElement>(null);
   const lettersRef = useRef<HTMLDivElement>(null);
   const lettersTopRef = useRef<number>(0);
+  const pressedButton = useRef<HTMLButtonElement | null>(null);
 
   const handleReturnToTop = useCallback(() => {
     if (onReturnToTop) {
@@ -129,6 +130,7 @@ export function AlphabetSidebar({
   // Handle mouse down - begin drag
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    pressedButton.current = (e.target as Element).closest("button");
     setIsDragging(true);
     updatePosition(e.clientY, true);
   }, [updatePosition]);
@@ -195,10 +197,12 @@ export function AlphabetSidebar({
       updatePosition(e.clientY);
     };
 
-    const handleMouseUp = () => {
-      if (hoveredLetter && availableLetters.includes(hoveredLetter)) {
+    const handleMouseUp = (event: MouseEvent) => {
+      const releasedButton = event.target instanceof Element ? event.target.closest("button") : null;
+      if ((!pressedButton.current || pressedButton.current !== releasedButton) && hoveredLetter && availableLetters.includes(hoveredLetter)) {
         onLetterClick?.(hoveredLetter);
       }
+      pressedButton.current = null;
       resetState();
     };
 
