@@ -8,6 +8,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
+import { invalidateLibraryIndex } from "~/lib/library-index.server";
 import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 
 interface ScrobbleRequest {
@@ -58,6 +59,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
 
   // Invalidate user's home cache so Continue Watching updates immediately
   await invalidateCache(getUserCacheKey("home", token));
+  invalidateLibraryIndex(token);
 
   return json({ success: true });
 }
