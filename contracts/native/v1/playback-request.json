@@ -1,0 +1,31 @@
+{
+  "ratingKey": "5001",
+  "mediaId": "9001",
+  "startPositionMs": null,
+  "audioStreamId": null,
+  "subtitleStreamId": null,
+  "subtitlesOff": false,
+  "quality": "original",
+  "forceTranscode": false,
+  "capabilities": {
+    "schemaVersion": 1,
+    "device": { "manufacturer": "Google", "model": "Fixture TV", "sdkInt": 34 },
+    "display": { "widthPx": 3840, "heightPx": 2160, "refreshRatesHz": [23.976, 50, 59.94, 60], "hdrTypes": ["hdr10", "hlg"] },
+    "video": [
+      { "codec": "h264", "profiles": ["baseline", "main", "high"], "maxWidth": 3840, "maxHeight": 2160, "maxFrameRate": 60, "maxBitrateKbps": null, "tenBit": false, "hdrTypes": [] },
+      { "codec": "hevc", "profiles": ["main", "main 10"], "maxWidth": 3840, "maxHeight": 2160, "maxFrameRate": 60, "maxBitrateKbps": null, "tenBit": true, "hdrTypes": ["hdr10", "hlg"] }
+    ],
+    "audio": [
+      { "codec": "aac", "maxChannels": 8, "passthrough": false },
+      { "codec": "ac3", "maxChannels": 6, "passthrough": true },
+      { "codec": "eac3", "maxChannels": 8, "passthrough": true },
+      { "codec": "flac", "maxChannels": 8, "passthrough": false }
+    ],
+    "containers": ["mp4", "mkv", "mov", "webm", "mpegts"],
+    "subtitles": ["srt", "vtt", "ass", "ssa", "pgs", "mov_text"],
+    "audioOutput": { "type": "hdmi", "maxChannels": 8 },
+    "maxVideoBitrateKbps": null
+  },
+  "replacesPlaybackId": null,
+  "reason": "start"
+}

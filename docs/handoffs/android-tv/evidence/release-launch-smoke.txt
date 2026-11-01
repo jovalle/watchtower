@@ -1,0 +1,3 @@
+emulator-5554 sdk=36 page=4096 model=sdk_google_atv64_amati_arm64 install=Success Status: ok pid=18665 app_crashes=0
+emulator-5556 sdk=31 page=4096 model=sdk_google_atv64_arm64 install=Success Status: ok pid=14689 app_crashes=0
+emulator-5558 sdk=36 page=16384 model=sdk_google_atv64_amati_arm64_16k install=Success Status: ok pid=4881 app_crashes=0

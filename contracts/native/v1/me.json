@@ -1,0 +1,9 @@
+{
+  "deviceSessionId": "ds_4f9c2b7e1a0d4c6e",
+  "identityVersion": 1,
+  "expiresAtMs": 1793318400000,
+  "server": { "machineId": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "name": "Test Plex" },
+  "account": { "userId": "1001", "title": "Test Owner" },
+  "profile": { "userId": "1001", "title": "Test Owner", "restricted": false, "owner": true, "protected": false },
+  "features": { "profiles": false, "requests": true, "discovery": true, "rooms": false }
+}

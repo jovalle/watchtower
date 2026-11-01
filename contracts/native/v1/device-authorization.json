@@ -1,0 +1,8 @@
+{
+  "userCode": "BCDF-GH23",
+  "verificationUri": "https://watchtower.example.test/link",
+  "verificationUriComplete": "https://watchtower.example.test/link?code=BCDFGH23",
+  "pollingSecret": "wtp_TESTONLY_pollingsecret_not_a_real_value_000",
+  "expiresInMs": 600000,
+  "intervalMs": 5000
+}

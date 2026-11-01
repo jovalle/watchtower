@@ -1,4 +1,42 @@
 import type { PlexClient } from "./plex/client.server";
+import type { PlexMetadata } from "./plex/types";
+import type { TMDBRecommendation } from "./tmdb/types";
+
+export function splitContinueWatching<
+  T extends {
+    type: string;
+    viewOffset?: number | null;
+    viewCount?: number | null;
+  },
+>(items: T[]): { continuing: T[]; nextEpisodes: T[] } {
+  return {
+    continuing: items.filter((item) => Boolean(item.viewOffset)),
+    nextEpisodes: items.filter(
+      (item) =>
+        item.type === "episode" && !item.viewOffset && !item.viewCount,
+    ),
+  };
+}
+
+export async function resolveTrendingLibraryMatches(
+  client: PlexClient,
+  trending: TMDBRecommendation[],
+): Promise<
+  Array<{ recommendation: TMDBRecommendation; match: PlexMetadata | null }>
+> {
+  return Promise.all(
+    trending.map(async (recommendation) => {
+      const matches = await client.findByTmdbId(
+        recommendation.type,
+        recommendation.id,
+      );
+      return {
+        recommendation,
+        match: matches.success ? (matches.data[0] ?? null) : null,
+      };
+    }),
+  );
+}
 
 /** Plex history and similar titles are requested with this viewer's server token. */
 export async function personalRecommendations(client: PlexClient) {

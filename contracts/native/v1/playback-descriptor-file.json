@@ -1,0 +1,69 @@
+{
+  "playbackId": "3f0c4a52-9d4e-4c61-9b3e-0d2f5a6b7c81",
+  "expiresInMs": 21600000,
+  "media": { "serverMachineId": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "ratingKey": "5001", "mediaId": "9001", "partId": "9101" },
+  "item": {
+    "ratingKey": "5001",
+    "type": "movie",
+    "title": "Test Movie",
+    "year": 2021,
+    "posterUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fthumb%2F1700000000&w=400&h=600",
+    "backdropUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fart%2F1700000000&w=1280&h=720",
+    "thumbUrl": null,
+    "durationMs": 7260000,
+    "viewOffsetMs": 600000,
+    "viewCount": 0,
+    "leafCount": null,
+    "viewedLeafCount": null,
+    "contentRating": "PG-13",
+    "showTitle": null,
+    "seasonNumber": null,
+    "episodeNumber": null,
+    "parentRatingKey": null,
+    "grandparentRatingKey": null,
+    "external": null
+  },
+  "durationMs": 7260000,
+  "startPositionMs": 600000,
+  "resumeSource": "saved",
+  "delivery": {
+    "type": "file",
+    "method": "direct_play",
+    "plexDecision": null,
+    "mimeType": "video/x-matroska",
+    "parts": [
+      { "partId": "9101", "index": 0, "startMs": 0, "durationMs": 3600000, "url": "/api/v1/playback/3f0c4a52-9d4e-4c61-9b3e-0d2f5a6b7c81/file/9101" },
+      { "partId": "9102", "index": 1, "startMs": 3600000, "durationMs": 3660000, "url": "/api/v1/playback/3f0c4a52-9d4e-4c61-9b3e-0d2f5a6b7c81/file/9102" }
+    ],
+    "activePartIndex": 0,
+    "timeline": { "mapping": "absolute", "requestedOffsetMs": 600000 }
+  },
+  "source": { "videoCodec": "hevc", "width": 3840, "height": 2160, "hdr": "hdr10", "bitrateKbps": 62000, "audioCodec": "truehd", "audioChannels": 8, "container": "mkv" },
+  "quality": {
+    "requested": "original",
+    "options": [
+      { "id": "original", "label": "Original", "maxBitrateKbps": null, "resolution": null },
+      { "id": "1080p-20", "label": "1080p (20 Mbps)", "maxBitrateKbps": 20000, "resolution": "1080p" }
+    ],
+    "transcodeTarget": null
+  },
+  "tracks": {
+    "audio": [
+      { "streamId": "11", "title": "English (TrueHD 7.1)", "language": "English", "languageCode": "eng", "codec": "truehd", "channels": 8, "default": true, "selected": true, "audioDescription": false }
+    ],
+    "subtitles": [
+      { "streamId": "21", "title": "English (SRT External)", "language": "English", "languageCode": "eng", "codec": "srt", "format": "text", "external": true, "forced": false, "hearingImpaired": true, "default": false, "selected": true }
+    ],
+    "selectedAudioStreamId": "11",
+    "selectedSubtitleStreamId": "21",
+    "subtitleDelivery": "sidecar",
+    "sidecarUrl": "/api/v1/playback/3f0c4a52-9d4e-4c61-9b3e-0d2f5a6b7c81/subtitles/21"
+  },
+  "markers": [{ "type": "credits", "startMs": 7000000, "endMs": 7260000, "final": true }],
+  "nextItem": null,
+  "previousItem": null,
+  "autoplay": { "autoSkipIntro": false, "autoPlayNextEpisode": true },
+  "heartbeatIntervalMs": 30000,
+  "timelineIntervalMs": 10000,
+  "diagnostics": ["direct play: mkv/hevc main 10 hdr10/truehd within declared capabilities"]
+}
