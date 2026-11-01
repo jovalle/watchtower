@@ -21,7 +21,7 @@ export function invalidateLibraryIndex(token: string) {
 export async function getLibraryIndex(client: PlexClient, token: string, sections: string[], options: LibraryQueryOptions) {
   const query = createHash("sha256").update(JSON.stringify([sections, options])).digest("hex").slice(0, 20);
   const key = `library-${query}${getUserCacheKey("", token)}`;
-  // shortcut: a cold index reads every Plex page; use upstream paging when cross-section sort and filters can be preserved.
+  // Plex cannot sort by episode count, so this fallback reads every series page.
   const cached = indexes.get(key);
   if (cached) return { success: true as const, data: cached };
   const startedAt = generation;

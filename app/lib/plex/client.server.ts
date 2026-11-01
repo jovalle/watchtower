@@ -212,13 +212,7 @@ export class PlexClient {
     return { success: true, data: [...items.values()].slice(0, limit) };
   }
 
-  /**
-   * Get items from a library section.
-   */
-  async getLibraryItems(
-    sectionKey: string,
-    options: LibraryQueryOptions = {}
-  ): Promise<PlexResult<PlexMediaItem[]>> {
+  private libraryItemsQuery(options: LibraryQueryOptions): URLSearchParams {
     const params = new URLSearchParams();
     if (options.includeGuids) params.set("includeGuids", "1");
 
@@ -246,7 +240,37 @@ export class PlexClient {
         ? `${queryString}&${options.filter}`
         : options.filter;
     }
-    if (options.all) return this.getPages<PlexMediaItem>(`/library/sections/${sectionKey}/all`, new URLSearchParams(queryString), 1000);
+    return new URLSearchParams(queryString);
+  }
+
+  /** Get a bounded page, retaining Plex's total and checking that it advanced. */
+  async getLibraryPage(sectionKey: string, options: LibraryQueryOptions & { offset: number; limit: number }): Promise<PlexResult<{ items: PlexMediaItem[]; total: number; offset: number }>> {
+    const query = this.libraryItemsQuery(options);
+    const result = await this.request<PlexLibraryItemsResponse>(`/library/sections/${sectionKey}/all?${query}`);
+    if (!result.success) return result;
+    const page = result.data.MediaContainer;
+    const items = page.Metadata || [];
+    if (!Number.isSafeInteger(page.totalSize) || page.totalSize! < 0 || (page.offset ?? 0) !== options.offset || items.length > options.limit || options.offset + items.length > page.totalSize! || (!items.length && options.offset < page.totalSize!)) {
+      return { success: false, error: { code: -1, message: "Plex pagination did not advance. Refresh to try again." } };
+    }
+    return { success: true, data: { items, total: page.totalSize!, offset: options.offset } };
+  }
+
+  async getLibraryFacet(sectionKey: string, facet: "genre" | "year" | "firstCharacter", options: LibraryQueryOptions = {}): Promise<PlexResult<Array<{ key: string; title: string; size?: number }>>> {
+    const query = this.libraryItemsQuery(options);
+    query.delete("sort");
+    query.delete("X-Plex-Container-Start");
+    query.delete("X-Plex-Container-Size");
+    const result = await this.request<{ MediaContainer: { Directory?: Array<{ key: string; title: string; size?: number }> } }>(`/library/sections/${sectionKey}/${facet}?${query}`);
+    if (!result.success) return result;
+    return { success: true, data: result.data.MediaContainer.Directory || [] };
+  }
+
+  /** Get items from a library section. */
+  async getLibraryItems(sectionKey: string, options: LibraryQueryOptions = {}): Promise<PlexResult<PlexMediaItem[]>> {
+    const query = this.libraryItemsQuery(options);
+    if (options.all) return this.getPages<PlexMediaItem>(`/library/sections/${sectionKey}/all`, query, 1000);
+    const queryString = query.toString();
     const path = `/library/sections/${sectionKey}/all${
       queryString ? `?${queryString}` : ""
     }`;

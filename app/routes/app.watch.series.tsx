@@ -6,7 +6,7 @@ import WatchNavigation from "~/components/library/WatchNavigation";
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useSearchParams,
@@ -23,6 +23,8 @@ import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { libraryPage } from "~/lib/library-page";
 import { getLibraryIndex } from "~/lib/library-index.server";
+import { loadUpstreamLibrary } from "~/lib/upstream-library.server";
+import type { PlexMediaItem } from "~/lib/plex/types";
 
 export const meta: MetaFunction = () => {
   return [
@@ -110,6 +112,40 @@ function formatReleaseDate(dateStr?: string): string | undefined {
   }
 }
 
+function toView(item: PlexMediaItem, watchlistGuids: Set<string>): ShowItemView {
+  return {
+    ratingKey: item.ratingKey,
+    guid: item.guid,
+    title: item.title,
+    year: item.year?.toString(),
+    posterUrl: buildPosterUrl(item.thumb),
+    // logoUrl would come from TMDB integration (Phase 6)
+    logoUrl: undefined,
+    viewCount: item.viewCount ?? 0,
+    leafCount: item.leafCount,
+    viewedLeafCount: item.viewedLeafCount,
+    isInWatchlist: watchlistGuids.has(item.guid),
+    // Sort-relevant fields
+    audienceRating: item.audienceRating,
+    userRating: item.userRating,
+    releaseDate: item.originallyAvailableAt,
+    addedAt: item.addedAt,
+    details: {
+      backdropUrl: buildBackdropUrl(item.art),
+      releaseDate: formatReleaseDate(item.originallyAvailableAt),
+      seasons: item.childCount,
+      episodes: item.leafCount,
+      rating: item.contentRating,
+      audienceRating: item.audienceRating?.toFixed(1),
+      userRating: item.userRating?.toFixed(1),
+      genres: item.Genre?.map((g) => g.tag),
+      directors: item.Director?.map((d) => d.tag),
+      cast: item.Role?.slice(0, 5).map((r) => r.tag),
+      summary: item.summary,
+    },
+  };
+}
+
 export async function loader({
   request,
 }: LoaderFunctionArgs): Promise<Response> {
@@ -117,10 +153,9 @@ export async function loader({
   const plexToken = await requirePlexToken(request);
   const url = new URL(request.url);
 
-  const sort = url.searchParams.get("sort") || "titleSort";
-  const sortDirection = (url.searchParams.get("dir") || "asc") as
-    | "asc"
-    | "desc";
+  const requestedSort = url.searchParams.get("sort") || "titleSort";
+  const sort = SORT_OPTIONS.some((option) => option.value === requestedSort) ? requestedSort : "titleSort";
+  const sortDirection = url.searchParams.get("dir") === "desc" ? "desc" : "asc";
   const filter = url.searchParams.get("filter") || "all";
   const genreFilter = url.searchParams.get("genre") || undefined;
   const yearFilter = url.searchParams.get("year")
@@ -169,6 +204,32 @@ export async function loader({
   }
   const plexFilter = filterParts.length > 0 ? filterParts.join("&") : undefined;
 
+  if (sort !== "leafCount") {
+    const requestedPage = Number(url.searchParams.get("page") || 1);
+    const [paged, watchlist] = await Promise.all([
+      loadUpstreamLibrary(client, sections.map((section) => section.key), { sort: plexSort, filter: plexFilter, year: yearFilter, genre: genreFilter }, requestedPage),
+      new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token: plexToken, clientId: env.PLEX_CLIENT_ID }).getWatchlist({ type: "show" }),
+    ]);
+    if (url.searchParams.has("shuffle") && paged.total) {
+      let choice = Math.floor(Math.random() * paged.total);
+      const part = paged.sections.find((section) => { if (choice < section.total) return true; choice -= section.total; return false; });
+      if (part) {
+        const random = await client.getLibraryPage(part.section, { ...part.query, offset: choice, limit: 1 });
+        if (!random.success || !random.data.items[0]) throw new Response("Could not shuffle your library. Refresh to try again.", { status: 503 });
+        return redirect(`/app/media/show/${random.data.items[0].ratingKey}`);
+      }
+    }
+    const watchlistGuids = new Set(watchlist.success ? watchlist.data.map((item) => item.guid) : []);
+    return json<LoaderData>({
+      items: paged.items.map((item) => toView(item, watchlistGuids)),
+      page: paged.page, pages: paged.pages, total: paged.total, letters: paged.letters,
+      keys: paged.firstKey ? [paged.firstKey] : [],
+      libraryKey: tvLibrary.key,
+      currentFilters: { sort, sortDirection, filter, genre: genreFilter, year: yearFilter },
+      availableFilters: paged.availableFilters,
+    });
+  }
+
   // Fetch items and watchlist in parallel
   // Note: Genre filtering is done client-side because Plex API requires genre IDs, not names
   const [itemsResult, watchlistResult] = await Promise.all([
@@ -189,39 +250,7 @@ export async function loader({
   );
 
   // Build items list (before genre filtering to extract available filters)
-  const allItems: ShowItemView[] = itemsResult.success
-    ? itemsResult.data.map((item) => ({
-        ratingKey: item.ratingKey,
-        guid: item.guid,
-        title: item.title,
-        year: item.year?.toString(),
-        posterUrl: buildPosterUrl(item.thumb),
-        // logoUrl would come from TMDB integration (Phase 6)
-        logoUrl: undefined,
-        viewCount: item.viewCount ?? 0,
-        leafCount: item.leafCount,
-        viewedLeafCount: item.viewedLeafCount,
-        isInWatchlist: watchlistGuids.has(item.guid),
-        // Sort-relevant fields
-        audienceRating: item.audienceRating,
-        userRating: item.userRating,
-        releaseDate: item.originallyAvailableAt,
-        addedAt: item.addedAt,
-        details: {
-          backdropUrl: buildBackdropUrl(item.art),
-          releaseDate: formatReleaseDate(item.originallyAvailableAt),
-          seasons: item.childCount,
-          episodes: item.leafCount,
-          rating: item.contentRating,
-          audienceRating: item.audienceRating?.toFixed(1),
-          userRating: item.userRating?.toFixed(1),
-          genres: item.Genre?.map((g) => g.tag),
-          directors: item.Director?.map((d) => d.tag),
-          cast: item.Role?.slice(0, 5).map((r) => r.tag),
-          summary: item.summary,
-        },
-      }))
-    : [];
+  const allItems: ShowItemView[] = itemsResult.success ? itemsResult.data.map((item) => toView(item, watchlistGuids)) : [];
 
   // Apply client-side genre filtering (Plex API requires genre IDs, not names)
   let items = genreFilter
@@ -234,26 +263,6 @@ export async function loader({
       const aCount = a.leafCount ?? 0;
       const bCount = b.leafCount ?? 0;
       return sortDirection === "desc" ? bCount - aCount : aCount - bCount;
-    });
-  }
-
-  // Apply client-side sorting for rating fields (Plex API doesn't handle nulls consistently)
-  if (sort === "audienceRating" || sort === "userRating" || sort === "rating") {
-    const getRatingValue = (item: ShowItemView): number | null => {
-      if (sort === "userRating") return item.userRating ?? null;
-      if (sort === "audienceRating") return item.audienceRating ?? null;
-      return item.audienceRating ?? null;
-    };
-
-    items = [...items].sort((a, b) => {
-      const aVal = getRatingValue(a);
-      const bVal = getRatingValue(b);
-      // Items without ratings go to the end
-      if (aVal === null && bVal === null) return 0;
-      if (aVal === null) return 1;
-      if (bVal === null) return -1;
-      // Sort by rating value
-      return sortDirection === "desc" ? bVal - aVal : aVal - bVal;
     });
   }
 
@@ -272,6 +281,8 @@ export async function loader({
       }
     }
   }
+
+  if (url.searchParams.has("shuffle") && items.length) return redirect(`/app/media/show/${items[Math.floor(Math.random() * items.length)].ratingKey}`);
 
   return json<LoaderData>({
     ...libraryPage(items, url.searchParams.get("page")),
@@ -332,7 +343,7 @@ function getSortIndicator(
 }
 
 export default function TVShowsPage() {
-  const { items, libraryKey, currentFilters, availableFilters, page, pages, total, letters, keys } =
+  const { items, libraryKey, currentFilters, availableFilters, page, pages, total, letters } =
     useLoaderData<LoaderData>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -519,13 +530,13 @@ export default function TVShowsPage() {
     [searchParams, setSearchParams]
   );
 
-  // Handle shuffle
+  // Request a fresh random item from the complete filtered library.
   const handleShuffle = useCallback(() => {
-    if (keys.length > 0) {
-      const randomKey = keys[Math.floor(Math.random() * keys.length)];
-      navigate(`/app/media/show/${randomKey}`);
-    }
-  }, [keys, navigate]);
+    if (!total) return;
+    const params = new URLSearchParams(searchParams);
+    params.set("shuffle", String(Date.now()));
+    setSearchParams(params);
+  }, [searchParams, setSearchParams, total]);
 
   // Handle clear all filters
   const handleClearFilters = useCallback(() => {
