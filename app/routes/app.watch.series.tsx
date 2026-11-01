@@ -4,7 +4,7 @@ import WatchNavigation from "~/components/library/WatchNavigation";
  * GET /app/tv
  */
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
@@ -21,6 +21,8 @@ import { ContextMenu, type ContextMenuItem } from "~/components/ui";
 import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
+import { libraryPage } from "~/lib/library-page";
+import { getLibraryIndex } from "~/lib/library-index.server";
 
 export const meta: MetaFunction = () => {
   return [
@@ -63,6 +65,11 @@ interface ShowItemView {
 interface LoaderData {
   items: ShowItemView[];
   libraryKey: string | null;
+  page: number;
+  pages: number;
+  total: number;
+  letters: Record<string, { page: number; ratingKey: string }>;
+  keys: string[];
   currentFilters: {
     sort: string;
     sortDirection: "asc" | "desc";
@@ -140,7 +147,7 @@ export async function loader({
   const tvLibrary = sections[0];
   if (!tvLibrary) {
     return json<LoaderData>({
-      items: [],
+      ...libraryPage([], null),
       libraryKey: null,
       currentFilters: {
         sort,
@@ -165,7 +172,7 @@ export async function loader({
   // Fetch items and watchlist in parallel
   // Note: Genre filtering is done client-side because Plex API requires genre IDs, not names
   const [itemsResult, watchlistResult] = await Promise.all([
-    client.getLibraryItemsForSections(sections.map((section) => section.key), {
+    getLibraryIndex(client, token, sections.map((section) => section.key), {
       sort: plexSort,
       filter: plexFilter,
       // genre: genreFilter, // Disabled - using client-side filtering instead
@@ -267,7 +274,7 @@ export async function loader({
   }
 
   return json<LoaderData>({
-    items,
+    ...libraryPage(items, url.searchParams.get("page")),
     libraryKey: tvLibrary.key,
     currentFilters: {
       sort,
@@ -325,7 +332,7 @@ function getSortIndicator(
 }
 
 export default function TVShowsPage() {
-  const { items, libraryKey, currentFilters, availableFilters } =
+  const { items, libraryKey, currentFilters, availableFilters, page, pages, total, letters, keys } =
     useLoaderData<LoaderData>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -470,54 +477,38 @@ export default function TVShowsPage() {
     return menuItems;
   };
 
-  // Compute available letters for alphabet sidebar
-  const availableLetters = useMemo(() => {
-    const letters = new Set<string>();
-    items.forEach((item) => {
-      const firstChar = item.title.charAt(0).toUpperCase();
-      if (/[A-Z]/.test(firstChar)) {
-        letters.add(firstChar);
-      } else if (/[0-9]/.test(firstChar)) {
-        letters.add("#");
-      }
-    });
-    return Array.from(letters).sort();
-  }, [items]);
-
-  // Refs for letter scrolling
   const gridRef = useRef<HTMLDivElement>(null);
-
-  // Handle letter click for alphabet sidebar
-  const handleLetterClick = useCallback(
-    (letter: string) => {
-      const targetItem = items.find((item) => {
-        const firstChar = item.title.charAt(0).toUpperCase();
-        if (letter === "#") {
-          return /[0-9]/.test(firstChar);
-        }
-        return firstChar === letter;
-      });
-
-      if (targetItem && gridRef.current) {
-        // Find the element and scroll to it with offset for header
-        const element = gridRef.current.querySelector(
-          `[data-rating-key="${targetItem.ratingKey}"]`
-        );
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          const headerOffset = 120; // Account for fixed header and some padding
-          const targetPosition = window.scrollY + rect.top - headerOffset;
-          window.scrollTo({ top: targetPosition, behavior: "smooth" });
-        }
-      }
-    },
-    [items]
-  );
+  const scrollToLetter = useCallback((letter: string) => {
+    const target = letters[letter];
+    const element = [...(gridRef.current?.querySelectorAll<HTMLElement>("[data-rating-key]") ?? [])].find((node) => node.dataset.ratingKey === target?.ratingKey);
+    if (element) window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().top - 120, behavior: "smooth" });
+  }, [letters]);
+  useEffect(() => {
+    const letter = searchParams.get("letter");
+    if (!isLoading && letter && letters[letter]?.page === page) scrollToLetter(letter);
+  }, [isLoading, letters, page, scrollToLetter, searchParams]);
+  const handleLetterClick = useCallback((letter: string) => {
+    const target = letters[letter];
+    if (!target) return;
+    if (target.page === page && searchParams.get("letter") === letter) { scrollToLetter(letter); return; }
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(target.page));
+    params.set("letter", letter);
+    setSearchParams(params);
+  }, [letters, page, scrollToLetter, searchParams, setSearchParams]);
+  const changePage = (next: number) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(next));
+    params.delete("letter");
+    setSearchParams(params);
+  };
 
   // Handle filter change
   const handleFilterChange = useCallback(
     (filter: string) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (filter === "all") {
         newParams.delete("filter");
       } else {
@@ -530,11 +521,11 @@ export default function TVShowsPage() {
 
   // Handle shuffle
   const handleShuffle = useCallback(() => {
-    if (items.length > 0) {
-      const randomItem = items[Math.floor(Math.random() * items.length)];
-      navigate(`/app/media/show/${randomItem.ratingKey}`);
+    if (keys.length > 0) {
+      const randomKey = keys[Math.floor(Math.random() * keys.length)];
+      navigate(`/app/media/show/${randomKey}`);
     }
-  }, [items, navigate]);
+  }, [keys, navigate]);
 
   // Handle clear all filters
   const handleClearFilters = useCallback(() => {
@@ -549,6 +540,8 @@ export default function TVShowsPage() {
   const handleGenreFilter = useCallback(
     (genre: string | undefined) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (genre) {
         newParams.set("genre", genre);
         newParams.delete("year"); // Only one advanced filter at a time
@@ -564,6 +557,8 @@ export default function TVShowsPage() {
   const handleYearFilter = useCallback(
     (year: number | undefined) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (year) {
         newParams.set("year", year.toString());
         newParams.delete("genre"); // Only one advanced filter at a time
@@ -588,7 +583,7 @@ export default function TVShowsPage() {
           {/* Plex-style Library Header */}
           <LibraryHeader
             title="Series"
-            itemCount={items.length}
+            itemCount={total}
             currentFilter={currentFilters.filter}
             onFilterChange={handleFilterChange}
             currentSort={currentFilters.sort}
@@ -596,6 +591,8 @@ export default function TVShowsPage() {
             sortOptions={SORT_OPTIONS}
             onSortChange={(sort, direction) => {
               const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
               newParams.set("sort", sort);
               // Default to descending for rating, episode count, and date sorts
               const defaultDesc = [
@@ -703,6 +700,12 @@ export default function TVShowsPage() {
             </div>
           )}
 
+          {pages > 1 && !isLoading && <nav aria-label="Library pages" className="mt-8 flex items-center justify-center gap-4">
+            <button className="min-h-11 rounded border px-4 disabled:opacity-40" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</button>
+            <span aria-live="polite">Page {page} of {pages}</span>
+            <button className="min-h-11 rounded border px-4 disabled:opacity-40" disabled={page === pages} onClick={() => changePage(page + 1)}>Next</button>
+          </nav>}
+
           {/* Context Menu */}
           {contextMenu.isOpen && contextMenu.item && (
             <ContextMenu
@@ -718,7 +721,7 @@ export default function TVShowsPage() {
           items.length > 0 &&
           currentFilters.sort.startsWith("titleSort") && (
             <AlphabetSidebar
-              availableLetters={availableLetters}
+              availableLetters={Object.keys(letters)}
               onLetterClick={handleLetterClick}
             />
           )}
