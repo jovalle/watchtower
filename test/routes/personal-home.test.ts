@@ -36,12 +36,36 @@ it("serves independent progress, next episodes, and related unwatched titles wit
   }));
   for (const user of ["a", "b"]) {
     const response = await loader({ request: new Request("http://watchtower.test/app", { headers: { "test-user": user } }), params: {}, context: {} });
-    const home = await response.json();
+    const home = response.data;
+    const extraRows = await home.extraRows;
     expect(home.continueWatching.map((item) => item.ratingKey)).toEqual([`${user}-episode`]);
-    expect(home.extraRows.map((row) => row.title)).toEqual(["Next episodes for you", `Because you watched ${user}'s movie`]);
-    expect(home.extraRows[0].items[0].ratingKey).toBe(`${user}-next`);
-    expect(home.extraRows[1].items.map((item) => item.ratingKey)).toEqual([`${user}-related`]);
+    expect(home.nextRows.map((row) => row.title)).toEqual(["Next episodes for you"]);
+    expect(extraRows.map((row) => row.title)).toEqual([`Because you watched ${user}'s movie`]);
+    expect(home.nextRows[0].items[0].ratingKey).toBe(`${user}-next`);
+    expect(extraRows[0].items.map((item) => item.ratingKey)).toEqual([`${user}-related`]);
     expect(home.feedErrors).toEqual([]);
   }
   expect(createTMDBClient).not.toHaveBeenCalled();
+});
+
+it("returns the core home feed while optional recommendations are still loading", async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/library/sections") await pending;
+    if (url.hostname === "discover.provider.plex.tv") return Response.json({ MediaContainer: { Metadata: [] } });
+    if (url.pathname === "/library/sections") return Response.json({ MediaContainer: { Directory: [] } });
+    return Response.json({ MediaContainer: { Metadata: [{ ratingKey: "1", title: "Movie", type: "movie", guid: "x" }] } });
+  }));
+  try {
+    const response = await Promise.race([
+      loader({ request: new Request("http://watchtower.test/app"), params: {}, context: {} }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 200)),
+    ]);
+    expect(response).not.toBeNull();
+    expect(response && "data" in response && response.data.extraRows).toBeInstanceOf(Promise);
+  } finally {
+    release();
+  }
 });
