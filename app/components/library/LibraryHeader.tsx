@@ -310,8 +310,6 @@ function FilterDropdown({
               <button
                 onClick={() => {
                   onFilterChange("all");
-                  onGenreFilter?.(undefined);
-                  onYearFilter?.(undefined);
                   setIsOpen(false);
                 }}
                 className="flex w-full items-center justify-between px-3 py-2 text-sm text-foreground-secondary transition-colors hover:bg-white/10"
