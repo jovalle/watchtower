@@ -164,6 +164,7 @@ export function AlphabetSidebar({
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     const currentIndex = hoveredLetter ? ALPHABET.indexOf(hoveredLetter) : -1;
     let newIndex = currentIndex;
 
