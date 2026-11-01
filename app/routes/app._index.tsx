@@ -3,10 +3,10 @@
  * Features a cinematic Billboard component for the hero section with real Plex data.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useRevalidator } from "@remix-run/react";
+import { defer } from "@remix-run/node";
+import { Await, useLoaderData, useNavigate, useRevalidator } from "@remix-run/react";
 import { Plus, ListX, X } from "lucide-react";
 import { Billboard, MediaCard, MediaRow } from "~/components/media";
 import { Container } from "~/components/layout";
@@ -22,7 +22,6 @@ import {
   getUserSettings,
   DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
-import { createSeerrClient } from "~/lib/integrations/seerr.server";
 import { personalRecommendations } from "~/lib/home.server";
 
 
@@ -73,8 +72,9 @@ interface LoaderData {
   billboardCandidates: BillboardData[];
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
-  extraRows: ExtraRow[];
-  seerrEnabled: boolean;
+  nextRows: ExtraRow[];
+  extraRows: Promise<ExtraRow[]>;
+  logos: Promise<Record<string, string>>;
   feedErrors: string[];
 }
 
@@ -226,40 +226,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     clientId: env.PLEX_CLIENT_ID,
   });
 
-  const respond = async (data: CachedHomeData) => {
-    const [trending, collections, seerr, recommendations] = await Promise.all([
-      prefs.showTrending && !prefs.discoveryDisabled
-        ? getTrendingRow(extrasClient, token)
-        : [],
-      prefs.showCollections ? getCollectionRows(extrasClient, token) : [],
-      createSeerrClient(),
-      personalRecommendations(extrasClient).catch(() => null),
-    ]);
+  const respond = (data: CachedHomeData) => {
     const nextEpisodes = prefs.showContinueWatching ? data.continueWatching.filter((item) => item.type === "episode" && !item.viewOffset && !item.viewCount) : [];
     const continueItems = prefs.showContinueWatching ? data.continueWatching.filter((item) => !!item.viewOffset) : [];
-    const used = new Set(continueItems.map((item) => item.ratingKey));
-    const extraRows: ExtraRow[] = [
-      ...(nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : []),
-      ...(recommendations ? [{ title: recommendations.title, items: recommendations.items.filter((item) => !used.has(item.ratingKey)).map(libraryRowItem) }] : []),
-      ...(trending.length > 0
-        ? [{ title: "Trending Now", items: trending }]
-        : []),
-      ...collections,
-    ];
-    const uniqueRows = extraRows.map((row) => ({ ...row, items: row.items.filter((item) => {
-      const key = item.ratingKey || item.href;
-      if (used.has(key)) return false;
-      used.add(key);
-      return true;
-    }) })).filter((row) => row.items.length > 0);
-    return json<LoaderData>({
-      billboardCandidates: data.billboardCandidates,
-      continueWatching: continueItems,
-      recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded.filter((item) => !used.has(item.ratingKey)) : [],
-      extraRows: uniqueRows,
-      seerrEnabled: seerr !== null,
-      feedErrors: data.feedErrors ?? [],
-    });
+    const inProgress = new Set(continueItems.map((item) => item.ratingKey));
+    const nextKeys = new Set(nextEpisodes.map((item) => item.ratingKey));
+    const recentlyAdded = prefs.showRecentlyAdded ? data.recentlyAdded.filter((item) => !inProgress.has(item.ratingKey) && !nextKeys.has(item.ratingKey)) : [];
+    const used = new Set([...continueItems, ...nextEpisodes, ...recentlyAdded].map((item) => item.ratingKey));
+    const nextRows: ExtraRow[] = nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : [];
+    const extraRows = (async () => {
+      const [trending, collections, recommendations] = await Promise.all([
+        prefs.showTrending && !prefs.discoveryDisabled ? getTrendingRow(extrasClient, token).catch(() => []) : [],
+        prefs.showCollections ? getCollectionRows(extrasClient, token).catch(() => []) : [],
+        personalRecommendations(extrasClient).catch(() => null),
+      ]);
+      const rows: ExtraRow[] = [
+        ...(recommendations ? [{ title: recommendations.title, items: recommendations.items.map(libraryRowItem) }] : []),
+        ...(trending.length ? [{ title: "Trending Now", items: trending }] : []),
+        ...collections,
+      ];
+      return rows.map((row) => ({ ...row, items: row.items.filter((item) => {
+        const key = item.ratingKey || item.href;
+        if (used.has(key)) return false;
+        used.add(key);
+        return true;
+      }) })).filter((row) => row.items.length > 0);
+    })();
+    const logos = (async () => {
+      const tmdb = prefs.discoveryDisabled ? null : createTMDBClient();
+      if (!tmdb) return {};
+      const items = [...data.continueWatching, ...data.recentlyAdded.slice(0, 10)];
+      const pairs = await Promise.all(items.map(async (item) => {
+        try {
+          const year = item.year ? parseInt(item.year) : undefined;
+          const logo = item.type === "show" || item.type === "episode"
+            ? await tmdb.getCachedTVLogoUrl(item.showTitle || item.title, year)
+            : await tmdb.getCachedMovieLogoUrl(item.title, year);
+          return [item.ratingKey, logo] as const;
+        } catch { return [item.ratingKey, null] as const; }
+      }));
+      return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => !!pair[1]));
+    })().catch(() => ({}));
+    return defer({ billboardCandidates: data.billboardCandidates, continueWatching: continueItems, recentlyAdded, nextRows, extraRows, logos, feedErrors: data.feedErrors ?? [] } satisfies LoaderData);
   };
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
@@ -314,49 +322,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .filter((item) => item.type === "movie" || item.type === "show")
         .map((item) => transformToView(item, watchlistGuids, false))
     : [];
-
-  // Fetch logos for all items (continue watching + recently added)
-  // Uses local caching to reduce TMDB API calls and bandwidth
-  const tmdbClient = prefs.discoveryDisabled ? null : createTMDBClient();
-  if (!tmdbClient) {
-    console.log(
-      "[Logo] TMDB not configured - skipping logo fetch. Set TMDB_API_KEY in .env"
-    );
-  }
-  if (tmdbClient) {
-    // Helper to fetch logo for an item (uses cache)
-    const fetchLogo = async (item: MediaItemView) => {
-      try {
-        // For episodes, use the show title; for movies/shows, use the item title
-        const titleForLookup = item.showTitle || item.title;
-        const isShow = item.type === "show" || item.type === "episode";
-
-        // Use cached methods - downloads and stores logos locally
-        const logoUrl = isShow
-          ? await tmdbClient.getCachedTVLogoUrl(
-              titleForLookup,
-              item.year ? parseInt(item.year) : undefined
-            )
-          : await tmdbClient.getCachedMovieLogoUrl(
-              item.title,
-              item.year ? parseInt(item.year) : undefined
-            );
-
-        if (logoUrl) {
-          item.logoUrl = logoUrl;
-        }
-      } catch (error) {
-        // Silently fail - logos are optional
-        console.error(`[Logo] Failed to fetch logo for ${item.title}:`, error);
-      }
-    };
-
-    // Fetch logos in parallel for both sections
-    await Promise.all([
-      ...continueWatching.map(fetchLogo),
-      ...recentlyAdded.slice(0, 10).map(fetchLogo),
-    ]);
-  }
 
   // Build billboard candidates from watchlist items (in library) + recently added
   // This allows the hero to cycle through both
@@ -444,11 +409,20 @@ export default function AppIndex() {
     billboardCandidates,
     continueWatching,
     recentlyAdded,
+    nextRows,
     extraRows,
+    logos,
     feedErrors,
-  } = useLoaderData<typeof loader>();
+  } = useLoaderData<LoaderData>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
+  const [logoUrls, setLogoUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    setLogoUrls({});
+    Promise.resolve(logos).then((result) => { if (active) setLogoUrls(result); }).catch(() => {});
+    return () => { active = false; };
+  }, [logos]);
 
   // Billboard cycling state
   const [billboardIndex, setBillboardIndex] = useState(0);
@@ -670,7 +644,7 @@ export default function AppIndex() {
           year={billboard.year}
           rating={billboard.rating}
           duration={billboard.duration}
-          logoUrl={billboard.logoUrl}
+          logoUrl={logoUrls[billboard.ratingKey] || billboard.logoUrl}
           onPlay={() => handlePlay(billboard.ratingKey)}
           onMoreInfo={() => handleMoreInfo(billboard.type, billboard.ratingKey)}
           onMouseEnter={() => setIsBillboardHovered(true)}
@@ -702,7 +676,7 @@ export default function AppIndex() {
                 badge={item.seasonEpisode}
                 progress={item.progress}
                 viewCount={item.viewCount}
-                logoUrl={item.logoUrl}
+                logoUrl={logoUrls[item.ratingKey] || item.logoUrl}
                 showProgressBar
                 onClick={() => handleCardClick(item)}
                 onPlay={() => handlePlay(item.ratingKey, item.viewOffset)}
@@ -713,21 +687,20 @@ export default function AppIndex() {
           </MediaRow>
         )}
 
-        {extraRows.map((row, index) => (
-          <MediaRow key={`${index}:${row.title}`} title={row.title}>
-            {row.items.map(({ ratingKey, ...item }) => (
-              <MediaCard
-                key={item.key}
-                imageUrl={item.imageUrl}
-                title={item.title}
-                year={item.year}
-                badge={ratingKey ? undefined : "Not in library"}
-                onClick={() => navigate(item.href)}
-                onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
-              />
+        {nextRows.map((row) => <MediaRow key={row.title} title={row.title}>
+          {row.items.map((item) => <MediaCard key={item.key} imageUrl={item.imageUrl} title={item.title} year={item.year} onClick={() => navigate(item.href)} onPlay={item.ratingKey ? () => handlePlay(item.ratingKey!) : undefined} />)}
+        </MediaRow>)}
+        <Suspense fallback={<p role="status">Loading recommendations…</p>}>
+          <Await resolve={extraRows} errorElement={<p role="alert">Could not load recommendations.</p>}>
+            {(rows) => rows.map((row, index) => (
+              <MediaRow key={`${index}:${row.title}`} title={row.title}>
+                {row.items.map(({ ratingKey, ...item }) => (
+                  <MediaCard key={item.key} imageUrl={item.imageUrl} title={item.title} year={item.year} badge={ratingKey ? undefined : "Not in library"} onClick={() => navigate(item.href)} onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined} />
+                ))}
+              </MediaRow>
             ))}
-          </MediaRow>
-        ))}
+          </Await>
+        </Suspense>
         {/* Recently Added row */}
         {recentlyAdded.length > 0 && (
           <MediaRow title="Recently Added">
@@ -741,7 +714,7 @@ export default function AppIndex() {
                 leafCount={item.leafCount}
                 viewedLeafCount={item.viewedLeafCount}
                 isInWatchlist={getIsInWatchlist(item)}
-                logoUrl={item.logoUrl}
+                logoUrl={logoUrls[item.ratingKey] || item.logoUrl}
                 onClick={() => handleCardClick(item)}
                 onPlay={() => handlePlay(item.ratingKey)}
                 onAddToWatchlist={() => {
