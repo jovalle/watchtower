@@ -105,10 +105,13 @@ Open `http://localhost:9001`, sign in with the Plex account that owns your serve
 ```bash
 # Prerequisites: Node.js 22+, Bun (https://bun.sh), and just (https://just.systems)
 bun install --frozen-lockfile
+cp .env.example .env.local  # First time only; fill in optional service credentials
 just dev
 ```
 
 Open `http://127.0.0.1:9001`. On first setup, follow the setup code printed in the terminal. `just dev` runs Remix/Vite with live reload for UI and server-route edits; it does not require a production build. Keep the same hostname and port while signing in through Plex.
+
+For Seerr pages, set `SEERR_URL` and `SEERR_API_KEY` in `.env.local` (the API key is in Seerr's **Settings → General**). Vite loads this ignored file automatically; restart `just dev` after changing credentials. Existing `.env` values are also loaded, with `.env.local` taking precedence. Keep secrets unprefixed: `VITE_` variables are exposed to the browser. Plex login and first-time server setup are still required.
 
 Use `just dev 9021` if port 9001 is occupied. For testing on another device on your network, explicitly bind all interfaces with `just dev 9021 0.0.0.0` and open your computer's LAN address on that device. Development uses your configured services and local data; requests and playback actions affect those services.
 
@@ -126,6 +129,11 @@ All optional. The Plex server and token are configured at `/setup`, not through 
 | `PORT`            | Server port (default: `9001`)                                                                 |
 | `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
 | `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
+| `OMDB_API_KEY`    | OMDb API key for IMDb, Rotten Tomatoes, and Metacritic ratings                               |
+| `SEERR_URL`       | Seerr/Overseerr/Jellyseerr base URL; requires `SEERR_API_KEY`                                  |
+| `SEERR_API_KEY`   | Server-only Seerr API key; requires `SEERR_URL`                                               |
+
+A complete, valid `SEERR_URL` and `SEERR_API_KEY` environment pair takes precedence over saved **Settings → Integrations** values. Environment credentials are not written to disk by reading settings or saving another integration. Remove the environment pair and restart to use saved settings again; incomplete or invalid environment values also fall back to saved settings. For production, supply environment variables to the server process (for example, Docker `--env-file`); `just start` does not load `.env.local`.
 
 Trakt is enabled only by a saved client ID and secret in Settings → Integrations. A legacy `TRAKT_CLIENT_ID` environment value no longer enables requests; move existing credentials into Integrations to keep using Trakt. Users also need a watchlist username for list imports.
 
