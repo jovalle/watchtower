@@ -522,6 +522,8 @@ export default function TVShowsPage() {
       newParams.delete("letter");
       if (filter === "all") {
         newParams.delete("filter");
+        newParams.delete("genre");
+        newParams.delete("year");
       } else {
         newParams.set("filter", filter);
       }
