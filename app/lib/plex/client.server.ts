@@ -34,6 +34,65 @@ import type {
 } from "./types";
 import { QUALITY_PROFILES } from "./types";
 
+export interface TranscodeUrlOptions {
+  serverUrl: string;
+  token: string;
+  ratingKey: string;
+  session: string;
+  clientIdentifier: string;
+  mediaIndex: number;
+  partIndex: number;
+  offsetSeconds: number;
+  quality: QualityProfile;
+  forceTranscode: boolean;
+  subtitles: "burn" | "none";
+  clientProfileName?: string;
+  clientProfileExtra?: string;
+  platform?: string;
+  device?: string;
+  deviceName?: string;
+}
+
+export function buildPlexTranscodeUrl(options: TranscodeUrlOptions): string {
+  const params = new URLSearchParams();
+  params.set("path", `/library/metadata/${options.ratingKey}`);
+  params.set("protocol", "hls");
+  params.set("session", options.session);
+  params.set("hasMDE", "1");
+  if (options.clientProfileName) params.set("X-Plex-Client-Profile-Name", options.clientProfileName);
+  if (options.clientProfileExtra) params.set("X-Plex-Client-Profile-Extra", options.clientProfileExtra);
+  params.set("copyts", "1");
+  params.set("mediaIndex", String(options.mediaIndex));
+  params.set("partIndex", String(options.partIndex));
+  params.set("subtitles", options.subtitles);
+  const directStream = Boolean(options.quality.isOriginal) && !options.forceTranscode;
+  params.set("directPlay", "0");
+  params.set("directStream", directStream ? "1" : "0");
+  if (directStream) {
+    params.set("directStreamAudio", "1");
+  } else {
+    params.set("videoCodec", "h264");
+    params.set("audioCodec", "aac");
+    params.set("context", "streaming");
+    if (options.quality.maxBitrate) {
+      params.set("videoBitrate", String(options.quality.maxBitrate));
+      params.set("maxVideoBitrate", String(options.quality.maxBitrate));
+    }
+    const resolutions: Record<string, string> = { "1080p": "1920x1080", "720p": "1280x720", "480p": "854x480" };
+    if (options.quality.resolution && resolutions[options.quality.resolution]) params.set("videoResolution", resolutions[options.quality.resolution]);
+  }
+  if (options.offsetSeconds > 0) params.set("offset", String(Math.floor(options.offsetSeconds)));
+  params.set("X-Plex-Token", options.token);
+  params.set("X-Plex-Client-Identifier", options.clientIdentifier);
+  params.set("X-Plex-Product", PLEX_HEADERS["X-Plex-Product"]);
+  params.set("X-Plex-Version", PLEX_HEADERS["X-Plex-Version"]);
+  params.set("X-Plex-Platform", options.platform ?? PLEX_HEADERS["X-Plex-Platform"]);
+  params.set("X-Plex-Platform-Version", PLEX_HEADERS["X-Plex-Platform-Version"]);
+  params.set("X-Plex-Device", options.device ?? PLEX_HEADERS["X-Plex-Device"]);
+  params.set("X-Plex-Device-Name", options.deviceName ?? PLEX_HEADERS["X-Plex-Device-Name"]);
+  return `${options.serverUrl.replace(/\/$/, "")}/video/:/transcode/universal/start.m3u8?${params}`;
+}
+
 /** Keeps the most recently viewed item per GUID, preserving first-seen order. */
 export function dedupeByGuid(items: PlexMediaItem[]): PlexMediaItem[] {
   const byKey = new Map<string, PlexMediaItem>();
@@ -54,13 +113,19 @@ export class PlexClient {
   private readonly serverUrl: string;
   private readonly token: string;
   private readonly clientId: string;
+  private readonly onUnauthorized?: () => void | Promise<void>;
   private readonly providerLibraries = new Map<string, Promise<PlexResult<PlexMetadata[]>>>();
 
-  constructor(config: PlexServerConfig) {
+  constructor(
+    config: PlexServerConfig & {
+      onUnauthorized?: () => void | Promise<void>;
+    },
+  ) {
     // Ensure no trailing slash on server URL
     this.serverUrl = config.serverUrl.replace(/\/$/, "");
     this.token = config.token;
     this.clientId = config.clientId;
+    this.onUnauthorized = config.onUnauthorized;
   }
 
   /**
@@ -102,6 +167,7 @@ export class PlexClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 401) await this.onUnauthorized?.();
         return {
           success: false,
           error: {
@@ -437,14 +503,14 @@ export class PlexClient {
 
   /** Resolve external identity using only media type and provider GUID, never title similarity. */
   async findByTmdbId(type: "movie" | "show", id: number): Promise<PlexResult<PlexMetadata[]>> {
-    return this.findByGuid(type, `tmdb://${id}`);
+    return this.findByPlexGuid(type, `tmdb://${id}`);
   }
 
   async findByImdbId(type: "movie" | "show", id: string): Promise<PlexResult<PlexMetadata[]>> {
-    return this.findByGuid(type, `imdb://${id}`);
+    return this.findByPlexGuid(type, `imdb://${id}`);
   }
 
-  private async findByGuid(type: "movie" | "show", guid: string): Promise<PlexResult<PlexMetadata[]>> {
+  async findByPlexGuid(type: "movie" | "show", guid: string): Promise<PlexResult<PlexMetadata[]>> {
     // Plex's guid filter matches primary Plex GUIDs, not the external Guid array.
     // ponytail: scan once per type/client; add a scoped index if measured library size warrants it.
     let library = this.providerLibraries.get(type);
@@ -579,6 +645,8 @@ export class PlexClient {
       quality?: QualityProfile;
       forceTranscode?: boolean;
       subtitles?: "burn" | "none";
+      /** Device/player scope for independent progress ordering. */
+      deviceScope?: string;
     } = {}
   ): PlexPlaybackInfo {
     const {
@@ -586,83 +654,29 @@ export class PlexClient {
       quality,
       forceTranscode = false,
       subtitles = "none",
+      deviceScope = "",
     } = options;
     const selectedQuality = quality || QUALITY_PROFILES[0];
     const useDirectPlay =
       Boolean(selectedQuality.isOriginal) && !forceTranscode;
 
-    const params = new URLSearchParams();
-
-    // Media path reference
-    params.set("path", `/library/metadata/${ratingKey}`);
-
-    // HLS streaming
-    params.set("protocol", "hls");
     // Plex must not reuse a stale session when retrying, seeking, or opening another player.
     const session = randomUUID();
-    registerPlaybackSession(session, ratingKey, this.serverUrl, this.token, `${this.clientId}-${session}`);
-    params.set("session", session);
-    params.set("hasMDE", "1");
-    params.set("X-Plex-Client-Profile-Name", "Chrome");
-    params.set("copyts", "1");
-    params.set("mediaIndex", "0");
-    params.set("partIndex", "0");
-    // Text subtitles are delivered as a WebVTT sidecar, so Plex only renders ones it must burn in.
-    params.set("subtitles", subtitles);
-
-    if (useDirectPlay) {
-      // Direct play/stream mode
-      // HLS needs a remux/transcode session; native files use the separate range proxy.
-      params.set("directPlay", "0");
-      params.set("directStream", "1");
-      params.set("directStreamAudio", "1");
-    } else {
-      // Transcode mode
-      params.set("directPlay", "0");
-      params.set("directStream", "0");
-      params.set("videoCodec", "h264");
-      params.set("audioCodec", "aac");
-      params.set("context", "streaming");
-
-      if (selectedQuality.maxBitrate) {
-        params.set("videoBitrate", selectedQuality.maxBitrate.toString());
-        params.set("maxVideoBitrate", selectedQuality.maxBitrate.toString());
-      }
-
-      const resolutions: Record<string, string> = {
-        "1080p": "1920x1080",
-        "720p": "1280x720",
-        "480p": "854x480",
-      };
-      if (
-        selectedQuality.resolution &&
-        resolutions[selectedQuality.resolution]
-      ) {
-        params.set("videoResolution", resolutions[selectedQuality.resolution]);
-      }
-    }
-
-    // Resume position - Plex expects SECONDS
-    if (offsetSeconds > 0) {
-      params.set("offset", Math.floor(offsetSeconds).toString());
-    }
-
-    // Client identification
-    params.set("X-Plex-Token", this.token);
-    params.set("X-Plex-Client-Identifier", `${this.clientId}-${session}`);
-    params.set("X-Plex-Product", PLEX_HEADERS["X-Plex-Product"]);
-    params.set("X-Plex-Version", PLEX_HEADERS["X-Plex-Version"]);
-    params.set("X-Plex-Platform", PLEX_HEADERS["X-Plex-Platform"]);
-    params.set(
-      "X-Plex-Platform-Version",
-      PLEX_HEADERS["X-Plex-Platform-Version"]
-    );
-    params.set("X-Plex-Device", PLEX_HEADERS["X-Plex-Device"]);
-    params.set("X-Plex-Device-Name", PLEX_HEADERS["X-Plex-Device-Name"]);
-
-    const streamUrl = `${
-      this.serverUrl
-    }/video/:/transcode/universal/start.m3u8?${params.toString()}`;
+    registerPlaybackSession(session, ratingKey, this.serverUrl, this.token, `${this.clientId}-${session}`, deviceScope);
+    const streamUrl = buildPlexTranscodeUrl({
+      serverUrl: this.serverUrl,
+      token: this.token,
+      ratingKey,
+      session,
+      clientIdentifier: `${this.clientId}-${session}`,
+      mediaIndex: 0,
+      partIndex: 0,
+      offsetSeconds,
+      quality: selectedQuality,
+      forceTranscode,
+      subtitles,
+      clientProfileName: "Chrome",
+    });
 
     return {
       streamUrl,
@@ -672,6 +686,47 @@ export class PlexClient {
       quality: selectedQuality,
       availableQualities: QUALITY_PROFILES,
       method: useDirectPlay ? "direct_stream" : "transcode",
+    };
+  }
+
+  async getTranscodeDecision(streamUrl: string): Promise<PlexResult<{ generalDecisionCode: number; videoDecision?: string; audioDecision?: string; subtitleDecision?: string }>> {
+    const url = new URL(streamUrl);
+    url.pathname = "/video/:/transcode/universal/decision";
+    const result = await this.request<{
+      MediaContainer?: {
+        generalDecisionCode?: number | string;
+        videoDecision?: string;
+        audioDecision?: string;
+        subtitleDecision?: string;
+        Metadata?: Array<{
+          Media?: Array<{
+            Part?: Array<{
+              Stream?: Array<{
+                streamType?: number | string;
+                decision?: string;
+              }>;
+            }>;
+          }>;
+        }>;
+      };
+    }>(`${url.pathname}${url.search}`);
+    if (!result.success) return result;
+    const container = result.data?.MediaContainer ?? {};
+    const streams = container.Metadata?.[0]?.Media?.[0]?.Part?.[0]?.Stream;
+    const streamDecision = (streamType: number): string | undefined =>
+      Array.isArray(streams)
+        ? streams.find((stream) => Number(stream?.streamType) === streamType)
+            ?.decision
+        : undefined;
+    const decisionCode = Number(container.generalDecisionCode);
+    return {
+      success: true,
+      data: {
+        generalDecisionCode: Number.isFinite(decisionCode) ? decisionCode : 0,
+        videoDecision: streamDecision(1) ?? container.videoDecision,
+        audioDecision: streamDecision(2) ?? container.audioDecision,
+        subtitleDecision: streamDecision(3) ?? container.subtitleDecision,
+      },
     };
   }
 
@@ -697,6 +752,7 @@ export class PlexClient {
         }
       );
       if (response.ok) return { success: true, data: undefined };
+      if (response.status === 401) await this.onUnauthorized?.();
       return {
         success: false,
         error: {

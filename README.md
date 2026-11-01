@@ -46,6 +46,7 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 - **Unified watchlist** — Aggregate watchlists from Plex, Trakt, and IMDB in one view
 - **Lists support** — Browse your Plex playlists and collections
 - **TV show navigation** — Season/episode browsing with On Deck integration
+- **Watch Together** — Synchronized rooms where every viewer streams with their own Plex account ([guide](docs/watch-together.md))
 - **Responsive design** — Optimized for desktop, tablet, and mobile
 
 ## Navigation and playback
@@ -71,6 +72,12 @@ Run one Watchtower process against a data directory. Notification writes use an 
 The player exposes browser-native AirPlay/Remote Playback only when the browser reports a receiver for a native media source. HLS played through Media Source Extensions does not use this path. Stream URLs remain authenticated; receivers must support the browser's authenticated playback handoff. There is no custom Chromecast receiver or public token-bearing stream URL.
 
 **Receiver playback is not yet verified.** Desktop/mobile playback compatibility, audible track selection, cross-device resume, and the full keyboard/remote journey also require live acceptance. See the [delivery ledger](docs/netflix-replacement-plan.md#delivery-ledger) and [continuation handoff](docs/implementation-handoff.md) for evidence and remaining work. A visible casting control is not a compatibility guarantee.
+
+## Watch Together
+
+Rooms let people who can each access a movie or episode watch it in sync. Watchtower coordinates play, pause, position and the next episode; every viewer streams with their own Plex account, so library permissions and watch history stay personal. See the [user guide](docs/watch-together.md).
+
+Rooms live in the single Watchtower process and end when it restarts. The [operations guide](docs/handoffs/watch-together/OPERATIONS.md) covers reverse-proxy requirements for the event stream, limits, diagnostics and rollback (`WATCH_TOGETHER=disabled`). The [acceptance record](docs/handoffs/watch-together/ACCEPTANCE.md) lists what has been verified locally and what still needs real Plex accounts, devices and ingress.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f4f8/512.gif" height="24"> Screenshots
 
@@ -125,7 +132,9 @@ All optional. The Plex server and token are configured at `/setup`, not through 
 | `PLEX_CLIENT_ID`  | Client identifier (default: `watchtower-001`)                                                 |
 | `PORT`            | Server port (default: `9001`)                                                                 |
 | `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
+| `TRUST_PROXY`     | Trusted proxies for native pairing limits (Express names/CIDRs or hop count; unset trusts only the socket peer) |
 | `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
+| `WATCH_TOGETHER`  | Set to `disabled` to turn off Watch Together rooms (default: enabled)                        |
 
 Trakt is enabled only by a saved client ID and secret in Settings → Integrations. A legacy `TRAKT_CLIENT_ID` environment value no longer enables requests; move existing credentials into Integrations to keep using Trakt. Users also need a watchlist username for list imports.
 

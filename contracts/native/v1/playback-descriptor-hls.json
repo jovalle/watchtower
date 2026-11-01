@@ -1,0 +1,88 @@
+{
+  "playbackId": "8b1e7f10-2a3b-4c5d-8e9f-0a1b2c3d4e5f",
+  "expiresInMs": 21600000,
+  "media": { "serverMachineId": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "ratingKey": "7003", "mediaId": "9301", "partId": "9401" },
+  "item": {
+    "ratingKey": "7003",
+    "type": "episode",
+    "title": "Episode Three",
+    "year": 2020,
+    "posterUrl": null,
+    "backdropUrl": null,
+    "thumbUrl": null,
+    "durationMs": 2640000,
+    "viewOffsetMs": 1200000,
+    "viewCount": 0,
+    "leafCount": null,
+    "viewedLeafCount": null,
+    "contentRating": "TV-14",
+    "showTitle": "Test Show",
+    "seasonNumber": 1,
+    "episodeNumber": 3,
+    "parentRatingKey": "7001",
+    "grandparentRatingKey": "7000",
+    "external": null
+  },
+  "durationMs": 2640000,
+  "startPositionMs": 1200000,
+  "resumeSource": "saved",
+  "delivery": {
+    "type": "hls",
+    "method": "transcode",
+    "plexDecision": { "video": "transcode", "audio": "copy", "subtitle": "burn" },
+    "mimeType": "application/x-mpegURL",
+    "parts": [
+      { "partId": "9401", "index": 0, "startMs": 0, "durationMs": 2640000, "url": "/api/v1/playback/8b1e7f10-2a3b-4c5d-8e9f-0a1b2c3d4e5f/hls/start.m3u8" }
+    ],
+    "activePartIndex": 0,
+    "timeline": { "mapping": "unknown", "requestedOffsetMs": 1200000 }
+  },
+  "source": { "videoCodec": "hevc", "width": 1920, "height": 1080, "hdr": null, "bitrateKbps": 9000, "audioCodec": "eac3", "audioChannels": 6, "container": "mkv" },
+  "quality": {
+    "requested": "1080p-8",
+    "options": [
+      { "id": "original", "label": "Original", "maxBitrateKbps": null, "resolution": null },
+      { "id": "1080p-8", "label": "1080p (8 Mbps)", "maxBitrateKbps": 8000, "resolution": "1080p" }
+    ],
+    "transcodeTarget": { "maxBitrateKbps": 8000, "resolution": "1080p" }
+  },
+  "tracks": {
+    "audio": [
+      { "streamId": "51", "title": "English (EAC3 5.1)", "language": "English", "languageCode": "eng", "codec": "eac3", "channels": 6, "default": true, "selected": true, "audioDescription": false }
+    ],
+    "subtitles": [
+      { "streamId": "61", "title": "English (PGS)", "language": "English", "languageCode": "eng", "codec": "pgs", "format": "image", "external": false, "forced": false, "hearingImpaired": false, "default": false, "selected": true }
+    ],
+    "selectedAudioStreamId": "51",
+    "selectedSubtitleStreamId": "61",
+    "subtitleDelivery": "burned",
+    "sidecarUrl": null
+  },
+  "markers": [{ "type": "intro", "startMs": 30000, "endMs": 90000, "final": false }],
+  "nextItem": {
+    "ratingKey": "7004",
+    "type": "episode",
+    "title": "Episode Four",
+    "year": 2020,
+    "posterUrl": null,
+    "backdropUrl": null,
+    "thumbUrl": null,
+    "durationMs": 2700000,
+    "viewOffsetMs": null,
+    "viewCount": 0,
+    "leafCount": null,
+    "viewedLeafCount": null,
+    "contentRating": "TV-14",
+    "showTitle": "Test Show",
+    "seasonNumber": 1,
+    "episodeNumber": 4,
+    "parentRatingKey": "7001",
+    "grandparentRatingKey": "7000",
+    "external": null
+  },
+  "previousItem": null,
+  "autoplay": { "autoSkipIntro": false, "autoPlayNextEpisode": true },
+  "heartbeatIntervalMs": 30000,
+  "timelineIntervalMs": 10000,
+  "diagnostics": ["quality 1080p-8 requested: transcoding video", "subtitle pgs burned in by Plex"]
+}
