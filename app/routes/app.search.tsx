@@ -48,6 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       q,
       library: [] as LibraryResult[],
       discover: [] as TMDBRecommendation[],
+      libraryError: false,
+      discoverError: false,
       seerrEnabled,
     });
   }
@@ -79,11 +81,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? excludeLibraryMatches(tmdbResult.data, plexItems).slice(0, 24)
     : [];
 
-  return json({ q, library, discover, seerrEnabled });
+  return json({ q, library, discover, seerrEnabled, libraryError: !plexResult.success, discoverError: !!tmdbResult && !tmdbResult.success });
 }
 
 export default function SearchPage() {
-  const { q, library, discover } = useLoaderData<typeof loader>();
+  const { q, library, discover, libraryError, discoverError } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -135,7 +137,8 @@ export default function SearchPage() {
         </Typography>
       )}
 
-      {q && library.length === 0 && discover.length === 0 && !isSearching && (
+      {(libraryError || discoverError) && <p role="alert" className="mb-4 text-foreground-secondary">Could not search {libraryError && discoverError ? "your library or discovery" : libraryError ? "your library" : "discovery"}. <button className="underline" onClick={() => window.location.reload()}>Try again</button></p>}
+      {q && !libraryError && !discoverError && library.length === 0 && discover.length === 0 && !isSearching && (
         <Typography variant="body" className="text-foreground-secondary">
           No results for “{q}”.
         </Typography>
