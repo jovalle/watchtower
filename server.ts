@@ -6,9 +6,11 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createRequestHandler } from "@remix-run/express";
+import { createPairingClientIpResolver } from "./app/lib/native/client-ip.server";
 
 const app = express();
 const PORT = process.env.PORT || 9001;
+const pairingClientIp = createPairingClientIpResolver();
 
 // Log levels
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -107,6 +109,13 @@ async function start() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       build: build as any,
       mode: process.env.NODE_ENV,
+      getLoadContext: (req) => ({
+        clientIp: req.ip,
+        pairingClientIp: pairingClientIp(
+          req.socket.remoteAddress,
+          req.get("X-Forwarded-For"),
+        ),
+      }),
     }),
   );
 

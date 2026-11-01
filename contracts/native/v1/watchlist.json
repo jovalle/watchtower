@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "tt0000001",
+      "title": "Test Movie",
+      "type": "movie",
+      "year": 2021,
+      "posterUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fthumb%2F1700000000&w=400&h=600",
+      "sources": ["plex", "trakt"],
+      "ratingKey": "5001",
+      "plexGuid": "plex://movie/000000000000000000000001",
+      "external": { "provider": "tmdb", "id": "100", "type": "movie" },
+      "imdbId": "tt0000001",
+      "addedAtMs": 1790000000000
+    }
+  ],
+  "counts": { "all": 1, "plex": 1, "trakt": 1, "imdb": 0 },
+  "errors": []
+}

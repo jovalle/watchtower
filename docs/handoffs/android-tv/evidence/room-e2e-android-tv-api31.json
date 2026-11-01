@@ -1,0 +1,142 @@
+{
+  "at": "2026-09-28T06:15:07.092Z",
+  "results": [
+    {
+      "id": "TVR-00 combined server advertises rooms",
+      "pass": true,
+      "detail": {
+        "features": {
+          "pairing": true,
+          "profiles": false,
+          "rooms": true
+        }
+      }
+    },
+    {
+      "id": "TVR-01 harness credential stored on the emulator",
+      "pass": true,
+      "detail": {}
+    },
+    {
+      "id": "TVR-A0 web host creates a room",
+      "pass": true,
+      "detail": {
+        "status": 201
+      }
+    },
+    {
+      "id": "TVR-A1 web host registers a room-scoped playback session",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-A2 TV joins through a watchtower://join invite link",
+      "pass": true,
+      "detail": {
+        "participants": 2
+      }
+    },
+    {
+      "id": "TVR-A3 TV player claims readiness at the room target",
+      "pass": true,
+      "detail": {
+        "tv": {
+          "participantId": "7f7d31bc-fd2e-47a4-a78f-4a01947f0ec6",
+          "displayName": "Test Owner",
+          "connected": true,
+          "ready": true,
+          "buffering": false,
+          "blocking": true,
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "TVR-A4 web host play accepted",
+      "pass": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "id": "TVR-A5 TV follows host play",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 3031,
+        "targetMs": 3046,
+        "skewMs": -15,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-A6 TV stays within 500 ms while playing (loopback)",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 8840,
+        "targetMs": 9078,
+        "skewMs": -238,
+        "speed": 1.00474
+      }
+    },
+    {
+      "id": "TVR-A7 guest TV media key cannot pause the room",
+      "pass": true,
+      "detail": {
+        "tvState": 3,
+        "tvMs": 11948,
+        "targetMs": 12177,
+        "skewMs": -229,
+        "speed": 1.00426,
+        "phase": "playing",
+        "path": "key_event"
+      }
+    },
+    {
+      "id": "TVR-A8 TV follows host seek",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "resumed": true,
+        "resumeMs": 1213,
+        "tvState": 3,
+        "tvMs": 31030,
+        "targetMs": 31048,
+        "skewMs": -18,
+        "speed": 1
+      }
+    },
+    {
+      "id": "TVR-A9 TV follows host pause",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "tvState": 2,
+        "tvMs": 30956,
+        "targetMs": 31049,
+        "skewMs": -93,
+        "speed": 0
+      }
+    },
+    {
+      "id": "TVR-A10 host End reaches the TV",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "messageShown": true
+      }
+    },
+    {
+      "id": "TVR-B0 details offers Watch together for a rooms-enabled profile",
+      "pass": false,
+      "detail": {
+        "lastFocus": [
+          "Retry"
+        ]
+      }
+    }
+  ]
+}
