@@ -6,7 +6,7 @@ import WatchNavigation from "~/components/library/WatchNavigation";
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useSearchParams,
@@ -22,7 +22,8 @@ import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server"
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
 import { libraryPage } from "~/lib/library-page";
-import { getLibraryIndex } from "~/lib/library-index.server";
+import { loadUpstreamLibrary } from "~/lib/upstream-library.server";
+import type { PlexMediaItem } from "~/lib/plex/types";
 
 export const meta: MetaFunction = () => {
   return [
@@ -117,6 +118,35 @@ function formatReleaseDate(dateStr?: string): string | undefined {
   }
 }
 
+function toView(item: PlexMediaItem, watchlistGuids: Set<string>): MovieItemView {
+  return {
+    ratingKey: item.ratingKey,
+    guid: item.guid,
+    title: item.title,
+    year: item.year?.toString(),
+    posterUrl: buildPosterUrl(item.thumb),
+    viewCount: item.viewCount ?? 0,
+    isInWatchlist: watchlistGuids.has(item.guid),
+    // Sort-relevant fields
+    audienceRating: item.audienceRating,
+    userRating: item.userRating,
+    releaseDate: item.originallyAvailableAt,
+    addedAt: item.addedAt,
+    details: {
+      backdropUrl: buildBackdropUrl(item.art),
+      releaseDate: formatReleaseDate(item.originallyAvailableAt),
+      runtime: formatRuntime(item.duration),
+      rating: item.contentRating,
+      audienceRating: item.audienceRating?.toFixed(1),
+      userRating: item.userRating?.toFixed(1),
+      genres: item.Genre?.map((g) => g.tag),
+      directors: item.Director?.map((d) => d.tag),
+      cast: item.Role?.map((r) => r.tag),
+      summary: item.summary,
+    },
+  };
+}
+
 export async function loader({
   request,
 }: LoaderFunctionArgs): Promise<Response> {
@@ -124,10 +154,9 @@ export async function loader({
   const plexToken = await requirePlexToken(request);
   const url = new URL(request.url);
 
-  const sort = url.searchParams.get("sort") || "titleSort";
-  const sortDirection = (url.searchParams.get("dir") || "asc") as
-    | "asc"
-    | "desc";
+  const requestedSort = url.searchParams.get("sort") || "titleSort";
+  const sort = SORT_OPTIONS.some((option) => option.value === requestedSort) ? requestedSort : "titleSort";
+  const sortDirection = url.searchParams.get("dir") === "desc" ? "desc" : "asc";
   const filter = url.searchParams.get("filter") || "all";
   const genreFilter = url.searchParams.get("genre") || undefined;
   const yearFilter = url.searchParams.get("year")
@@ -174,114 +203,30 @@ export async function loader({
   }
   const plexFilter = filterParts.length > 0 ? filterParts.join("&") : undefined;
 
-  // Fetch items and watchlist in parallel
-  // Note: Genre filtering is done client-side because Plex API requires genre IDs, not names
-  const [itemsResult, watchlistResult] = await Promise.all([
-    getLibraryIndex(client, token, sections.map((section) => section.key), {
-      sort: plexSort,
-      filter: plexFilter,
-      // genre: genreFilter, // Disabled - using client-side filtering instead
-      year: yearFilter,
-    }),
+  const requestedPage = Number(url.searchParams.get("page") || 1);
+  const [paged, watchlist] = await Promise.all([
+    loadUpstreamLibrary(client, sections.map((section) => section.key), { sort: plexSort, filter: plexFilter, year: yearFilter, genre: genreFilter }, requestedPage),
     new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token: plexToken, clientId: env.PLEX_CLIENT_ID }).getWatchlist({ type: "movie" }),
   ]);
-
-  if (!itemsResult.success) throw new Response("Could not finish loading your library. Refresh to try again.", { status: 503 });
-
-  // Build a set of GUIDs that are in watchlist for fast lookup
-  const watchlistGuids = new Set(
-    watchlistResult.success ? watchlistResult.data.map((item) => item.guid) : []
-  );
-
-  // Build items list (before genre filtering to extract available filters)
-  const allItems: MovieItemView[] = itemsResult.success
-    ? itemsResult.data.map((item) => ({
-        ratingKey: item.ratingKey,
-        guid: item.guid,
-        title: item.title,
-        year: item.year?.toString(),
-        posterUrl: buildPosterUrl(item.thumb),
-        viewCount: item.viewCount ?? 0,
-        isInWatchlist: watchlistGuids.has(item.guid),
-        // Sort-relevant fields
-        audienceRating: item.audienceRating,
-        userRating: item.userRating,
-        releaseDate: item.originallyAvailableAt,
-        addedAt: item.addedAt,
-        details: {
-          backdropUrl: buildBackdropUrl(item.art),
-          releaseDate: formatReleaseDate(item.originallyAvailableAt),
-          runtime: formatRuntime(item.duration),
-          rating: item.contentRating,
-          audienceRating: item.audienceRating?.toFixed(1),
-          userRating: item.userRating?.toFixed(1),
-          genres: item.Genre?.map((g) => g.tag),
-          directors: item.Director?.map((d) => d.tag),
-          cast: item.Role?.map((r) => r.tag),
-          summary: item.summary,
-        },
-      }))
-    : [];
-
-  // Apply client-side genre filtering (Plex API requires genre IDs, not names)
-  let items = genreFilter
-    ? allItems.filter((item) => item.details.genres?.includes(genreFilter))
-    : allItems;
-
-  // Apply client-side sorting for rating fields (Plex API doesn't handle nulls consistently)
-  if (sort === "audienceRating" || sort === "userRating" || sort === "rating") {
-    const getRatingValue = (item: MovieItemView): number | null => {
-      if (sort === "userRating") return item.userRating ?? null;
-      if (sort === "audienceRating") return item.audienceRating ?? null;
-      // For critic rating, we'd need to add it to the view model if needed
-      return item.audienceRating ?? null;
-    };
-
-    items = [...items].sort((a, b) => {
-      const aVal = getRatingValue(a);
-      const bVal = getRatingValue(b);
-      // Items without ratings go to the end
-      if (aVal === null && bVal === null) return 0;
-      if (aVal === null) return 1;
-      if (bVal === null) return -1;
-      // Sort by rating value
-      return sortDirection === "desc" ? bVal - aVal : aVal - bVal;
-    });
-  }
-
-  // Extract available filter values from raw items (before filtering)
-  // For filtered views, we'd need a separate call to get all genres/years
-  // For now, extract from the current result set
-  const genreSet = new Set<string>();
-  const yearSet = new Set<number>();
-  if (itemsResult.success) {
-    for (const item of itemsResult.data) {
-      if (item.Genre) {
-        for (const g of item.Genre) {
-          genreSet.add(g.tag);
-        }
-      }
-      if (item.year) {
-        yearSet.add(item.year);
-      }
+  if (url.searchParams.has("shuffle") && paged.total) {
+    let choice = Math.floor(Math.random() * paged.total);
+    const part = paged.sections.find((section) => { if (choice < section.total) return true; choice -= section.total; return false; });
+    if (part) {
+      const random = await client.getLibraryPage(part.section, { ...part.query, offset: choice, limit: 1 });
+      if (!random.success || !random.data.items[0]) throw new Response("Could not shuffle your library. Refresh to try again.", { status: 503 });
+      return redirect(`/app/watch/${random.data.items[0].ratingKey}`);
     }
   }
-
+  const watchlistGuids = new Set(watchlist.success ? watchlist.data.map((item) => item.guid) : []);
   return json<LoaderData>({
-    ...libraryPage(items, url.searchParams.get("page")),
+    items: paged.items.map((item) => toView(item, watchlistGuids)),
+    page: paged.page, pages: paged.pages, total: paged.total, letters: paged.letters,
+    keys: paged.firstKey ? [paged.firstKey] : [],
     libraryKey: movieLibrary.key,
-    currentFilters: {
-      sort,
-      sortDirection,
-      filter,
-      genre: genreFilter,
-      year: yearFilter,
-    },
-    availableFilters: {
-      genres: Array.from(genreSet).sort(),
-      years: Array.from(yearSet).sort((a, b) => b - a), // Descending (newest first)
-    },
+    currentFilters: { sort, sortDirection, filter, genre: genreFilter, year: yearFilter },
+    availableFilters: paged.availableFilters,
   });
+
 }
 
 // Context menu state type
@@ -505,13 +450,13 @@ export default function MoviesPage() {
     if (keys.length > 0) navigate(`/app/watch/${keys[0]}`);
   }, [keys, navigate]);
 
-  // Handle shuffle
+  // Request a fresh random item from the complete filtered library.
   const handleShuffle = useCallback(() => {
-    if (keys.length > 0) {
-      const randomKey = keys[Math.floor(Math.random() * keys.length)];
-      navigate(`/app/watch/${randomKey}`);
-    }
-  }, [keys, navigate]);
+    if (!total) return;
+    const params = new URLSearchParams(searchParams);
+    params.set("shuffle", String(Date.now()));
+    setSearchParams(params);
+  }, [searchParams, setSearchParams, total]);
 
   // Handle clear all filters
   const handleClearFilters = useCallback(() => {
