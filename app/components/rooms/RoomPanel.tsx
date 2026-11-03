@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, Users } from "lucide-react";
+import { Button, buttonStyles } from "~/components/ui";
 import type { RoomClientState } from "~/lib/rooms/client";
 import type {
   RoomPlayerDiagnostics,
@@ -113,11 +114,12 @@ export function RoomPanel({
   };
 
   return (
-    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] rounded-md border border-white/20 bg-black/90 text-white shadow-xl">
-      <button
+    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] rounded-lg border border-border-emphasis bg-background-elevated text-foreground-primary shadow-xl">
+      <Button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex min-h-11 w-full items-center gap-2 px-3 text-left"
+        variant="ghost"
+        className="w-full gap-2 text-left"
         aria-expanded={expanded}
       >
         <Users className="h-5 w-5" />
@@ -127,19 +129,19 @@ export function RoomPanel({
         ) : (
           <ChevronDown className="h-5 w-5" />
         )}
-      </button>
-      <div aria-live="polite" className="min-h-5 px-3 pb-2 text-sm text-white/80">
+      </Button>
+      <div aria-live="polite" className="min-h-5 px-3 pb-2 text-sm text-foreground-secondary">
         {status}
       </div>
 
       {countdownSeconds !== null && (
-        <div className="mx-3 mb-3 rounded border border-mango/40 bg-mango/10 p-3 text-sm">
+        <div className="mx-3 mb-3 rounded border border-accent-primary/40 bg-accent-primary/10 p-3 text-sm">
           Next episode in <span aria-hidden="true">{countdownSeconds}s</span>
           <span className="sr-only">a few seconds</span>
           {controller.isHost && (
-            <button
+            <Button
               type="button"
-              className="ml-3 min-h-11 underline"
+              variant="ghost" size="sm" className="ml-3"
               onClick={() =>
                 void controller.sendIntent({
                   type: "cancel-next",
@@ -148,34 +150,34 @@ export function RoomPanel({
               }
             >
               Cancel
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       {!self?.ready && controller.status === "connected" && (
         <div className="px-3 pb-3">
-          <button
+          <Button
             type="button"
             onClick={onReady}
-            className="min-h-11 w-full rounded bg-mango px-3 font-semibold text-black"
+            className="w-full"
           >
             {self?.error === "autoplay_blocked"
               ? "Tap to start playback"
               : "I'm ready"}
-          </button>
+          </Button>
         </div>
       )}
 
       {expanded && (
-        <div className="max-h-[calc(100vh-18rem)] overflow-y-auto border-t border-white/10 p-3">
+        <div className="max-h-[calc(100vh-18rem)] overflow-y-auto border-t border-border-subtle p-3">
           <p className="truncate text-sm font-semibold">{title}</p>
 
           <ul className="mt-3 space-y-2" aria-label="Room members">
             {snapshot.participants.map((participant) => (
               <li
                 key={participant.participantId}
-                className="flex min-h-11 items-center gap-2 border-b border-white/10 py-2 text-sm last:border-0"
+                className="flex min-h-11 flex-wrap items-center gap-2 border-b border-border-subtle py-2 text-sm last:border-0"
               >
                 <span className="min-w-0 flex-1 truncate">
                   {participant.displayName}
@@ -183,7 +185,7 @@ export function RoomPanel({
                     ? " (Host)"
                     : ""}
                 </span>
-                <span className="text-white/60">
+                <span className="text-foreground-secondary">
                   {participantStatus(participant)}
                   {participant.blocking && participant.buffering
                     ? " - blocking"
@@ -191,10 +193,10 @@ export function RoomPanel({
                 </span>
                 {controller.isHost &&
                   participant.participantId !== controller.participantId && (
-                    <span className="flex gap-1">
-                      <button
+                    <span className="flex flex-wrap gap-1">
+                      <Button
                         type="button"
-                        className="min-h-11 px-2 text-xs underline"
+                        variant="ghost" size="sm"
                         onClick={() =>
                           void controller.sendIntent({
                             type: "transfer-host",
@@ -205,10 +207,10 @@ export function RoomPanel({
                         }
                       >
                         Transfer
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="min-h-11 px-2 text-xs underline"
+                        variant="ghost" size="sm"
                         onClick={() => {
                           void controller.sendIntent({
                             type: "remove-participant",
@@ -219,7 +221,7 @@ export function RoomPanel({
                         }}
                       >
                         Remove
-                      </button>
+                      </Button>
                     </span>
                   )}
               </li>
@@ -227,112 +229,112 @@ export function RoomPanel({
           </ul>
 
           {removedMember && controller.isHost && invitation && (
-            <div className="mt-3 rounded border border-white/20 p-3 text-sm">
+            <div className="mt-3 rounded-md border border-border-emphasis p-3 text-sm">
               <span>Member removed.</span>
-              <button
+              <Button
                 type="button"
-                className="ml-2 min-h-11 underline"
+                variant="ghost" size="sm" className="ml-2"
                 onClick={() => {
                   setRemovedMember(false);
                   onInvitation("rotate");
                 }}
               >
                 Also rotate invite link
-              </button>
+              </Button>
             </div>
           )}
 
           {controller.isHost &&
             (snapshot.phase === "lobby" || snapshot.phase === "paused") && (
-              <button
+              <Button
                 type="button"
                 disabled={controller.status !== "connected" || !blockersReady}
                 onClick={() =>
                   void controller.sendIntent({ type: "play", payload: {} })
                 }
-                className="mt-3 min-h-11 w-full rounded border border-white/30 px-3 font-semibold disabled:opacity-50"
+                variant="secondary" className="mt-3 w-full"
               >
                 Start
-              </button>
+              </Button>
             )}
 
           {controller.isHost && invitation && (
-            <section className="mt-4 border-t border-white/10 pt-3">
+            <section className="mt-4 border-t border-border-subtle pt-3">
               <label htmlFor="room-invite" className="text-sm font-semibold">
                 Invite link
               </label>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <input
                   id="room-invite"
                   readOnly
                   value={inviteUrl}
                   onFocus={(event) => event.currentTarget.select()}
-                  className="min-w-0 flex-1 rounded border border-white/30 bg-white/5 px-2 text-xs"
+                  className="min-w-0 flex-1 rounded-md border border-border-emphasis bg-background-secondary px-3 text-sm text-foreground-primary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
                 />
-                <button
+                <Button
                   type="button"
                   onClick={copyInvite}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded border border-white/30"
+                  variant="secondary" size="sm"
                   aria-label="Copy invite link"
                 >
                   <Copy className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
-              <p className="mt-1 text-xs text-white/50">
+              <p className="mt-1 text-xs text-foreground-secondary">
                 {copied ? "Copied." : "Expires "}
                 {!copied && `in ${inviteMinutes} min`}
               </p>
-              <div className="mt-2 flex gap-2">
-                <button
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
                   type="button"
                   disabled={pending}
                   onClick={() => onInvitation("rotate")}
-                  className="min-h-11 flex-1 rounded border border-white/30 px-2 text-sm"
+                  variant="secondary" size="sm" className="flex-1"
                 >
                   Rotate
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   disabled={pending}
                   onClick={() => onInvitation("revoke")}
-                  className="min-h-11 flex-1 rounded border border-white/30 px-2 text-sm"
+                  variant="secondary" size="sm" className="flex-1"
                 >
                   Revoke
-                </button>
+                </Button>
               </div>
             </section>
           )}
 
-          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/10 pt-3">
-            <button
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border-subtle pt-3">
+            <Button
               type="button"
               onClick={onLeave}
-              className="min-h-11 rounded border border-white/30 px-3 text-sm"
+              variant="secondary" size="sm"
             >
               Leave
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={onContinueSolo}
-              className="min-h-11 rounded border border-white/30 px-3 text-sm"
+              variant="secondary" size="sm"
             >
               Continue solo
-            </button>
+            </Button>
             {controller.isHost && (
-              <button
+              <Button
                 type="button"
                 onClick={() =>
                   void controller.sendIntent({ type: "end", payload: {} })
                 }
-                className="col-span-2 min-h-11 rounded border border-red-400/50 px-3 text-sm text-red-200"
+                variant="secondary" size="sm" className="col-span-2 !border-red-400/50 !text-red-200"
               >
                 End room
-              </button>
+              </Button>
             )}
           </div>
 
-          <details className="mt-4 border-t border-white/10 pt-3 text-xs text-white/60">
-            <summary className="min-h-11 cursor-pointer py-3 font-semibold text-white/80">
+          <details className="mt-4 border-t border-border-subtle pt-3 text-xs text-foreground-secondary">
+            <summary className="min-h-11 cursor-pointer py-3 font-semibold text-foreground-secondary">
               Room details
             </summary>
             <dl className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono">
@@ -388,10 +390,10 @@ export function RoomTakeover({ pending, onTakeover }: { pending: boolean; onTake
   useEffect(() => buttonRef.current?.focus(), []);
   return (
     <div ref={dialogRef} className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 p-4" role="alertdialog" aria-modal="true" aria-labelledby="takeover-title">
-      <div className="max-w-md rounded-md border border-white/20 bg-black p-6 text-white">
+      <div className="max-w-md rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
         <h2 id="takeover-title" className="text-lg font-semibold">Room already open</h2>
-        <p className="mt-2 text-sm text-white/70">This room is open in another tab or window on this device.</p>
-        <button ref={buttonRef} type="button" disabled={pending} onClick={onTakeover} className="mt-5 min-h-11 w-full rounded bg-mango px-4 font-semibold text-black disabled:opacity-50">Take over here</button>
+        <p className="mt-2 text-sm text-foreground-secondary">This room is open in another tab or window on this device.</p>
+        <button ref={buttonRef} type="button" disabled={pending} onClick={onTakeover} className={buttonStyles({ className: "mt-5 w-full" })}>Take over here</button>
       </div>
     </div>
   );
@@ -427,21 +429,20 @@ export function RoomTerminal({
         >
           {message}
         </h2>
-        <div className="mt-5 flex justify-center gap-3">
-          <button
+        <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <Button
             type="button"
             onClick={onContinueSolo}
-            className="min-h-11 rounded bg-mango px-4 font-semibold text-black"
           >
             Continue solo
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={onBack}
-            className="min-h-11 rounded border border-white/30 px-4"
+            variant="secondary"
           >
             Back
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Button, buttonStyles } from "~/components/ui";
 
 type CreateRoomDialogProps = {
   title: string;
@@ -45,11 +46,11 @@ export function CreateRoomDialog({
       aria-modal="true"
       aria-labelledby="create-room-title"
     >
-      <div className="w-full max-w-md rounded-md border border-white/20 bg-black p-6 text-white shadow-2xl">
+      <div className="w-full max-w-md rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
         <h2 id="create-room-title" className="text-xl font-semibold">
           Watch together
         </h2>
-        <p className="mt-2 text-sm text-white/70">{title}</p>
+        <p className="mt-2 text-sm text-foreground-secondary">{title}</p>
         {disabledReason && (
           <p className="mt-4 rounded border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-100">
             {disabledReason}
@@ -66,28 +67,28 @@ export function CreateRoomDialog({
             type="button"
             disabled={pending || disabled}
             onClick={() => create(0)}
-            className="min-h-11 rounded bg-mango px-4 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50"
+            className={buttonStyles()}
           >
             {pending ? "Creating room..." : "Start from beginning"}
           </button>
           {resumePositionMs > 0 && (
-            <button
+            <Button
+              variant="secondary"
               type="button"
               disabled={pending || disabled}
               onClick={() => create(resumePositionMs)}
-              className="min-h-11 rounded border border-white/30 px-4 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start from saved position
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="ghost"
             type="button"
             disabled={pending}
             onClick={onCancel}
-            className="min-h-11 rounded px-4 text-white/80 hover:bg-white/10"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>
