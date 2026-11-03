@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@remix-run/react";
+import { Button } from "~/components/ui";
 import { joinRoom, RoomApiError } from "~/lib/rooms/client";
 
 const pendingJoins = new Map<string, ReturnType<typeof joinRoom>>();
@@ -81,13 +82,14 @@ export default function JoinRoomPage() {
           {error ?? "Joining the room..."}
         </p>
         {error && (
-          <button
+          <Button
+            variant="secondary"
             type="button"
             onClick={() => navigate("/app", { replace: true })}
-            className="mt-5 min-h-11 rounded border border-border-subtle px-4"
+            className="mt-5"
           >
             Return home
-          </button>
+          </Button>
         )}
       </div>
     </main>
