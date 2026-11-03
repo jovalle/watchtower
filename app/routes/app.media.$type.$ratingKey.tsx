@@ -32,7 +32,7 @@ import {
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
 import { TrailerModal } from "~/components/media/TrailerModal";
-import { Typography, Button } from "~/components/ui";
+import { Typography, Button, buttonStyles } from "~/components/ui";
 import {
   requireServerToken,
   requirePlexToken,
@@ -1917,7 +1917,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                         (type === "movie" || type === "episode") && (
                           <Link
                             to={`/app/watch/${metadata.ratingKey}?together=1`}
-                            className="flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-background-elevated px-5 font-medium text-foreground-primary transition-colors hover:bg-background-hover"
+                            className={buttonStyles({ variant: "secondary", size: "lg", className: "w-full sm:w-auto" })}
                           >
                             <Users className="mr-2 h-5 w-5" />
                             Watch together

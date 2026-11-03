@@ -46,6 +46,16 @@ const sizeStyles: Record<ButtonSize, string> = {
   lg: "px-6 py-3 text-lg",
 };
 
+export function buttonStyles({
+  variant = "primary",
+  size = "md",
+  className = "",
+}: Pick<ButtonProps, "variant" | "size" | "className"> = {}) {
+  const baseStyles =
+    "inline-flex min-h-11 min-w-11 items-center justify-center align-middle font-medium rounded-md origin-center will-change-transform transition-[transform,background-color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:pointer-events-none";
+  return `${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]}${className ? ` ${className}` : ""}`;
+}
+
 export function Button({
   variant = "primary",
   size = "md",
@@ -53,16 +63,8 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
-  const baseStyles =
-    "inline-flex min-h-11 min-w-11 items-center justify-center align-middle font-medium rounded-md origin-center will-change-transform transition-[transform,background-color,box-shadow] duration-200";
-  const variantClasses = variantStyles[variant];
-  const sizeClasses = sizeStyles[size];
-
   return (
-    <button
-      className={`${baseStyles} ${variantClasses} ${sizeClasses}${className ? ` ${className}` : ""}`}
-      {...props}
-    >
+    <button className={buttonStyles({ variant, size, className })} {...props}>
       {children}
     </button>
   );
