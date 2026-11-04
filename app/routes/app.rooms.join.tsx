@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@remix-run/react";
+import { Container, PageHeader } from "~/components/layout";
 import { Button } from "~/components/ui";
 import { joinRoom, RoomApiError } from "~/lib/rooms/client";
 
@@ -75,10 +76,10 @@ export default function JoinRoomPage() {
   }, [navigate]);
 
   return (
-    <main className="flex min-h-[60vh] items-center justify-center p-6">
-      <div className="max-w-md text-center">
-        <h1 className="text-2xl font-semibold">Join room</h1>
-        <p className="mt-3 text-foreground-secondary" role="status">
+    <Container size="wide" className="pb-16 pt-8">
+      <PageHeader title="Join Room" />
+      <div className="max-w-md">
+        <p className="text-foreground-secondary" role="status">
           {error ?? "Joining the room..."}
         </p>
         {error && (
@@ -88,10 +89,10 @@ export default function JoinRoomPage() {
             onClick={() => navigate("/app", { replace: true })}
             className="mt-5"
           >
-            Return home
+            Return Home
           </Button>
         )}
       </div>
-    </main>
+    </Container>
   );
 }

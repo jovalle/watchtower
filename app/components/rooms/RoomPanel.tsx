@@ -1,5 +1,6 @@
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, Users } from "lucide-react";
+import { useContainedTab } from "~/hooks/useContainedTab";
 import { Button, buttonStyles } from "~/components/ui";
 import type { RoomClientState } from "~/lib/rooms/client";
 import type {
@@ -114,7 +115,7 @@ export function RoomPanel({
   };
 
   return (
-    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] rounded-lg border border-border-emphasis bg-background-elevated text-foreground-primary shadow-xl">
+    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-lg border border-border-emphasis bg-background-elevated text-foreground-primary shadow-xl">
       <Button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -163,14 +164,14 @@ export function RoomPanel({
             className="w-full"
           >
             {self?.error === "autoplay_blocked"
-              ? "Tap to start playback"
-              : "I'm ready"}
+              ? "Tap to Start Playback"
+              : "I'm Ready"}
           </Button>
         </div>
       )}
 
       {expanded && (
-        <div className="max-h-[calc(100vh-18rem)] overflow-y-auto border-t border-border-subtle p-3">
+        <div className="border-t border-border-subtle p-3">
           <p className="truncate text-sm font-semibold">{title}</p>
 
           <ul className="mt-3 space-y-2" aria-label="Room members">
@@ -239,7 +240,7 @@ export function RoomPanel({
                   onInvitation("rotate");
                 }}
               >
-                Also rotate invite link
+                Also Rotate Invite Link
               </Button>
             </div>
           )}
@@ -275,7 +276,7 @@ export function RoomPanel({
                   type="button"
                   onClick={copyInvite}
                   variant="secondary" size="sm"
-                  aria-label="Copy invite link"
+                  aria-label="Copy Invite Link"
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -318,7 +319,7 @@ export function RoomPanel({
               onClick={onContinueSolo}
               variant="secondary" size="sm"
             >
-              Continue solo
+              Continue Solo
             </Button>
             {controller.isHost && (
               <Button
@@ -328,16 +329,16 @@ export function RoomPanel({
                 }
                 variant="secondary" size="sm" className="col-span-2 !border-red-400/50 !text-red-200"
               >
-                End room
+                End Room
               </Button>
             )}
           </div>
 
           <details className="mt-4 border-t border-border-subtle pt-3 text-xs text-foreground-secondary">
             <summary className="min-h-11 cursor-pointer py-3 font-semibold text-foreground-secondary">
-              Room details
+              Room Details
             </summary>
-            <dl className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono">
+            <dl className="grid grid-cols-2 gap-x-2 gap-y-1 break-words font-mono">
               <dt>Room</dt><dd>{snapshot.roomId.slice(0, 8)}</dd>
               <dt>Epoch</dt><dd>{snapshot.epoch.slice(0, 8)}</dd>
               <dt>Revision</dt><dd>{snapshot.revision}/{snapshot.presenceRevision}</dd>
@@ -357,43 +358,17 @@ export function RoomPanel({
   );
 }
 
-/** Keeps Tab inside a modal room overlay so the covered player controls stay unreachable. */
-function useContainedTab(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>("button:not([disabled])")];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (!first || !last) {
-        event.preventDefault();
-      } else if (event.shiftKey && (active === first || !active || !focusable.includes(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    dialog.addEventListener("keydown", onKeyDown);
-    return () => dialog.removeEventListener("keydown", onKeyDown);
-  }, [ref]);
-}
-
 export function RoomTakeover({ pending, onTakeover }: { pending: boolean; onTakeover(): void }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useContainedTab(dialogRef);
   useEffect(() => buttonRef.current?.focus(), []);
   return (
-    <div ref={dialogRef} className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 p-4" role="alertdialog" aria-modal="true" aria-labelledby="takeover-title">
-      <div className="max-w-md rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
-        <h2 id="takeover-title" className="text-lg font-semibold">Room already open</h2>
+    <div ref={dialogRef} className="absolute inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/85 p-4" role="alertdialog" aria-modal="true" aria-labelledby="takeover-title">
+      <div className="my-auto max-w-md break-words rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
+        <h2 id="takeover-title" className="text-lg font-semibold">Room Already Open</h2>
         <p className="mt-2 text-sm text-foreground-secondary">This room is open in another tab or window on this device.</p>
-        <button ref={buttonRef} type="button" disabled={pending} onClick={onTakeover} className={buttonStyles({ className: "mt-5 w-full" })}>Take over here</button>
+        <button ref={buttonRef} type="button" disabled={pending} onClick={onTakeover} className={buttonStyles({ className: "mt-5 w-full" })}>Take Over Here</button>
       </div>
     </div>
   );
@@ -418,9 +393,9 @@ export function RoomTerminal({
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="room-terminal-message"
-      className="absolute inset-0 z-[65] flex items-center justify-center bg-black/85 p-6 text-center text-white"
+      className="absolute inset-0 z-[65] flex items-center justify-center overflow-y-auto bg-black/85 p-6 text-center text-white"
     >
-      <div>
+      <div className="my-auto w-full max-w-lg break-words">
         <h2
           id="room-terminal-message"
           ref={messageRef}
@@ -434,7 +409,7 @@ export function RoomTerminal({
             type="button"
             onClick={onContinueSolo}
           >
-            Continue solo
+            Continue Solo
           </Button>
           <Button
             type="button"

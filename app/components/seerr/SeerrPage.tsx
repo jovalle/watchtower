@@ -1,10 +1,12 @@
 import { Form, Link, useNavigation, useSearchParams } from "@remix-run/react";
 import type { ReactNode } from "react";
-import { Container } from "~/components/layout";
+import { Container, PageHeader } from "~/components/layout";
+import { buttonStyles } from "~/components/ui/Button";
 
-export const controlClass =
-  "min-h-11 rounded-md border border-border-emphasis bg-background-secondary px-4 py-2 text-sm text-foreground-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary disabled:opacity-50";
-export const actionClass = `${controlClass} bg-accent-primary text-accent-foreground font-medium`;
+export const inputClass =
+  "min-h-11 min-w-0 rounded-md border border-border-emphasis bg-background-elevated px-4 py-2 text-sm text-foreground-primary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary disabled:opacity-50";
+export const controlClass = buttonStyles({ variant: "secondary", size: "sm" });
+export const actionClass = buttonStyles({ size: "sm" });
 
 export function SeerrError({ error }: { error: string }) {
   return (
@@ -12,12 +14,12 @@ export function SeerrError({ error }: { error: string }) {
       role="alert"
       className="my-6 rounded-lg border border-border-emphasis p-5"
     >
-      <p>{error}</p>
-      <div className="mt-4 flex gap-4">
-        <Link reloadDocument to="" className="text-accent-primary">
-          Try again
+      <p className="break-words">{error}</p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Link reloadDocument to="" className={controlClass}>
+          Try Again
         </Link>
-        <Link to="/app/settings" className="text-accent-primary">
+        <Link to="/app/settings" className={controlClass}>
           Settings
         </Link>
       </div>
@@ -38,8 +40,7 @@ export function SeerrPage({
   return (
     <Container size="wide" className="pb-16 pt-8">
       <div aria-busy={navigation.state !== "idle"}>
-        <h1 className="text-3xl font-bold">{title}</h1>
-        <p className="mb-8 mt-2 text-foreground-secondary">{description}</p>
+        <PageHeader title={title} description={description} />
         {children}
       </div>
     </Container>
@@ -63,7 +64,7 @@ export function ListFilter({
         name="filter"
         defaultValue={value}
         key={value}
-        className={controlClass}
+        className={inputClass}
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -85,7 +86,7 @@ export function Pagination({ page, pages }: { page: number; pages: number }) {
   };
   if (pages < 2 && page === 1) return null;
   return (
-    <nav aria-label="Pagination" className="mt-8 flex items-center gap-4">
+    <nav aria-label="Pagination" className="mt-8 flex flex-wrap items-center gap-4">
       {page > 1 && (
         <Link to={href(page - 1)} className={controlClass}>
           Previous

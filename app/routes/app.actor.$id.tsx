@@ -37,6 +37,7 @@ interface MediaItemView {
 }
 
 interface LoaderData {
+  errors: string[];
   actorName: string;
   actorPhotoUrl?: string;
   movies: MediaItemView[];
@@ -134,12 +135,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const movieLibrary = librariesResult.data.find((lib) => lib.type === "movie");
   const tvLibrary = librariesResult.data.find((lib) => lib.type === "show");
 
+  const errors: string[] = [];
   const movies: MediaItemView[] = [];
   const shows: MediaItemView[] = [];
 
   // Search movies by actor ID
   if (movieLibrary) {
     const result = await client.getLibraryItemsByActor(movieLibrary.key, id);
+    if (!result.success) errors.push("Could not load this actor’s movies.");
     if (result.success) {
       for (const item of result.data) {
         movies.push(transformToView(item));
@@ -150,6 +153,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Search TV shows by actor ID
   if (tvLibrary) {
     const result = await client.getLibraryItemsByActor(tvLibrary.key, id);
+    if (!result.success) errors.push("Could not load this actor’s series.");
     if (result.success) {
       for (const item of result.data) {
         shows.push(transformToView(item));
@@ -159,6 +163,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return json<LoaderData>({
     actorName,
+    errors,
     actorPhotoUrl,
     movies,
     shows,
@@ -166,7 +171,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export default function ActorPage() {
-  const { actorName, actorPhotoUrl, movies, shows } =
+  const { actorName, actorPhotoUrl, movies, shows, errors = [] } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
@@ -176,7 +181,7 @@ export default function ActorPage() {
     <div className="min-h-screen pb-16">
       <Container size="wide" className="pt-8">
         {/* Actor Header */}
-        <div className="mb-8 flex items-center gap-6">
+        <div className="mb-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-6">
           {/* Actor Photo */}
           <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-full bg-background-elevated md:h-32 md:w-32">
             {actorPhotoUrl ? (
@@ -192,7 +197,7 @@ export default function ActorPage() {
             )}
           </div>
 
-          <div>
+          <div className="min-w-0 break-words">
             <Typography variant="hero" as="h1">
               {actorName}
             </Typography>
@@ -204,11 +209,12 @@ export default function ActorPage() {
         </div>
 
         {/* No Content State */}
-        {!hasContent && (
+        {errors.map((message) => <p key={message} role="alert" className="mb-4 text-foreground-secondary">{message}</p>)}
+        {!hasContent && !errors.length && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <User className="mb-4 h-16 w-16 text-foreground-muted" />
             <Typography variant="subtitle" className="mb-2">
-              No content found
+              No Content Found
             </Typography>
             <Typography variant="body" className="text-foreground-secondary">
               No movies or TV shows featuring this actor were found in your

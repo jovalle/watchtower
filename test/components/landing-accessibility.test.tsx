@@ -6,7 +6,7 @@ vi.mock("@remix-run/react", () => ({ useNavigation: () => ({ state: "idle" }), F
 
 it("exposes FAQ state and hides collapsed answers", () => {
   render(<Index />);
-  const question = screen.getByRole("button", { name: "What is Watchtower?" });
+  const question = screen.getByRole("button", { name: "What Is Watchtower?" });
   expect(question).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByText(/private streaming interface/)).not.toBeVisible();
   fireEvent.click(question);

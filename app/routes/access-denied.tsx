@@ -9,6 +9,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
+import { Button, buttonStyles } from "~/components/ui";
 import { ShieldX, LogOut, HelpCircle } from "lucide-react";
 import { getPlexToken } from "~/lib/auth/session.server";
 import { getPlexUser } from "~/lib/auth/plex.server";
@@ -45,8 +46,8 @@ export default function AccessDenied() {
   return (
     <div className="flex min-h-screen flex-col bg-background-primary">
       {/* Main content */}
-      <main className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-        <div className="max-w-md space-y-6">
+      <main className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
+        <div className="w-full max-w-md break-words space-y-6">
           {/* Icon */}
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10">
             <ShieldX className="h-10 w-10 text-red-500" />
@@ -89,19 +90,19 @@ export default function AccessDenied() {
           <div className="flex flex-col gap-3 pt-4">
             {/* Logout and try different account */}
             <Form method="post" action="/auth/logout">
-              <button
+              <Button
                 type="submit"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-accent-primary px-6 py-3 font-semibold text-accent-foreground transition-colors hover:bg-accent-hover"
+                className="w-full gap-2"
               >
                 <LogOut className="h-4 w-4" />
                 Try a Different Account
-              </button>
+              </Button>
             </Form>
 
             {/* Back to home */}
             <a
               href="/"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-foreground-muted/20 bg-transparent px-6 py-3 font-semibold text-foreground-primary transition-colors hover:bg-background-elevated"
+              className={buttonStyles({ variant: "secondary", className: "w-full gap-2" })}
             >
               Return Home
             </a>

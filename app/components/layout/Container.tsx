@@ -27,7 +27,7 @@ export function Container({
 }: ContainerProps) {
   return (
     <div
-      className={`mx-auto w-full px-4 sm:px-6 lg:px-8 ${sizeClasses[size]} ${className}`}
+      className={`page-gutter mx-auto w-full ${sizeClasses[size]} ${className}`}
     >
       {children}
     </div>

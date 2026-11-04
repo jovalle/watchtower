@@ -17,6 +17,7 @@ interface MediaCardProps {
   onAddToWatchlist?: () => void;
   /** Whether item is already in watchlist */
   isInWatchlist?: boolean;
+  watchlistPending?: boolean;
   /** Number of times watched (viewCount > 0 = watched for movies) */
   viewCount?: number;
   /** Total episodes (TV shows only - used for watched calculation) */
@@ -55,6 +56,7 @@ export function MediaCard({
   fullWidth = false,
   onAddToWatchlist,
   isInWatchlist = false,
+  watchlistPending = false,
   viewCount = 0,
   leafCount,
   viewedLeafCount,
@@ -96,14 +98,6 @@ export function MediaCard({
   // Determine if we should show the logo (has URL, loaded successfully, no error)
   const showLogo = logoUrl && logoLoaded && !logoError;
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick?.();
-    }
-  };
-
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onPlay?.();
@@ -118,22 +112,20 @@ export function MediaCard({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={`${title}${year ? `, ${year}` : ""}${isWatched ? " (watched)" : ""}`}
-      onClick={onClick}
-      onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       onMouseLeave={() => setShowRemoveConfirm(false)}
-      className={`group relative cursor-pointer origin-center snap-start will-change-transform transition-transform duration-200 ease-out hover:z-10 hover:scale-105 focus:z-10 focus:scale-105 ${
+      className={`group relative cursor-pointer origin-center snap-start will-change-transform transition-transform duration-200 ease-out hover:z-10 hover:scale-105 focus-within:z-10 focus-within:scale-105 ${
         fullWidth
           ? "w-full"
           : "w-[280px] flex-shrink-0 md:w-[340px] lg:w-[400px]"
       }`}
     >
+      <button type="button" onClick={onClick}
+        aria-label={`${title}${year ? `, ${year}` : ""}${isWatched ? " (watched)" : ""}`}
+        className="absolute inset-0 z-10 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary" />
       {/* Card container with aspect ratio */}
       <div
-        className="relative aspect-[2/1] overflow-hidden rounded-xl bg-background-elevated shadow-lg transition-[box-shadow,ring-color] duration-200 ease-out group-hover:shadow-2xl group-hover:ring-2 group-hover:ring-white/50 group-focus:shadow-2xl group-focus:ring-2 group-focus:ring-accent-primary"
+        className="pointer-events-none relative z-20 aspect-[2/1] overflow-hidden rounded-xl bg-background-elevated shadow-lg transition-[box-shadow,ring-color] duration-200 ease-out group-hover:shadow-2xl group-hover:ring-2 group-hover:ring-white/50 group-focus-within:shadow-2xl group-focus-within:ring-2 group-focus-within:ring-accent-primary"
       >
         {/* Thumbnail image */}
         <ProxiedImage
@@ -215,7 +207,7 @@ export function MediaCard({
         )}
 
         {/* Hover content - action buttons only (title now always visible) */}
-        <div className="absolute inset-0 flex items-end justify-end p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
+        <div className="absolute inset-0 flex items-end justify-end p-3 opacity-0 [@media(hover:none)]:opacity-100 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
@@ -274,6 +266,8 @@ export function MediaCard({
                     : "bg-mango-hover text-black hover:bg-mango-hover"
                 }`}
                 aria-label={isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
+                disabled={watchlistPending}
+                aria-pressed={isInWatchlist}
                 title={isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
               >
                 {isInWatchlist ? (
