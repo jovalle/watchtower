@@ -13,6 +13,8 @@ export default defineConfig({
   server: {
     port: 9001,
   },
+  // Prebundle the lazy player dependency to avoid a late React dependency reload.
+  optimizeDeps: { include: ["hls.js"] },
   plugins: [
     remix({
       future: {

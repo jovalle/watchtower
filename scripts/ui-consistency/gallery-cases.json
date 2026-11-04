@@ -55,5 +55,9 @@
   "guest-error",
   "install-banner",
   "toast",
-  "toast-long"
+  "toast-long",
+  "room-player-playing",
+  "room-player-lobby",
+  "room-player-reconnecting",
+  "room-player-countdown"
 ]

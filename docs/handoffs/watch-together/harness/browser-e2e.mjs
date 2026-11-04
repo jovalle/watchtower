@@ -72,7 +72,7 @@ export async function run({ server, startServer, waitForServer }) {
   // The panel collapses while playing; expand it before reading the member list.
   const panel = (page) => page.evaluate(() => {
     const aside = document.querySelector("aside");
-    aside?.querySelector(':scope > button[aria-expanded="false"]')?.click();
+    aside?.querySelector('button[aria-label="Watch Together"][aria-expanded="false"]')?.click();
     return aside?.innerText ?? "";
   }).catch(() => "");
   const body = (page) => page.evaluate(() => document.body.innerText).catch(() => "");

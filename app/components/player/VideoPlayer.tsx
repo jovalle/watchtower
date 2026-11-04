@@ -3,7 +3,7 @@
  * Features: custom controls, quality selection, Plex progress sync, resume playback.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { useNavigate } from "@remix-run/react";
 import type HlsType from "hls.js";
 import {
@@ -126,6 +126,7 @@ export interface VideoPlayerProps {
   autoSkipIntro?: boolean;
   autoPlayNextEpisode?: boolean;
   room?: WatchRoomController | null;
+  roomPanel?: ReactNode;
   onRoomDiagnostics?(update: {
     driftMs: number;
     correction: "seek" | "rate" | null;
@@ -170,6 +171,7 @@ export function VideoPlayer({
   autoSkipIntro = false,
   autoPlayNextEpisode = true,
   room = null,
+  roomPanel,
   onRoomDiagnostics,
 }: VideoPlayerProps) {
   const navigate = useNavigate();
@@ -2312,6 +2314,12 @@ export function VideoPlayer({
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
+  const roomNeedsAttention = !!room && (
+    room.status !== "connected" || !!room.snapshot.nextCountdown ||
+    !room.snapshot.participants.find((participant) => participant.participantId === room.participantId)?.ready
+  );
+  const chromeVisible = showControls || isSeeking || roomNeedsAttention;
+  const roomControlsVisible = chromeVisible || isLoading;
 
   const getMethodLabel = () => {
     switch (playbackMethod) {
@@ -2424,7 +2432,7 @@ export function VideoPlayer({
       <div
         ref={(controls) => { controls?.toggleAttribute("inert", Boolean(isLoading || error || showEpisodePanel)); }}
         className={`absolute inset-0 z-30 flex flex-col justify-between overflow-y-auto transition-opacity duration-300 ${
-          (showControls || isSeeking) && !isLoading && !error
+          chromeVisible && !isLoading && !error
             ? "opacity-100"
             : "pointer-events-none opacity-0"
         }`}
@@ -2774,6 +2782,19 @@ export function VideoPlayer({
           </div>
         </div>
       </div>
+
+      {roomPanel && !error && (
+        <div
+          hidden={showSettingsPanel || showEpisodePanel}
+          aria-hidden={!roomControlsVisible}
+          ref={(controls) => { controls?.toggleAttribute("inert", !roomControlsVisible); }}
+          className={`absolute right-4 top-4 z-[45] max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] overflow-y-auto transition-opacity duration-300 ${
+            roomControlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          {roomPanel}
+        </div>
+      )}
 
       {/* Skip intro */}
       {activeMarker?.type === "intro" &&

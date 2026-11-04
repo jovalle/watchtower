@@ -499,7 +499,7 @@ export default function MoviesPage() {
               setSearchParams(newParams);
             }}
             onPlayAll={keys.length ? handlePlayAll : undefined}
-            onShuffle={keys.length ? handleShuffle : undefined}
+            onShuffle={total ? handleShuffle : undefined}
             onClearFilters={handleClearFilters}
             genres={availableFilters.genres}
             currentGenre={currentFilters.genre}
