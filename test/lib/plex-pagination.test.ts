@@ -36,3 +36,29 @@ it("fails visibly if an upstream repeats a page instead of silently truncating o
   expect(result.success).toBe(false);
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+it("returns a bounded Plex library page with its total and offset", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input) => {
+    const url = new URL(String(input));
+    expect(url.pathname).toBe("/library/sections/1/all");
+    expect(url.searchParams.get("X-Plex-Container-Start")).toBe("48");
+    expect(url.searchParams.get("X-Plex-Container-Size")).toBe("48");
+    expect(url.searchParams.get("genre")).toBe("42");
+    expect(url.searchParams.get("sort")).toBe("titleSort:desc");
+    return Response.json({ MediaContainer: { totalSize: 100, offset: 48, Metadata: [{ ratingKey: "x" }] } });
+  }));
+  const result = await client.getLibraryPage("1", { offset: 48, limit: 48, genre: "42", sort: "titleSort:desc" });
+  expect(result).toMatchObject({ success: true, data: { total: 100, offset: 48, items: [{ ratingKey: "x" }] } });
+});
+it("rejects a page whose offset or total is missing or inconsistent", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ MediaContainer: { totalSize: 50, offset: 0, Metadata: [{ ratingKey: "x" }] } })));
+  const result = await client.getLibraryPage("1", { offset: 48, limit: 48 });
+  expect(result.success).toBe(false);
+});
+it("reads Plex genre and alphabet facet counts without loading titles", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input) => {
+    const url = new URL(String(input));
+    expect(url.searchParams.get("unwatched")).toBe("1");
+    return Response.json({ MediaContainer: { Directory: [{ key: "42", title: "Action", size: 13 }] } });
+  }));
+  expect(await client.getLibraryFacet("1", "genre", { filter: "unwatched=1" })).toMatchObject({ success: true, data: [{ key: "42", title: "Action", size: 13 }] });
+});
