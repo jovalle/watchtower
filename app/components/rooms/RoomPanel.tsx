@@ -91,7 +91,7 @@ export function RoomPanel({
     return () => clearInterval(timer);
   }, [snapshot.nextCountdown]);
 
-  // Collapse while playing so the panel never sits over player menus; reopen when the room needs attention.
+  // Collapse while playing so the panel stays out of the picture; reopen when the room needs attention.
   useEffect(() => {
     setExpanded(snapshot.phase !== "playing");
   }, [snapshot.phase]);
@@ -115,63 +115,39 @@ export function RoomPanel({
   };
 
   return (
-    <aside className="absolute left-3 top-16 z-[60] w-[min(24rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-lg border border-border-emphasis bg-background-elevated text-foreground-primary shadow-xl">
-      <Button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        variant="ghost"
-        className="w-full gap-2 text-left"
-        aria-expanded={expanded}
-      >
-        <Users className="h-5 w-5" />
-        <span className="flex-1 font-semibold">Watch Together</span>
-        {expanded ? (
-          <ChevronUp className="h-5 w-5" />
-        ) : (
-          <ChevronDown className="h-5 w-5" />
+    <aside aria-label="Watch Together" className="flex max-w-full flex-col items-end gap-2 text-foreground-primary">
+      <div className="flex max-w-[calc(100vw-7rem)] flex-wrap items-center justify-end gap-2">
+        <div aria-live="polite" className="min-w-0 max-w-full break-words rounded-md bg-black/80 px-2 py-1 text-right text-sm text-white">
+          {status}
+        </div>
+        {countdownSeconds !== null && (
+          <div className="flex max-w-full flex-wrap items-center gap-1 rounded-md bg-background-elevated px-3 text-sm">
+            Next episode in <span aria-hidden="true">{countdownSeconds}s</span>
+            <span className="sr-only">a few seconds</span>
+            {controller.isHost && (
+              <Button type="button" variant="ghost" size="sm" className="ml-2"
+                onClick={() => void controller.sendIntent({ type: "cancel-next", payload: {} })}>
+                Cancel
+              </Button>
+            )}
+          </div>
         )}
-      </Button>
-      <div aria-live="polite" className="min-h-5 px-3 pb-2 text-sm text-foreground-secondary">
-        {status}
+        {!self?.ready && controller.status === "connected" && (
+          <Button type="button" onClick={onReady}>
+            {self?.error === "autoplay_blocked" ? "Tap to Start Playback" : "I'm Ready"}
+          </Button>
+        )}
+        <Button type="button" variant="ghost" className="gap-2 bg-background-elevated"
+          onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} aria-label="Watch Together">
+          <Users className="h-5 w-5" />
+          <span>Watch Together</span>
+          <span aria-hidden="true">{snapshot.participants.length}</span>
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </Button>
       </div>
 
-      {countdownSeconds !== null && (
-        <div className="mx-3 mb-3 rounded border border-accent-primary/40 bg-accent-primary/10 p-3 text-sm">
-          Next episode in <span aria-hidden="true">{countdownSeconds}s</span>
-          <span className="sr-only">a few seconds</span>
-          {controller.isHost && (
-            <Button
-              type="button"
-              variant="ghost" size="sm" className="ml-3"
-              onClick={() =>
-                void controller.sendIntent({
-                  type: "cancel-next",
-                  payload: {},
-                })
-              }
-            >
-              Cancel
-            </Button>
-          )}
-        </div>
-      )}
-
-      {!self?.ready && controller.status === "connected" && (
-        <div className="px-3 pb-3">
-          <Button
-            type="button"
-            onClick={onReady}
-            className="w-full"
-          >
-            {self?.error === "autoplay_blocked"
-              ? "Tap to Start Playback"
-              : "I'm Ready"}
-          </Button>
-        </div>
-      )}
-
       {expanded && (
-        <div className="border-t border-border-subtle p-3">
+        <div className="w-[min(24rem,calc(100vw-2rem))] max-w-full rounded-lg border border-border-emphasis bg-background-elevated p-3 shadow-xl">
           <p className="truncate text-sm font-semibold">{title}</p>
 
           <ul className="mt-3 space-y-2" aria-label="Room members">

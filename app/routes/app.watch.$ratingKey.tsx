@@ -548,6 +548,26 @@ export default function WatchPage() {
           autoSkipIntro={autoSkipIntro}
           autoPlayNextEpisode={autoPlayNextEpisode}
           room={watchRoom.controller}
+          roomPanel={
+            watchRoom.controller &&
+            watchRoom.state.status !== "ended" &&
+            watchRoom.state.status !== "error" && (
+              <RoomPanel
+                controller={watchRoom.controller}
+                title={title}
+                invitation={watchRoom.state.invitation}
+                pending={watchRoom.pending}
+                message={watchRoom.message}
+                reconnects={watchRoom.state.reconnects}
+                diagnostics={watchRoom.diagnostics}
+                lastErrorCode={watchRoom.state.lastErrorCode}
+                onReady={watchRoom.requestReady}
+                onLeave={() => void watchRoom.leave()}
+                onContinueSolo={() => void watchRoom.continueSolo()}
+                onInvitation={(action) => void watchRoom.updateInvitation(action)}
+              />
+            )
+          }
           onRoomDiagnostics={watchRoom.reportDiagnostics}
         />
       ) : (
@@ -572,29 +592,8 @@ export default function WatchPage() {
           onTakeover={() => void watchRoom.takeover()}
         />
       )}
-      {watchRoom.controller &&
-        watchRoom.state.status !== "ended" &&
-        watchRoom.state.status !== "error" && (
-        <RoomPanel
-          controller={watchRoom.controller}
-          title={title}
-          invitation={watchRoom.state.invitation}
-          pending={watchRoom.pending}
-          message={watchRoom.message}
-          reconnects={watchRoom.state.reconnects}
-          diagnostics={watchRoom.diagnostics}
-          lastErrorCode={watchRoom.state.lastErrorCode}
-          onReady={watchRoom.requestReady}
-          onLeave={() => void watchRoom.leave()}
-          onContinueSolo={() => void watchRoom.continueSolo()}
-          onInvitation={(action) => void watchRoom.updateInvitation(action)}
-        />
-      )}
       {roomId && watchRoom.state.status === "connecting" && (
         <div role="status" className="absolute inset-0 z-[55] flex items-center justify-center bg-black text-white">Connecting to room...</div>
-      )}
-      {roomId && watchRoom.state.status === "reconnecting" && (
-        <div role="status" className="absolute inset-0 z-[55] flex items-center justify-center bg-black/80 text-white">Reconnecting. Playback is paused.</div>
       )}
       {togetherRequested && !watchTogetherEnabled && (
         <RoomTerminal

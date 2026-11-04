@@ -73,6 +73,10 @@ The player exposes browser-native AirPlay/Remote Playback only when the browser 
 
 **Receiver playback is not yet verified.** Desktop/mobile playback compatibility, audible track selection, cross-device resume, and the full keyboard/remote journey also require live acceptance. See the [delivery ledger](docs/netflix-replacement-plan.md#delivery-ledger) and [continuation handoff](docs/implementation-handoff.md) for evidence and remaining work. A visible casting control is not a compatibility guarantee.
 
+## Android TV and Watch Together in WIP
+
+The combined `codex/watchtower-wip` branch contains the native [Android TV app](android-tv/README.md), its `/api/v1` server API, and Watch Together for web and TV. The TV client is a separate Kotlin/Compose app to build and install on Android TV or Google TV. Web room controls appear on movie/episode detail pages; rooms are enabled unless `WATCH_TOGETHER=disabled`.
+
 ## Watch Together
 
 Rooms let people who can each access a movie or episode watch it in sync. Watchtower coordinates play, pause, position and the next episode; every viewer streams with their own Plex account, so library permissions and watch history stay personal. See the [user guide](docs/watch-together.md).
