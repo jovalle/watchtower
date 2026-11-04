@@ -1,5 +1,7 @@
 # Prompt for the Android TV worktree agent
 
+> Historical document: this records the earlier combined Android TV and Watch Together work. After the 2026-11-03 split, `work/android-tv` contains standalone TV functionality only; room implementation, room-only tests, harness, and evidence were removed. The complete combined snapshot and original evidence remain on `work/watch-together`. Room requirements and results below do not describe the current Android branch. Current setup and commands are in [`android-tv/README.md`](../../../android-tv/README.md).
+
 Copy the following prompt into the agent assigned to the Android TV worktree. This launches implementation work; the research/documentation task itself has not launched that work.
 
 ```text

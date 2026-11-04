@@ -26,3 +26,11 @@ it.each([null, [], {}, { ratingKey: 42 }])("rejects invalid scrobble body %j bef
   expect(response.status).toBe(400);
   expect(upstream).not.toHaveBeenCalled();
 });
+
+
+it.each(["room=old-room", "together=1"])("rejects removed room playback option %s instead of starting solo playback", async (query) => {
+  const upstream = vi.fn().mockResolvedValue(Response.json({ MediaContainer: { Metadata: [{ ratingKey: "42", type: "movie", title: "Example", duration: 600000 }] } }));
+  vi.stubGlobal("fetch", upstream);
+  await expect(loader({ request: new Request(`http://watchtower.test/app/watch/42?${query}`), params: { ratingKey: "42" }, context: {} })).rejects.toMatchObject({ status: 404 });
+  expect(upstream).not.toHaveBeenCalled();
+});

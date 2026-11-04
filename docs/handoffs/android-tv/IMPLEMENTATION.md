@@ -1,5 +1,7 @@
 # Android TV / Google TV: implementation and acceptance handoff
 
+> Historical document: this records the earlier combined Android TV and Watch Together work. After the 2026-11-03 split, `work/android-tv` contains standalone TV functionality only; room implementation, room-only tests, harness, and evidence were removed. The complete combined snapshot and original evidence remain on `work/watch-together`. Room requirements and results below do not describe the current Android branch. Current setup and commands are in [`android-tv/README.md`](../../../android-tv/README.md).
+
 Prepared 2026-09-27. Branch `work/android-tv`; base `8578769`. Workspace `[local workspace]`.
 
 **Status: research and specification only.** No Android scaffold, APK, AAB, device test, store submission, or native backend API exists as a result of this documentation task. The user explicitly selected **both sideloading and Google Play** distribution. Specific TV models remain unspecified.

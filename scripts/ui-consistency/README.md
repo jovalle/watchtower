@@ -10,7 +10,7 @@ node --import tsx scripts/ui-consistency/server.mjs
 The server binds to `127.0.0.1:9345`. It renders the real production Remix components, replacing route loaders, actions and APIs with synthetic fixtures. It creates a disposable data directory and a fixture session secret. No Plex, Seerr, Trakt or real account mutations are used. This server is a local QA tool; it is not part of the production route tree.
 
 - Open `/__audit/cases` for page IDs and paths. Add `?audit=ID` to a listed path (or `&audit=ID` when it already has a query).
-- Open `/__audit/gallery?case=ID` for room, cinema and notification components; IDs are in `gallery-cases.json`.
+- Open `/__audit/gallery?case=ID` for cinema and notification components; IDs are in `gallery-cases.json`.
 - Open `/__audit/forms-gallery?case=ID` for shared menus, forms and streaming states; IDs are in `forms-gallery-cases.json`.
 - A fixture cookie preserves the selected response through local form submissions. Submit the real form to reveal fixtures with action responses; `delayMs` holds the pending state.
 - Home/Watchlist fixtures stream deferred data. Check both the initial shell and settled state. Galleries activate specified disclosures, pending states and failures through their real controls.

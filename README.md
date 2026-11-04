@@ -46,7 +46,6 @@ It is living proof that you can have a beautiful, user-friendly interface for yo
 - **Unified watchlist** — Aggregate watchlists from Plex, Trakt, and IMDB in one view
 - **Lists support** — Browse your Plex playlists and collections
 - **TV show navigation** — Season/episode browsing with On Deck integration
-- **Watch Together** — Synchronized rooms where every viewer streams with their own Plex account ([guide](docs/watch-together.md))
 - **Responsive design** — Optimized for desktop, tablet, and mobile
 
 ## Navigation and playback
@@ -73,15 +72,12 @@ The player exposes browser-native AirPlay/Remote Playback only when the browser 
 
 **Receiver playback is not yet verified.** Desktop/mobile playback compatibility, audible track selection, cross-device resume, and the full keyboard/remote journey also require live acceptance. See the [delivery ledger](docs/netflix-replacement-plan.md#delivery-ledger) and [continuation handoff](docs/implementation-handoff.md) for evidence and remaining work. A visible casting control is not a compatibility guarantee.
 
-## Android TV and Watch Together in WIP
+## Feature Workspaces
 
-The combined `work/watchtower-wip` branch contains the native [Android TV app](android-tv/README.md), its `/api/v1` server API, and Watch Together for web and TV. The TV client is a separate Kotlin/Compose app to build and install on Android TV or Google TV. Web room controls appear on movie/episode detail pages; rooms are enabled unless `WATCH_TOGETHER=disabled`.
+- `work/android-tv`: standalone Android TV/Google TV client and native API, plus the audited web interface. See the [Android TV guide](android-tv/README.md).
+- `work/watch-together`: the preserved full Watch Together implementation and its web/TV room integration, in its own worktree.
 
-## Watch Together
-
-Rooms let people who can each access a movie or episode watch it in sync. Watchtower coordinates play, pause, position and the next episode; every viewer streams with their own Plex account, so library permissions and watch history stay personal. See the [user guide](docs/watch-together.md).
-
-Rooms live in the single Watchtower process and end when it restarts. The [operations guide](docs/handoffs/watch-together/OPERATIONS.md) covers reverse-proxy requirements for the event stream, limits, diagnostics and rollback (`WATCH_TOGETHER=disabled`). The [acceptance record](docs/handoffs/watch-together/ACCEPTANCE.md) lists what has been verified locally and what still needs real Plex accounts, devices and ingress.
+This Android branch has no room implementation or UI. Native API v1 retains the reserved `rooms` capability field as `false` for compatibility.
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f4f8/512.gif" height="24"> Screenshots
 
@@ -141,7 +137,6 @@ All optional. The Plex server and token are configured at `/setup`, not through 
 | `SECURE_COOKIES`  | Set to `true` behind HTTPS                                                                    |
 | `TRUST_PROXY`     | Trusted proxies for native pairing limits (Express names/CIDRs or hop count; unset trusts only the socket peer) |
 | `TMDB_API_KEY`    | TMDB API key for recommendations and logos ([get free key](https://developer.themoviedb.org)) |
-| `WATCH_TOGETHER`  | Set to `disabled` to turn off Watch Together rooms (default: enabled)                        |
 | `OMDB_API_KEY`    | OMDb API key for IMDb, Rotten Tomatoes, and Metacritic ratings                               |
 | `SEERR_URL`       | Seerr/Overseerr/Jellyseerr base URL; requires `SEERR_API_KEY`                                  |
 | `SEERR_API_KEY`   | Server-only Seerr API key; requires `SEERR_URL`                                               |

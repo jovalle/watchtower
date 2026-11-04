@@ -1,5 +1,7 @@
 # Android TV acceptance
 
+> Historical document: this records the earlier combined Android TV and Watch Together work. After the 2026-11-03 split, `work/android-tv` contains standalone TV functionality only; room implementation, room-only tests, harness, and evidence were removed. The complete combined snapshot and original evidence remain on `work/watch-together`. Room requirements and results below do not describe the current Android branch. Current setup and commands are in [`android-tv/README.md`](../../../android-tv/README.md).
+
 Status recorded 2026-09-28 from the Android TV branch and the combined Watch Together E2E branch. This document separates source and test evidence from runtime qualification. A test class proves only the behavior it exercises; it does not close a wider device, Plex, audio, accessibility, or Play gate.
 
 ## Acceptance matrix
@@ -86,7 +88,7 @@ These are the recorded commands and results from 2026-09-27/28, as run by the im
 
 ## E2E check list
 
-`room-e2e.ts` records these checks. `PASS` and `FAIL` below are copied from the evidence JSON files: the API 36 and API 31 full-run columns are the final runs at `b723d36` ([`room-e2e-google-tv-api36.json`](evidence/room-e2e-google-tv-api36.json), [`room-e2e-android-tv-api31.json`](evidence/room-e2e-android-tv-api31.json)); the B-only column is an earlier API 31 rerun of scenario B at `19daa48` ([`room-e2e-android-tv-api31-scenarioB-rerun.json`](evidence/room-e2e-android-tv-api31-scenarioB-rerun.json)). `not recorded` means the full API 31 run stopped after its failed `TVR-B0` check.
+`room-e2e.ts` records these checks. `PASS` and `FAIL` below are copied from the evidence JSON files: the API 36 and API 31 full-run columns are the final runs at `b723d36` (`room-e2e-google-tv-api36.json` (historical `work/watch-together` artifact), `room-e2e-android-tv-api31.json` (historical `work/watch-together` artifact)); the B-only column is an earlier API 31 rerun of scenario B at `19daa48` (`room-e2e-android-tv-api31-scenarioB-rerun.json` (historical `work/watch-together` artifact)). `not recorded` means the full API 31 run stopped after its failed `TVR-B0` check.
 
 | Check | Google TV API 36 | Android TV API 31 full | Android TV API 31 B-only rerun |
 | --- | --- | --- | --- |

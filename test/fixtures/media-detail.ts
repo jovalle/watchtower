@@ -7,6 +7,6 @@ export function mediaDetailFixture(type: "movie" | "show" | "season" | "episode"
     cast: [], similar: [], recommendations: [], seasons: [], episodes: [], breadcrumbs: [],
     viewCount: 1, leafCount: 2, viewedLeafCount: 2, isInWatchlist,
     seasonIndex: 1, episodeIndex: 1, tmdbId: 17, imdbId: "tt17", trailerKey: "fixtureKey1",
-    audioStreams: [], subtitleStreams: [], watchTogetherEnabled: true,
+    audioStreams: [], subtitleStreams: [],
   };
 }

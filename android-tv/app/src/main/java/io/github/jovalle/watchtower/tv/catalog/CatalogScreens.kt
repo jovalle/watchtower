@@ -441,7 +441,6 @@ fun MediaDetailsScreen(
     route: DetailsRoute,
     onOpen: (String) -> Unit,
     onPlay: (PlayerRoute) -> Unit,
-    onWatchTogether: ((MediaDetail) -> Unit)? = null,
 ) {
     val model: DetailViewModel = viewModel(key = route.ratingKey) {
         DetailViewModel(route.ratingKey, data, graph.session::current, graph.session.identityChanges)
@@ -474,7 +473,6 @@ fun MediaDetailsScreen(
             requests,
             onOpen,
             onPlay,
-            onWatchTogether,
         )
     }
 }
@@ -489,7 +487,6 @@ private fun DetailsContent(
     requestModel: RequestActionsViewModel,
     onOpen: (String) -> Unit,
     onPlay: (PlayerRoute) -> Unit,
-    onWatchTogether: ((MediaDetail) -> Unit)?,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     var showIssue by remember { mutableStateOf(false) }
@@ -507,7 +504,6 @@ private fun DetailsContent(
                         enabled = !state.mutationInFlight,
                         issueEnabled = requestState.enabled,
                         onPlay = onPlay,
-                        onWatchTogether = onWatchTogether?.let { action -> { action(detail) } },
                         onSetWatched = { model.setWatched(detail.viewCount == 0) },
                         onSetWatchlist = { model.setWatchlist(detail.onWatchlist != true) },
                         onAddToPlaylist = { model.loadPlaylists(); showPlaylists = true },
@@ -612,7 +608,6 @@ internal fun DetailsActionRow(
     enabled: Boolean,
     issueEnabled: Boolean,
     onPlay: (PlayerRoute) -> Unit,
-    onWatchTogether: (() -> Unit)?,
     onSetWatched: () -> Unit,
     onSetWatchlist: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -624,7 +619,7 @@ internal fun DetailsActionRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        DetailsPlaybackActions(detail, onPlay, onWatchTogether != null) { onWatchTogether?.invoke() }
+        DetailsPlaybackActions(detail, onPlay)
         OutlinedButton(onClick = onSetWatched, enabled = enabled) {
             Text(if (detail.viewCount > 0) stringResource(R.string.mark_unwatched) else stringResource(R.string.mark_watched))
         }
@@ -823,8 +818,6 @@ fun ExternalDetailsScreen(graph: AppGraph, data: CatalogDataSource, route: Exter
 fun DetailsPlaybackActions(
     detail: MediaDetail,
     onPlay: (PlayerRoute) -> Unit,
-    roomsEnabled: Boolean = false,
-    onWatchTogether: () -> Unit = {},
 ) {
     val ratingKey = detail.ratingKey
     if (detail.playable && ratingKey != null) {
@@ -835,9 +828,6 @@ fun DetailsPlaybackActions(
             Text(stringResource(R.string.play))
         }
         OutlinedButton(onClick = { onPlay(PlayerRoute(ratingKey, startPositionMs = 0)) }) { Text(stringResource(R.string.start_over)) }
-        if (roomsEnabled && detail.versions.firstOrNull()?.parts?.firstOrNull() != null) {
-            OutlinedButton(onClick = onWatchTogether) { Text(stringResource(R.string.room_watch_together)) }
-        }
     }
 }
 
