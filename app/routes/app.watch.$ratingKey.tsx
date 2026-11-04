@@ -8,17 +8,9 @@
  */
 
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useEffect } from "react";
-import { useLoaderData, useNavigate, useOutletContext } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { useLoaderData, useOutletContext } from "@remix-run/react";
 import { VideoPlayer } from "~/components/player";
-import {
-  CreateRoomDialog,
-  RoomPanel,
-  RoomTakeover,
-  RoomTerminal,
-} from "~/components/rooms";
-import { useWatchRoom } from "~/hooks/useWatchRoom";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
@@ -41,14 +33,6 @@ import {
   getUserSettings,
   DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
-import {
-  getWebDevice,
-  resolveRoomPrincipal,
-} from "~/lib/rooms/principal.server";
-import {
-  getMemberPlaybackContext,
-  isWatchTogetherEnabled,
-} from "~/lib/rooms/coordinator.server";
 
 interface AudioTrack {
   id: number;
@@ -112,13 +96,6 @@ interface LoaderData {
   nextEpisode: NextEpisodeInfo | null;
   autoSkipIntro: boolean;
   autoPlayNextEpisode: boolean;
-  mediaId: string;
-  partIdValue: string | null;
-  partCount: number;
-  roomId: string | null;
-  togetherRequested: boolean;
-  room: ReturnType<typeof getMemberPlaybackContext>;
-  watchTogetherEnabled: boolean;
 }
 
 interface NextEpisodeInfo {
@@ -159,6 +136,11 @@ function isMobileDevice(userAgent: string): boolean {
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
+  const url = new URL(request.url);
+  if (url.searchParams.has("room") || url.searchParams.has("together")) {
+    throw new Response("Watch Together is unavailable on this server.", { status: 404 });
+  }
+
   const { ratingKey } = params;
 
   if (!ratingKey) {
@@ -189,41 +171,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const isMobile = isMobileDevice(userAgent);
 
   // Parse URL parameters
-  const url = new URL(request.url);
   const queryTime = url.searchParams.get("t");
   const queryTimeMs = queryTime !== null && /^\d+$/.test(queryTime)
     ? Number(queryTime)
     : NaN;
   const qualityId = url.searchParams.get("quality") || "original";
   const forceTranscodeParam = url.searchParams.get("transcode") === "1";
-  const roomId = url.searchParams.get("room");
-  const togetherRequested = url.searchParams.get("together") === "1";
-  const watchTogetherEnabled = isWatchTogetherEnabled();
-
-  let room: ReturnType<typeof getMemberPlaybackContext> = null;
-  let device: Awaited<ReturnType<typeof getWebDevice>>;
-  if (roomId && watchTogetherEnabled) {
-    const principal = await resolveRoomPrincipal(request);
-    if (principal.ok) {
-      room = getMemberPlaybackContext(roomId, principal.principal);
-      device = {
-        deviceSessionId: principal.principal.deviceSessionId,
-        setCookie: principal.setCookie,
-      };
-      if (room && room.ratingKey !== ratingKey) {
-        throw redirect(
-          `/app/watch/${encodeURIComponent(room.ratingKey)}?room=${encodeURIComponent(roomId)}`,
-          principal.setCookie
-            ? { headers: { "Set-Cookie": principal.setCookie } }
-            : undefined
-        );
-      }
-    } else {
-      device = await getWebDevice(request);
-    }
-  } else {
-    device = await getWebDevice(request);
-  }
 
   // Determine resume position (milliseconds -> seconds)
   // Priority: query param > metadata viewOffset > 0
@@ -233,9 +186,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (Number.isSafeInteger(queryTimeMs) && queryTimeMs >= 0) {
     resumeMs = queryTimeMs;
     resumeSource = "query";
-  } else if (room) {
-    resumeMs = room.targetPositionMs;
-    resumeSource = "room";
   } else if (metadata.viewOffset && metadata.viewOffset > 0) {
     resumeMs = metadata.viewOffset;
     resumeSource = "metadata";
@@ -254,17 +204,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Play the file as-is when the browser reported it can decode the container and codecs
   const media = metadata.Media?.[0];
-  // A room plays exactly the edition it was created with; never substitute Plex's current default.
-  if (
-    room &&
-    (String(media?.id) !== room.mediaId ||
-      String(media?.Part?.[0]?.id) !== room.partId)
-  ) {
-    throw new Response(
-      "This room's title changed on Plex. Create a new room to keep watching together.",
-      { status: 409 }
-    );
-  }
   const caps = parsePlaybackCaps(cookieHeader);
   const videoStream = media?.Part?.[0]?.Stream?.find((s) => s.streamType === 1);
   // Browsers can't burn in subtitles or pick a non-default audio track from a file, so those need HLS.
@@ -299,8 +238,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     quality: selectedQuality,
     forceTranscode,
     subtitles: trackNeeds.burnSubtitleId !== null ? "burn" : "none",
-    // Room readiness needs sessions owned by this device; solo playback keeps its original shared scope.
-    deviceScope: room ? device.deviceSessionId : undefined,
   });
 
   // Logging
@@ -441,18 +378,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     nextEpisode,
     autoSkipIntro: preferences.autoSkipIntro,
     autoPlayNextEpisode: preferences.autoPlayNextEpisode,
-    mediaId: String(media?.id ?? ""),
-    partIdValue: part?.id === undefined ? null : String(part.id),
-    partCount: media?.Part?.length ?? 0,
-    roomId,
-    togetherRequested,
-    room,
-    watchTogetherEnabled,
-  }, device.setCookie ? { headers: { "Set-Cookie": device.setCookie } } : undefined);
+  });
 }
 
 export default function WatchPage() {
-  const navigate = useNavigate();
   const { playbackBackTo } = useOutletContext<{ playbackBackTo: string }>();
   const {
     streamUrl,
@@ -479,36 +408,7 @@ export default function WatchPage() {
     nextEpisode,
     autoSkipIntro,
     autoPlayNextEpisode,
-    mediaId,
-    partIdValue,
-    partCount,
-    roomId,
-    togetherRequested,
-    watchTogetherEnabled,
   } = useLoaderData<typeof loader>();
-
-  const watchRoom = useWatchRoom({
-    roomId,
-    together: togetherRequested,
-    watchTogetherEnabled,
-    ratingKey,
-    mediaId,
-    partId: partIdValue,
-    partCount,
-    title,
-    resumePositionMs: resumePositionSeconds * 1000,
-    autoAdvance: autoPlayNextEpisode,
-  });
-
-  useEffect(() => {
-    const nextRatingKey = watchRoom.controller?.snapshot.media.ratingKey;
-    if (nextRatingKey && nextRatingKey !== ratingKey && roomId) {
-      navigate(
-        `/app/watch/${encodeURIComponent(nextRatingKey)}?room=${encodeURIComponent(roomId)}`,
-        { replace: true }
-      );
-    }
-  }, [navigate, ratingKey, roomId, watchRoom.controller?.snapshot.media.ratingKey]);
 
   // Build title/subtitle for episodes
   let mainTitle = title;
@@ -520,114 +420,33 @@ export default function WatchPage() {
 
   return (
     <div data-player-page className="fixed inset-0 z-50 bg-black">
-      {((!roomId && !togetherRequested) || watchRoom.controller) ? (
-        <VideoPlayer
-          key={streamUrl}
-          backTo={playbackBackTo}
-          src={streamUrl}
-          title={mainTitle}
-          subtitle={subtitle}
-          posterUrl={posterUrl}
-          durationMs={durationMs}
-          resumePositionSeconds={resumePositionSeconds}
-          ratingKey={ratingKey}
-          quality={quality}
-          availableQualities={availableQualities}
-          playbackMethod={playbackMethod}
-          mediaInfo={mediaInfo}
-          audioTracks={audioTracks}
-          subtitleTracks={subtitleTracks}
-          partId={partId}
-          burnedSubtitleId={burnedSubtitleId}
-          episodes={episodes}
-          seasonTitle={parentTitle}
-          seasonNumber={parentIndex}
-          episodeNumber={index}
-          markers={markers}
-          nextEpisode={nextEpisode}
-          autoSkipIntro={autoSkipIntro}
-          autoPlayNextEpisode={autoPlayNextEpisode}
-          room={watchRoom.controller}
-          roomPanel={
-            watchRoom.controller &&
-            watchRoom.state.status !== "ended" &&
-            watchRoom.state.status !== "error" && (
-              <RoomPanel
-                controller={watchRoom.controller}
-                title={title}
-                invitation={watchRoom.state.invitation}
-                pending={watchRoom.pending}
-                message={watchRoom.message}
-                reconnects={watchRoom.state.reconnects}
-                diagnostics={watchRoom.diagnostics}
-                lastErrorCode={watchRoom.state.lastErrorCode}
-                onReady={watchRoom.requestReady}
-                onLeave={() => void watchRoom.leave()}
-                onContinueSolo={() => void watchRoom.continueSolo()}
-                onInvitation={(action) => void watchRoom.updateInvitation(action)}
-              />
-            )
-          }
-          onRoomDiagnostics={watchRoom.reportDiagnostics}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `linear-gradient(rgb(0 0 0 / 70%), rgb(0 0 0 / 90%)), url(${posterUrl})` }} />
-      )}
-
-      {watchRoom.showCreateDialog && (
-        <CreateRoomDialog
-          title={title}
-          resumePositionMs={resumePositionSeconds * 1000}
-          pending={watchRoom.pending}
-          disabled={watchRoom.createDisabled}
-          disabledReason={watchRoom.createDisabledReason}
-          error={watchRoom.message}
-          onCreate={(positionMs) => void watchRoom.submitCreate(positionMs)}
-          onCancel={watchRoom.cancelCreate}
-        />
-      )}
-      {watchRoom.takeoverRequired && (
-        <RoomTakeover
-          pending={watchRoom.pending}
-          onTakeover={() => void watchRoom.takeover()}
-        />
-      )}
-      {roomId && watchRoom.state.status === "connecting" && (
-        <div role="status" className="absolute inset-0 z-[55] flex items-center justify-center bg-black text-white">Connecting to room...</div>
-      )}
-      {togetherRequested && !watchTogetherEnabled && (
-        <RoomTerminal
-          message="Watch Together is currently disabled."
-          onContinueSolo={watchRoom.continueSoloFromTerminal}
-          onBack={() => navigate(playbackBackTo || "/app", { replace: true })}
-        />
-      )}
-      {watchRoom.state.status === "error" && (
-        <RoomTerminal
-          message={watchRoom.message ?? "The room is no longer available."}
-          onContinueSolo={watchRoom.continueSoloFromTerminal}
-          onBack={() => navigate(playbackBackTo || "/app", { replace: true })}
-        />
-      )}
-      {watchRoom.state.status === "ended" && (
-        <RoomTerminal
-          message={
-            watchRoom.state.endedReason === "replaced"
-              ? "This room moved to another tab or window."
-              : watchRoom.state.endedReason === "server_restarted"
-                ? "The room ended because the server restarted."
-                : watchRoom.state.endedReason === "removed"
-                  ? "The host removed this device from the room."
-                  : watchRoom.state.endedReason === "access_denied"
-                    ? "Your Plex profile cannot access the room's current title."
-                    : watchRoom.state.endedReason === "expired"
-                      ? "This room expired. Create a new room to continue together."
-                : "This room has ended."
-          }
-          onContinueSolo={watchRoom.continueSoloFromTerminal}
-          onBack={() => navigate(playbackBackTo || "/app", { replace: true })}
-        />
-      )}
+      <VideoPlayer
+        key={streamUrl}
+        backTo={playbackBackTo}
+        src={streamUrl}
+        title={mainTitle}
+        subtitle={subtitle}
+        posterUrl={posterUrl}
+        durationMs={durationMs}
+        resumePositionSeconds={resumePositionSeconds}
+        ratingKey={ratingKey}
+        quality={quality}
+        availableQualities={availableQualities}
+        playbackMethod={playbackMethod}
+        mediaInfo={mediaInfo}
+        audioTracks={audioTracks}
+        subtitleTracks={subtitleTracks}
+        partId={partId}
+        burnedSubtitleId={burnedSubtitleId}
+        episodes={episodes}
+        seasonTitle={parentTitle}
+        seasonNumber={parentIndex}
+        episodeNumber={index}
+        markers={markers}
+        nextEpisode={nextEpisode}
+        autoSkipIntro={autoSkipIntro}
+        autoPlayNextEpisode={autoPlayNextEpisode}
+      />
     </div>
   );
 }

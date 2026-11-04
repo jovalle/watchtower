@@ -2,7 +2,7 @@
 
 Watchtower Android TV is a native Kotlin application for Android TV and Google TV. Its UI uses Jetpack Compose for TV, and playback uses AndroidX Media3. It is not a WebView wrapper. The app talks to the Watchtower native JSON API under `/api/v1`; the Watchtower server remains responsible for Plex access, authorization, media decisions, and protected resources.
 
-The combined `work/watchtower-wip` branch contains this TV client, the native API, and the Watch Together room server. The separate TV/integration branch names have been archived; their feature history remains in WIP. See [the acceptance handoff](../docs/handoffs/android-tv/ACCEPTANCE.md) for the historical acceptance evidence.
+The `work/android-tv` branch contains this standalone TV client and the native API. Watch Together was removed from this branch; the complete combined implementation and its historical evidence remain on `work/watch-together`. See [the acceptance handoff](../docs/handoffs/android-tv/ACCEPTANCE.md) for historical evidence and its limits.
 
 ## Requirements
 
@@ -34,7 +34,6 @@ The application module is `android-tv/app`. Kotlin sources are under `app/src/ma
 - `pairing/` contains the server address, browser-approved pairing, QR, profile chooser, and PIN screens.
 - `catalog/` contains home, library, search, details, seasons, episodes, lists, ratings, requests, and catalog state.
 - `playback/` contains Media3 player ownership, media-source construction, capability detection, track mapping, timeline mapping, progress reporting, policies, and the player screen.
-- `rooms/` contains the Watch Together protocol client, authority checks, session state, synchronization, and room screens.
 - `platform/` contains validated deep links, system voice-search integration, and Android TV Watch Next provider integration.
 - `settings/` contains local playback preferences and the settings screen.
 - `ui/` contains the application shell and shared TV UI composition.
@@ -67,7 +66,7 @@ When release signing variables are absent, the release APK and AAB from these ta
 
 ## Run against a local Watchtower server
 
-The debug build sets a debug-only `ALLOW_CLEARTEXT` flag, the address validator accepts `http://`, and the debug source set overrides `res/xml/network_security_config.xml` (`app/src/debug/res/xml/`) to permit cleartext, so a debug build can reach a LAN or emulator development server such as `http://10.0.2.2:9031`; the emulator room E2E runs this way. Release builds use `app/src/main/res/xml/network_security_config.xml`: HTTPS only, system certificate authorities only, no user-added CAs and no cleartext.
+The debug build sets a debug-only `ALLOW_CLEARTEXT` flag, the address validator accepts `http://`, and the debug source set overrides `res/xml/network_security_config.xml` (`app/src/debug/res/xml/`) to permit cleartext, so a debug build can reach a LAN or emulator development server such as `http://10.0.2.2:9031`. Release builds use `app/src/main/res/xml/network_security_config.xml`: HTTPS only, system certificate authorities only, no user-added CAs and no cleartext.
 
 From the repository root, the local harness can provide an isolated server and fake PMS:
 
@@ -92,29 +91,16 @@ The pairing code is not a credential. The QR value is the verification URL; the 
 
 ## Local TV E2E harness
 
-The scripts under [`scripts/tv-e2e`](../scripts/tv-e2e/) use isolated synthetic data under `./tmp/tv-e2e` or `./tmp/tv-room-e2e`. They do not contact a real Plex account when used with the supplied fake PMS and `plextv-shim.mjs`.
+The scripts under [`scripts/tv-e2e`](../scripts/tv-e2e/) use isolated synthetic data under `./tmp/tv-e2e`. Use the supplied fake PMS and synthetic credentials, and keep the harness data separate from real server data.
 
 - `generate-media.ts` creates testsrc2 H.264/AAC MP4 media, two 30-second MP4 parts, a subtitled MKV with SRT, and HLS files.
 - `fake-pms.ts` serves the synthetic catalog and media on port `32499`, including Range responses, HLS, subtitle, library, collection, playlist, search, and mutation fixtures.
 - `seed.ts` creates the isolated Watchtower data and emits a harness bearer token. Keep its `DATA_PATH` separate from any real server data.
 - `smoke.ts` exercises instance, identity, home, libraries, details, seasons, search, collections, playlists, direct Range playback, multipart resume, subtitle sidecar, HLS resources, timeline, watched, rating, stop, and the fake-PMS call audit.
-- `room-e2e.ts` runs the Android TV and Watch Together room journey. It needs a server branch containing the Watch Together room API, not only `work/android-tv`. Its peers are scripted protocol clients: one web cookie session and one native bearer session.
 - `package-artifacts.sh` produces the debug APK, unsigned release APK and AAB, R8 mapping, checksums, and a clearly labeled QA copy signed with the local Android debug key.
 - `signing-compat.sh` checks same-key upgrade, downgrade, different-key update, and unsigned-install behavior on one emulator.
 - `audit-16kb.sh <apk>` checks APK zip alignment and ELF `LOAD` segment alignment for packaged native libraries.
 - `release-smoke.sh <apk>` installs and launches a QA APK on each connected emulator and checks for an app process and fatal crash entries.
-
-The room driver supports these environment variables:
-
-```sh
-ANDROID_SERIAL=emulator-5554 bun scripts/tv-e2e/room-e2e.ts
-ROOM_E2E_ONLY=A ANDROID_SERIAL=emulator-5554 bun scripts/tv-e2e/room-e2e.ts
-ROOM_E2E_ONLY=B ANDROID_SERIAL=emulator-5556 bun scripts/tv-e2e/room-e2e.ts
-ROOM_E2E_TRACE=1 ANDROID_SERIAL=emulator-5554 bun scripts/tv-e2e/room-e2e.ts
-ROOM_E2E_HOLD=1 ANDROID_SERIAL=emulator-5554 bun scripts/tv-e2e/room-e2e.ts
-```
-
-`ROOM_E2E_ONLY=A|B` selects one scenario. `ROOM_E2E_TRACE=1` logs room revisions. `ROOM_E2E_HOLD=1` leaves the seeded servers running for inspection. The recorded evidence is in [`docs/handoffs/android-tv/evidence`](../docs/handoffs/android-tv/evidence/).
 
 ## Versioning
 

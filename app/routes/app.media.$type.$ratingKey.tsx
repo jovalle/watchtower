@@ -28,7 +28,6 @@ import {
   Subtitles,
   RotateCcw,
   Film,
-  Users,
 } from "lucide-react";
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
@@ -49,7 +48,6 @@ import type { TMDBRecommendation } from "~/lib/tmdb/types";
 import { externalTitle, externalImdbTitle } from "~/lib/title.server";
 import { RequestModal } from "~/components/media/RequestModal";
 import { ExternalTitle } from "~/components/media/ExternalTitle";
-import { isWatchTogetherEnabled } from "~/lib/rooms/coordinator.server";
 
 interface SeasonView {
   ratingKey: string;
@@ -177,7 +175,6 @@ interface LoaderData {
     codec?: string;
     selected?: boolean;
   }>;
-  watchTogetherEnabled: boolean;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -943,7 +940,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     videoStreams,
     audioStreams,
     subtitleStreams,
-    watchTogetherEnabled: isWatchTogetherEnabled(),
   };
 
   // Fetch seasons and episodes for TV shows
@@ -1177,7 +1173,6 @@ function LibraryDetail({ data }: { data: LoaderData }) {
     mediaInfo,
     audioStreams,
     subtitleStreams,
-    watchTogetherEnabled,
   } = data;
 
   // For TV shows/seasons, watched = all episodes watched. For movies/episodes, watched = viewCount > 0
@@ -1917,16 +1912,6 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           ? "Play Again"
                           : "Play"}
                       </Button>
-                      {watchTogetherEnabled &&
-                        (type === "movie" || type === "episode") && (
-                          <Link
-                            to={`/app/watch/${metadata.ratingKey}?together=1`}
-                            className={buttonStyles({ variant: "secondary", size: "lg", className: "w-full sm:w-auto" })}
-                          >
-                            <Users className="mr-2 h-5 w-5" />
-                            Watch Together
-                          </Link>
-                        )}
                       {viewOffset && (
                         <Button
                           variant="secondary"

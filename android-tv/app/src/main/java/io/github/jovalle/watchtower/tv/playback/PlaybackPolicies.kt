@@ -1,35 +1,6 @@
 package io.github.jovalle.watchtower.tv.playback
 
-import androidx.media3.common.Player
 import io.github.jovalle.watchtower.tv.api.Marker
-
-enum class PlaybackRouteMode { SOLO, ROOM, TERMINAL_ROOM }
-
-fun playbackRouteMode(roomId: String?, hasActiveRoomSession: Boolean): PlaybackRouteMode = when {
-    roomId == null -> PlaybackRouteMode.SOLO
-    hasActiveRoomSession -> PlaybackRouteMode.ROOM
-    else -> PlaybackRouteMode.TERMINAL_ROOM
-}
-
-data class LocalInterruptionDecision(
-    val interrupted: Boolean,
-    val reconcile: Boolean,
-    val ready: Boolean,
-)
-
-fun localInterruptionDecision(
-    lifecycleStopped: Boolean,
-    playbackSuppressionReason: Int,
-    playWhenReadyChangeReason: Int?,
-    transportInterruptionLatched: Boolean,
-): LocalInterruptionDecision {
-    val transportInterrupted = transportInterruptionLatched || playWhenReadyChangeReason in setOf(
-        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS,
-        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY,
-    )
-    val interrupted = lifecycleStopped || playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE || transportInterrupted
-    return LocalInterruptionDecision(interrupted, reconcile = !interrupted, ready = !interrupted)
-}
 
 sealed interface PlaybackIntent {
     data object Play : PlaybackIntent
@@ -45,7 +16,6 @@ sealed interface PlaybackIntent {
 
 sealed interface AuthorityDecision {
     data object Allow : AuthorityDecision
-    data object Handled : AuthorityDecision
     data class Deny(val reason: String) : AuthorityDecision
     data class Redirect(val intent: PlaybackIntent) : AuthorityDecision
 }
@@ -53,7 +23,7 @@ sealed interface AuthorityDecision {
 fun interface TransportAuthority {
     fun authorize(intent: PlaybackIntent): AuthorityDecision
 
-    /** Automatic actions (auto-skip, autoplay next); a room authority denies these so clients never advance independently. */
+    /** Automatic actions (auto-skip, autoplay next) share the transport authorization gate. */
     fun authorizeAutomatic(intent: PlaybackIntent): AuthorityDecision = authorize(intent)
 }
 
@@ -72,7 +42,6 @@ class PlaybackIntentGate(
     private fun dispatch(intent: PlaybackIntent, decision: AuthorityDecision): AuthorityDecision {
         when (decision) {
             AuthorityDecision.Allow -> execute(intent)
-            AuthorityDecision.Handled -> Unit
             is AuthorityDecision.Redirect -> execute(decision.intent)
             is AuthorityDecision.Deny -> Unit
         }
