@@ -22,7 +22,7 @@ The combined `work/watchtower-wip` checkout now includes the completed layout au
 - **566 tests across 94 files passed**, including player race/authorization, native room integration, pagination, Seerr configuration, and the layout audit regressions.
 - TypeScript, ESLint, explicit preview-fixture lint, production build, and `git diff --check` passed.
 - The manual Vite optimizer produced `hls.js` and React prebundles. Its deprecated standalone command retained plugin watchers after producing metadata, so that process was stopped after checking the generated metadata.
-- Twelve combined room/player scenarios and six movie/series scenarios were checked at **320×900, 1440×900, and 667×240**. No horizontal page overflow or unnamed room buttons was found; the short-screen room container scrolled to End Room, settings hid the room panel, and the 44×44 native alphabet selector navigated to T.
+- Four room states and two library views were checked across **320×900, 1440×900, and 667×240** (18 presentation/interaction checks). The synthetic videos loaded but remained paused, so these browser checks do not establish active playback compatibility. No horizontal page overflow or unnamed room buttons was found; the short-screen room container scrolled to End Room, settings hid the room panel, and the 44×44 native alphabet selector navigated to T.
 - Browser screenshots and measurements: `[local workspace]`.
 - Main working-file hashes match the pre-cleanup inventory. The two branches/worktrees remain main and the combined WIP.
 
