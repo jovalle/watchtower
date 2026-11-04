@@ -50,7 +50,6 @@
                 <data
                     android:host="media"
                     android:scheme="watchtower" />
-                <data android:host="join" />
             </intent-filter>
         </activity>
     </application>

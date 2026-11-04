@@ -1,6 +1,6 @@
 # Native client API v1 contract (Android TV track)
 
-Status: **frozen for implementation on `codex/android-tv`, 2026-09-27**, base `8578769`. Types: [`app/lib/native/contract.ts`](../../../app/lib/native/contract.ts). Golden fixtures: [`contracts/native/v1/`](../../../contracts/native/v1/). The [shared contract](../shared-contract.md) governs identity, media/time and rooms; this file specifies the native facade the TV track owns. Changing a field requires updating the TypeScript types, fixtures, Kotlin DTOs and both test suites in one change.
+Status: **frozen for implementation on `codex/android-tv`, 2026-09-27**, base `8578769`. Types: [`app/lib/native/contract.ts`](../../../app/lib/native/contract.ts). Golden fixtures: [`contracts/native/v1/`](../../../contracts/native/v1/). The [shared contract](../shared-contract.md) governs identity and media/time; this file specifies the native facade the TV track owns. Changing a field requires updating the TypeScript types, fixtures, Kotlin DTOs and both test suites in one change.
 
 ## Conventions
 
@@ -83,15 +83,9 @@ All require bearer auth unless marked public.
 - Playback sessions are owned by effective user + server + device session + identity version. Another device, even on the same Plex account, cannot use, heartbeat, report or stop them. Replacement generations are scoped per device and rating key, so a second device's stream never supersedes or stops the first. A replacement request stops the prior session of the same device after the new one is registered; stale timeline reports from it are ignored.
 - Timeline states are `playing`, `paused`, `stopped` with a per-session increasing `sequence`; stale or equal sequences return `accepted:false`. Existing Plex and Trakt behavior is reused. Seeking to the end never scrobbles by itself.
 
-## Watch Together coordination
+## Reserved Capability
 
-Watch Together (`codex/watch-together`) owns `/api/v1/rooms/*`, `/api/v1/clock`, the room schema and fixtures. This branch provides, for its routes:
-
-- `resolveRequestPrincipal(request, {allowCookie})` in `app/lib/native/principal.server.ts`, returning the shared `PlaybackPrincipal` fields. Bearer principals carry the device session ID and identity version; cookie principals use a provisional `web:<hash>` device ID until WT binds a server-issued browser device.
-- Device-scoped playback ownership (`ownedNativePlaybackSession`) so presence can bind a participant's own playback session.
-- `features.rooms` in `/instance` and `/me` stays `false` until the room routes exist in the same deployment.
-
-The Kotlin room client consumes the shared-contract shapes and provisional fixtures in `contracts/rooms/v1-provisional/`. They are replaced by WT's reviewed fixtures, not extended independently. TV room support remains blocked until integrated server tests pass.
+`features.rooms` remains in `/instance` and `/me` as a reserved compatibility field set to `false`. This branch has no room routes, room client, invitation deep links, or room navigation. The historical combined implementation is retained on `codex/watch-together`.
 
 ## Compatibility and rollback
 

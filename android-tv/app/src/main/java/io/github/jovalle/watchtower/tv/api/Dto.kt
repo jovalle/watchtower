@@ -28,6 +28,7 @@ data class InstanceResponse(
     val pairing: PairingInfo,
 )
 
+// Reserved compatibility field: this branch advertises rooms=false.
 @Serializable
 data class InstanceFeatures(val pairing: Boolean, val profiles: Boolean, val rooms: Boolean)
 
@@ -104,6 +105,7 @@ data class ServerInfo(val machineId: String, val name: String)
 @Serializable
 data class AccountInfo(val userId: String, val title: String)
 
+// Reserved compatibility field: this branch advertises rooms=false.
 @Serializable
 data class MeFeatures(val profiles: Boolean, val requests: Boolean, val discovery: Boolean, val rooms: Boolean)
 

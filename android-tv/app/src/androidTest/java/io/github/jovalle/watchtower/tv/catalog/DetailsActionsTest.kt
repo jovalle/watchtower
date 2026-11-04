@@ -21,8 +21,6 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import io.github.jovalle.watchtower.tv.api.Guids
 import io.github.jovalle.watchtower.tv.api.MediaDetail
-import io.github.jovalle.watchtower.tv.api.MediaPart
-import io.github.jovalle.watchtower.tv.api.MediaVersion
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -54,11 +52,10 @@ class DetailsActionsTest {
                 MaterialTheme {
                     Box(Modifier.fillMaxSize().testTag("root").padding(36.dp)) {
                         DetailsActionRow(
-                            detail = detail(withRoomMedia = true),
+                            detail = detail(),
                             enabled = true,
                             issueEnabled = true,
                             onPlay = {},
-                            onWatchTogether = {},
                             onSetWatched = {},
                             onSetWatchlist = {},
                             onAddToPlaylist = {},
@@ -71,7 +68,7 @@ class DetailsActionsTest {
         }
 
         val root = compose.onNodeWithTag("root").getBoundsInRoot()
-        listOf("Play", "Start over", "Watch together", "Mark watched", "Add to watchlist", "Add to playlist", "Report issue")
+        listOf("Play", "Start over", "Mark watched", "Add to watchlist", "Add to playlist", "Report issue")
             .forEach { label ->
                 val node = compose.onNodeWithText(label)
                 val bounds = node.getBoundsInRoot()
@@ -80,7 +77,7 @@ class DetailsActionsTest {
             }
     }
 
-    private fun detail(withRoomMedia: Boolean = false) = MediaDetail(
+    private fun detail() = MediaDetail(
         ratingKey = "42", type = "movie", title = "Movie", year = null, posterUrl = null, backdropUrl = null,
         thumbUrl = null, durationMs = null, viewOffsetMs = null, viewCount = 0, leafCount = null,
         viewedLeafCount = null, contentRating = null, showTitle = null, seasonNumber = null, episodeNumber = null,
@@ -88,14 +85,7 @@ class DetailsActionsTest {
         studio = null, genres = emptyList(), directors = emptyList(), cast = emptyList(), audienceRating = null,
         criticRating = null, userRating = null, originallyAvailableAt = null, editionTitle = null, editions = emptyList(),
         guids = Guids(null, null, null, null),
-        versions = if (withRoomMedia) listOf(
-            MediaVersion(
-                mediaId = "media", label = "1080p", container = "mp4", videoCodec = "h264", videoProfile = null,
-                videoResolution = "1080", width = 1920, height = 1080, frameRate = 24.0, bitDepth = 8, hdr = null,
-                bitrateKbps = 8_000, audioCodec = "aac", audioChannels = 2, durationMs = 7_200_000,
-                parts = listOf(MediaPart("part", 0, 7_200_000, "mp4", 1_000)), audioTracks = emptyList(), subtitleTracks = emptyList(),
-            ),
-        ) else emptyList(),
+        versions = emptyList(),
         markers = emptyList(), onWatchlist = false, playable = true,
     )
 }

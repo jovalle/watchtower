@@ -11,5 +11,4 @@ data class PlayerRoute(
     val ratingKey: String,
     val mediaId: String? = null,
     val startPositionMs: Long? = null,
-    val roomId: String? = null,
 )

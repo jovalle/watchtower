@@ -35,7 +35,7 @@ class NavigationRailLayoutTest {
             MaterialTheme {
                 Row(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxHeight().testTag("rail")) {
-                        NavigationRail(expanded = false, currentRoute = null, libraries = emptyList(), roomsEnabled = true, navigate = {})
+                        NavigationRail(expanded = false, currentRoute = null, libraries = emptyList(), navigate = {})
                     }
                     Box(Modifier.weight(1f).fillMaxHeight().testTag("content"))
                 }
@@ -57,7 +57,6 @@ class NavigationRailLayoutTest {
                     expanded = false,
                     currentRoute = null,
                     libraries = libraries,
-                    roomsEnabled = true,
                     navigate = {},
                 )
             }

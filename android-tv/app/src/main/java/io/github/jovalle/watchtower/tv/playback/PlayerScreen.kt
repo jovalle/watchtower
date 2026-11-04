@@ -63,9 +63,6 @@ import androidx.tv.material3.Text
 import io.github.jovalle.watchtower.tv.AppGraph
 import io.github.jovalle.watchtower.tv.R
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
-import io.github.jovalle.watchtower.tv.rooms.RoomConnectionStatus
-import io.github.jovalle.watchtower.tv.rooms.RoomInvitationQr
-import io.github.jovalle.watchtower.tv.rooms.localizedRoomMessage
 
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -75,18 +72,13 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 	val view = LocalView.current
 	val controller = remember(graph, route) { PlaybackController(context, graph, route, onExit, onOpenItem) }
 	val state by controller.state.collectAsStateWithLifecycle()
-	val roomPanelOpener = remember { FocusRequester() }
-	val leaveOpener = remember { FocusRequester() }
 	val playOpener = remember { FocusRequester() }
 	val menuOpeners = remember { PlayerMenu.entries.associateWith { FocusRequester() } }
-	val countdownHasActions = state.room?.isHost != false
-	val countdownOverlay = state.nextDeadlineMs != null && countdownHasActions
-	val overlayVisible = state.terminalRoom || state.confirmLeave || state.roomPanelVisible || state.menu != null || countdownOverlay
-	RestoreFocusEffect(state.roomPanelVisible || state.terminalRoom, roomPanelOpener)
-	RestoreFocusEffect(state.confirmLeave || state.terminalRoom, leaveOpener)
-	RestoreFocusEffect(countdownOverlay || state.terminalRoom, playOpener)
+	val countdownOverlay = state.nextDeadlineMs != null
+	val overlayVisible = state.menu != null || countdownOverlay
+	RestoreFocusEffect(countdownOverlay, playOpener)
 	PlayerMenu.entries.forEach { menu ->
-		RestoreFocusEffect(state.menu == menu || state.terminalRoom, requireNotNull(menuOpeners[menu]))
+		RestoreFocusEffect(state.menu == menu, requireNotNull(menuOpeners[menu]))
 	}
 
 	DisposableEffect(controller, lifecycle) {
@@ -115,30 +107,27 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 			.background(Color.Black)
 			.onPreviewKeyEvent { event -> handlePlayerKey(event.nativeKeyEvent, state, controller) },
 	) {
-		if (!state.terminalRoom) {
-			PlayerSurface(
-				player = controller.surfacePlayer,
-				modifier = Modifier.fillMaxSize(),
-				surfaceType = SURFACE_TYPE_SURFACE_VIEW,
-			)
-			AndroidView(
-				factory = {
-					SubtitleView(it).apply {
-						setUserDefaultStyle()
-						setUserDefaultTextSize()
-					}
-				},
-				update = { it.setCues(state.cues) },
-				modifier = Modifier.fillMaxSize(),
-			)
-		}
+		PlayerSurface(
+			player = controller.surfacePlayer,
+			modifier = Modifier.fillMaxSize(),
+			surfaceType = SURFACE_TYPE_SURFACE_VIEW,
+		)
+		AndroidView(
+			factory = {
+				SubtitleView(it).apply {
+					setUserDefaultStyle()
+					setUserDefaultTextSize()
+				}
+			},
+			update = { it.setCues(state.cues) },
+			modifier = Modifier.fillMaxSize(),
+		)
 
-		if (!state.terminalRoom && (state.controlsVisible || state.loading || state.error != null)) {
+		if (state.controlsVisible || state.loading || state.error != null) {
 			Controls(
 				state,
 				controller,
 				canFocus = !overlayVisible,
-				roomPanelOpener = roomPanelOpener,
 				playOpener = playOpener,
 				menuOpeners = menuOpeners,
 				modifier = Modifier.align(Alignment.BottomCenter),
@@ -149,51 +138,18 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 				it,
 				state,
 				controller,
-				active = !state.terminalRoom && !state.confirmLeave && !state.roomPanelVisible,
+				active = true,
 				modifier = Modifier.align(Alignment.CenterEnd),
-			)
-		}
-		if (state.roomPanelVisible) {
-			RoomPanel(
-				state,
-				RoomPanelActions(
-					onPlay = { controller.submit(PlaybackIntent.Play) },
-					onEnd = controller::endRoom,
-					onRotate = controller::rotateInvitation,
-					onRevoke = controller::revokeInvitation,
-					onLeave = controller::requestLeave,
-					onBack = controller::handleBack,
-				),
-				active = !state.terminalRoom && !state.confirmLeave,
-				leaveOpener = leaveOpener,
-				modifier = Modifier.align(Alignment.CenterEnd),
-			)
-		}
-		if (state.confirmLeave) {
-			LeaveConfirmation(
-				onConfirm = controller::confirmLeave,
-				onCancel = controller::cancelLeave,
-				onBack = controller::handleBack,
-				modifier = Modifier.align(Alignment.Center),
 			)
 		}
 		state.nextDeadlineMs?.let { deadline ->
 			NextEpisodeCard(
 				seconds = ((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0) + 999) / 1_000,
-				onPlay = controller::playNextNow,
+				onPlay = { controller.submit(PlaybackIntent.Next) },
 				onCancel = controller::cancelNextCountdown,
 				onBack = controller::handleBack,
-				showActions = countdownHasActions,
-				active = countdownOverlay && !state.terminalRoom && !state.confirmLeave && !state.roomPanelVisible && state.menu == null,
+				active = countdownOverlay && state.menu == null,
 				modifier = Modifier.align(Alignment.BottomEnd),
-			)
-		}
-		if (state.terminalRoom) {
-			TerminalRoomOverlay(
-				state.roomMessage ?: stringResource(R.string.room_ended_generic),
-				controller::exit,
-				controller::handleBack,
-				Modifier.align(Alignment.Center),
 			)
 		}
 		val announcement = when {
@@ -202,7 +158,7 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 			!state.playWhenReady && !state.loading -> stringResource(R.string.player_paused)
 			else -> null
 		}
-		announcement?.takeUnless { state.terminalRoom }?.let {
+		announcement?.let {
 			Text(
 				text = it,
 				modifier = Modifier.align(Alignment.TopCenter).padding(24.dp).semantics {
@@ -210,17 +166,6 @@ fun PlayerScreen(graph: AppGraph, route: PlayerRoute, onExit: () -> Unit, onOpen
 				},
 				color = Color.White,
 				fontSize = 20.sp,
-			)
-		}
-		val renderedRoomMessage = state.room?.let {
-			localizedRoomMessage(it.errorCode, it.endedReason, state.roomMessage ?: it.message)
-		} ?: state.roomMessage
-		renderedRoomMessage?.takeUnless { state.terminalRoom }?.let {
-			Text(
-				text = it,
-				modifier = Modifier.align(Alignment.TopStart).padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite },
-				color = Color.White,
-				fontSize = 18.sp,
 			)
 		}
 	}
@@ -258,7 +203,6 @@ private fun Controls(
 	state: PlaybackUiState,
 	controller: PlaybackController,
 	canFocus: Boolean,
-	roomPanelOpener: FocusRequester,
 	playOpener: FocusRequester,
 	menuOpeners: Map<PlayerMenu, FocusRequester>,
 	modifier: Modifier = Modifier,
@@ -289,15 +233,6 @@ private fun Controls(
 			}
 		} else {
 			Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-				if (state.room != null) {
-					PlayerButton(
-						stringResource(R.string.room_controls),
-						stringResource(R.string.room_controls),
-						Modifier.focusRequester(roomPanelOpener),
-						canFocus,
-						controller::toggleRoomPanel,
-					)
-				}
 				PlayerButton(stringResource(R.string.player_start_over), stringResource(R.string.player_start_over_description), canFocus = canFocus) {
 					controller.submit(PlaybackIntent.StartOver)
 				}
@@ -341,112 +276,6 @@ private fun Controls(
 					controller.toggleMenu(PlayerMenu.DIAGNOSTICS)
 				}
 			}
-		}
-	}
-}
-
-@Composable
-internal fun RoomPanel(
-	state: PlaybackUiState,
-	actions: RoomPanelActions,
-	active: Boolean,
-	leaveOpener: FocusRequester,
-	modifier: Modifier = Modifier,
-) {
-	val room = state.room ?: return
-	val snapshot = room.snapshot
-	val primary = remember { FocusRequester() }
-	OverlayFocusEffect(active, primary)
-	LazyColumn(
-		modifier.handleOverlayBack(actions.onBack).focusGroup().focusProperties { onExit = { cancelFocusChange() } }
-			.width(420.dp).fillMaxHeight().background(Color(0xF20D0D0D)).padding(24.dp),
-		verticalArrangement = Arrangement.spacedBy(10.dp),
-	) {
-		item { Text(stringResource(R.string.room_controls), color = Color.White, fontSize = 26.sp) }
-		item {
-			Text(
-				when (room.status) {
-					RoomConnectionStatus.CONNECTED -> snapshot?.phase ?: ""
-					RoomConnectionStatus.RECONNECTING -> stringResource(R.string.room_reconnecting)
-					RoomConnectionStatus.ENDED, RoomConnectionStatus.ERROR ->
-						localizedRoomMessage(room.errorCode, room.endedReason, room.message)
-					else -> stringResource(R.string.room_preparing)
-				},
-				color = Color(0xFFCCCCCC),
-			)
-		}
-		items(snapshot?.participants.orEmpty(), key = { it.participantId }) { participant ->
-			val status = when {
-				participant.buffering -> stringResource(R.string.room_buffering)
-				participant.ready -> stringResource(R.string.room_ready)
-				else -> stringResource(R.string.room_waiting)
-			}
-			val host = if (participant.participantId == snapshot?.hostParticipantId) " ${stringResource(R.string.room_host_badge)}" else ""
-			Text("${participant.displayName}$host  $status", color = Color.White, fontSize = 18.sp)
-		}
-		if (room.isHost) {
-			item {
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					PlayerButton(stringResource(R.string.room_start), stringResource(R.string.room_start), canFocus = active, onClick = actions.onPlay)
-					PlayerButton(stringResource(R.string.room_end_everyone), stringResource(R.string.room_end_everyone), canFocus = active, onClick = actions.onEnd)
-				}
-			}
-			item {
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					PlayerButton(stringResource(R.string.room_rotate_invite), stringResource(R.string.room_rotate_invite), canFocus = active, onClick = actions.onRotate)
-					PlayerButton(stringResource(R.string.room_revoke_invite), stringResource(R.string.room_revoke_invite), canFocus = active, onClick = actions.onRevoke)
-				}
-			}
-		}
-		item {
-			PlayerButton(
-				stringResource(R.string.room_leave),
-				stringResource(R.string.room_leave),
-				Modifier.focusRequester(primary).focusRequester(leaveOpener),
-				active,
-				actions.onLeave,
-			)
-		}
-		state.roomInviteUrl?.let { url ->
-			item { RoomInvitationQr(url) }
-			item { Text(url, color = Color.White, fontSize = 14.sp) }
-		}
-	}
-}
-
-internal data class RoomPanelActions(
-	val onPlay: () -> Unit,
-	val onEnd: () -> Unit,
-	val onRotate: () -> Unit,
-	val onRevoke: () -> Unit,
-	val onLeave: () -> Unit,
-	val onBack: () -> Unit,
-)
-
-@Composable
-internal fun LeaveConfirmation(
-	onConfirm: () -> Unit,
-	onCancel: () -> Unit,
-	onBack: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val primary = remember { FocusRequester() }
-	OverlayFocusEffect(active = true, primary)
-	Column(
-		modifier.handleOverlayBack(onBack).focusGroup().focusProperties { onExit = { cancelFocusChange() } }
-			.width(440.dp).background(Color(0xFA171717)).padding(28.dp),
-		verticalArrangement = Arrangement.spacedBy(14.dp),
-	) {
-		Text(stringResource(R.string.room_leave_confirm), color = Color.White, fontSize = 26.sp)
-		Text(stringResource(R.string.room_leave_confirm_detail), color = Color(0xFFCCCCCC), fontSize = 17.sp)
-		Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-			PlayerButton(
-				stringResource(R.string.room_leave),
-				stringResource(R.string.room_leave),
-				Modifier.focusRequester(primary),
-				onClick = onConfirm,
-			)
-			PlayerButton(stringResource(R.string.room_stay), stringResource(R.string.room_stay), onClick = onCancel)
 		}
 	}
 }
@@ -588,7 +417,6 @@ internal fun NextEpisodeCard(
 	onPlay: () -> Unit,
 	onCancel: () -> Unit,
 	onBack: () -> Unit,
-	showActions: Boolean,
 	active: Boolean,
 	modifier: Modifier = Modifier,
 ) {
@@ -600,17 +428,15 @@ internal fun NextEpisodeCard(
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		Text(pluralStringResource(R.plurals.player_next_in, seconds.toInt(), seconds.toInt()), color = Color.White, fontSize = 20.sp)
-		if (showActions) {
-			Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-				PlayerButton(
-					stringResource(R.string.player_play_next),
-					stringResource(R.string.player_play_next_description),
-					Modifier.focusRequester(primary),
-					active,
-					onPlay,
-				)
-				PlayerButton(stringResource(R.string.player_cancel), stringResource(R.string.player_cancel_description), canFocus = active, onClick = onCancel)
-			}
+		Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+			PlayerButton(
+				stringResource(R.string.player_play_next),
+				stringResource(R.string.player_play_next_description),
+				Modifier.focusRequester(primary),
+				active,
+				onPlay,
+			)
+			PlayerButton(stringResource(R.string.player_cancel), stringResource(R.string.player_cancel_description), canFocus = active, onClick = onCancel)
 		}
 	}
 }
@@ -628,30 +454,6 @@ internal fun RestoreFocusEffect(overlayVisible: Boolean, opener: FocusRequester)
 	LaunchedEffect(overlayVisible, opener) {
 		if (!overlayVisible && wasVisible) opener.requestFocus()
 		wasVisible = overlayVisible
-	}
-}
-
-@Composable
-private fun TerminalRoomOverlay(
-	message: String,
-	onExitAction: () -> Unit,
-	onBack: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val primary = remember { FocusRequester() }
-	OverlayFocusEffect(active = true, primary)
-	Column(
-		modifier.handleOverlayBack(onBack).focusGroup().focusProperties { onExit = { cancelFocusChange() } }
-			.width(500.dp).background(Color(0xFA171717)).padding(28.dp),
-		verticalArrangement = Arrangement.spacedBy(16.dp),
-	) {
-		Text(message, color = Color.White, fontSize = 22.sp)
-		PlayerButton(
-			stringResource(R.string.player_exit),
-			stringResource(R.string.player_exit_description),
-			Modifier.focusRequester(primary),
-			onClick = onExitAction,
-		)
 	}
 }
 

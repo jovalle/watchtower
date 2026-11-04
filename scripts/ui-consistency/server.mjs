@@ -28,14 +28,13 @@ for (const name of ["gallery", "forms-gallery"]) {
     await bundle({ entryPoints: [`scripts/ui-consistency/${name}.tsx`], outfile: `tmp/consistency-audit/${name}.js`, bundle: true, format: "esm", platform: "browser", tsconfig: "tsconfig.json", alias: { "react-router-dom": dirname(remixRequire.resolve("react-router-dom/package.json")), "react-router": dirname(remixRequire.resolve("react-router/package.json")) }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "warning" });
 }
 const player = browse.find(c => c.id === "player-loading").data;
-const readyPlayer = { ...player, streamUrl: "/__audit/video.webm", durationMs: 60000, parentTitle: "Season 1", parentIndex: 1, index: 1, quality: { id: "original", label: "Original", isOriginal: true }, availableQualities: [{ id: "original", label: "Original", isOriginal: true }], autoPlayNextEpisode: false, autoSkipIntro: false, markers: [{ type: "intro", start: 0, end: 10 }, { type: "credits", start: 50, end: 60 }], mediaId: "1", partIdValue: "1", partCount: 1, burnedSubtitleId: null, room: null };
+const readyPlayer = { ...player, streamUrl: "/__audit/video.webm", durationMs: 60000, parentTitle: "Season 1", parentIndex: 1, index: 1, quality: { id: "original", label: "Original", isOriginal: true }, availableQualities: [{ id: "original", label: "Original", isOriginal: true }], autoPlayNextEpisode: false, autoSkipIntro: false, markers: [{ type: "intro", start: 0, end: 10 }, { type: "credits", start: 50, end: 60 }], mediaId: "1", partIdValue: "1", partCount: 1, burnedSubtitleId: null };
 const extras = [
     { id: "app-error", path: "/app/media/movie/missing", routeId: "routes/app.media.$type.$ratingKey", error: 404 },
     { id: "app-fatal", path: "/app/media/movie/missing", routeId: "routes/app.media.$type.$ratingKey", error: 500 },
     { id: "root-error", path: "/", routeId: "root", error: 500 },
     { id: "player-ready", path: "/app/watch/42", routeId: "routes/app.watch.$ratingKey", data: readyPlayer },
     { id: "player-tracks", path: "/app/watch/42", routeId: "routes/app.watch.$ratingKey", data: { ...readyPlayer, audioTracks: [{ id: 1, displayTitle: "English · Stereo", selected: true }, { id: 2, displayTitle: "French · Stereo" }], subtitleTracks: [{ id: 3, displayTitle: "English (SDH)", codec: "srt" }], availableQualities: [{ id: "original", label: "Original", isOriginal: true }, { id: "720p-4", label: "720p · 4 Mbps", isOriginal: false }] } },
-    { id: "room-create", path: "/app/watch/42?together=1", routeId: "routes/app.watch.$ratingKey", data: { ...readyPlayer, watchTogetherEnabled: true, togetherRequested: true } },
 ];
 const cases = [...browse, ...forms, ...publicCases, ...extras];
 const byId = new Map(cases.map(c => [c.id, c]));
@@ -73,8 +72,6 @@ function apiData(id, scenario, request) {
         return { success: true, cleared: 0 };
     if (id === "routes/api.validate.trakt" || id === "routes/api.validate.imdb")
         return { valid: true, success: true };
-    if (id === "routes/api.v1.rooms.join")
-        return json({ error: { code: "room_ended", message: "This room has ended." } }, { status: 410 });
     if (scenario.id.includes("api-error"))
         return json({ error: "Synthetic request failed." }, { status: 503 });
     if (url.pathname.startsWith("/api/"))
