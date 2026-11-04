@@ -1,5 +1,5 @@
 /**
- * Server-wide integration settings (Seerr, Trakt app credentials) managed by the server owner in the UI.
+ * Server-wide integration settings, with an environment override for Seerr.
  */
 
 import * as fs from "fs/promises";
@@ -19,7 +19,7 @@ function getConfigPath(): string {
   return path.join(env.DATA_PATH, "integrations.json");
 }
 
-export async function getIntegrations(): Promise<IntegrationsConfig> {
+async function getSavedIntegrations(): Promise<IntegrationsConfig> {
   if (cached) return cached;
   try {
     const parsed = JSON.parse(
@@ -32,11 +32,18 @@ export async function getIntegrations(): Promise<IntegrationsConfig> {
   return cached;
 }
 
+export async function getIntegrations(): Promise<IntegrationsConfig> {
+  const saved = await getSavedIntegrations();
+  const url = normalizeServiceUrl(process.env.SEERR_URL ?? "");
+  const apiKey = process.env.SEERR_API_KEY?.trim();
+  return url && apiKey ? { ...saved, seerr: { url, apiKey } } : saved;
+}
+
 export async function saveIntegrations(
   update: Partial<Omit<IntegrationsConfig, "version">>
 ): Promise<IntegrationsConfig> {
   const next: IntegrationsConfig = {
-    ...(await getIntegrations()),
+    ...(await getSavedIntegrations()),
     ...update,
     version: 1,
   };
