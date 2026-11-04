@@ -81,6 +81,6 @@ it("shows Seerr status 2 as resolved and submits a reopen action", async () => {
   );
   render(<RouterProvider router={router} />);
   expect(await screen.findByText("Issue #4 · Resolved")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Reopen issue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Issue" }));
   await waitFor(() => expect(intent).toBe("open"));
 });

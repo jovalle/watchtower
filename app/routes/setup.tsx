@@ -16,6 +16,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { buttonStyles } from "~/components/ui";
 import { CheckCircle, KeyRound, LogOut, Server, XCircle } from "lucide-react";
 import {
   clearSession,
@@ -218,8 +219,7 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 }
 
-const buttonClass =
-  "inline-flex w-full items-center justify-center gap-2 rounded-md bg-accent-primary px-6 py-3 font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50";
+const buttonClass = buttonStyles({ className: "w-full gap-2" });
 
 export default function Setup() {
   const data = useLoaderData<typeof loader>();
@@ -234,7 +234,7 @@ export default function Setup() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background-primary px-6 py-12">
-      <div className="w-full max-w-xl space-y-6">
+      <div className="w-full max-w-xl break-words space-y-6">
         <div className="flex items-center gap-3">
           <Server className="h-8 w-8 text-accent-primary" />
           <h1 className="text-3xl font-bold text-foreground-primary">
@@ -265,7 +265,7 @@ export default function Setup() {
                 required
                 autoComplete="off"
                 placeholder="XXXX-XXXX-XXXX"
-                className="mt-1 w-full rounded-md border border-border-subtle bg-background-elevated px-3 py-2 font-mono uppercase tracking-widest text-foreground-primary"
+                className="mt-1 min-h-11 w-full rounded-md border border-border-subtle bg-background-elevated px-3 py-2 font-mono uppercase tracking-widest text-foreground-primary"
               />
             </label>
             <button type="submit" disabled={busy} className={buttonClass}>
@@ -310,15 +310,15 @@ export default function Setup() {
             {data.servers.map((server) => (
               <fieldset
                 key={server.machineIdentifier}
-                className="rounded-lg bg-background-elevated p-4"
+                className="min-w-0 w-full rounded-lg bg-background-elevated p-4"
               >
-                <legend className="px-1 font-semibold text-foreground-primary">
+                <legend className="max-w-full px-1 [overflow-wrap:anywhere] font-semibold text-foreground-primary">
                   {server.name}
                 </legend>
                 {server.connections.map((c) => (
                   <label
                     key={c.uri}
-                    className="flex items-center gap-3 py-1.5 text-sm"
+                    className="flex min-w-0 flex-wrap items-center gap-3 py-3 text-sm"
                   >
                     <input
                       type="radio"
@@ -332,10 +332,10 @@ export default function Setup() {
                     ) : (
                       <XCircle className="h-4 w-4 text-red-500" />
                     )}
-                    <span className="break-all font-mono text-foreground-primary">
+                    <span className="min-w-0 flex-1 break-all font-mono text-foreground-primary">
                       {c.uri}
                     </span>
-                    <span className="ml-auto whitespace-nowrap text-foreground-muted">
+                    <span className="w-full break-words text-foreground-secondary sm:w-auto sm:max-w-[50%]">
                       {c.relay ? "relay" : c.local ? "local" : "remote"} ·{" "}
                       {c.ok ? `${c.latencyMs} ms` : c.error}
                     </span>
@@ -345,23 +345,23 @@ export default function Setup() {
             ))}
             <button
               type="submit"
-              disabled={busy || data.servers.length === 0}
+              disabled={busy || !data.servers.some((server) => server.connections.some((connection) => connection.ok))}
               className={buttonClass}
             >
-              Use this connection
+              Use This Connection
             </button>
           </Form>
         )}
 
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
 
         <Form method="post" action="/auth/logout">
           <button
             type="submit"
-            className="inline-flex items-center gap-2 text-sm text-foreground-muted hover:text-foreground-primary"
+            className={buttonStyles({ variant: "ghost", size: "sm", className: "gap-2" })}
           >
             <LogOut className="h-4 w-4" />
-            Sign in with a different account
+            Sign In with a Different Account
           </button>
         </Form>
       </div>

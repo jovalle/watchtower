@@ -4,6 +4,7 @@
  * Uses a two-stage flow: type name → confirm via API (conflict check) → then vote actions become available.
  */
 
+import { Button } from "~/components/ui";
 import { useState, useEffect, useCallback } from "react";
 
 const STORAGE_KEY = "watchtower-guest-name";
@@ -84,7 +85,7 @@ export function GuestIdentity({
       >
         What&apos;s your name?
       </label>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <input
           id="guest-name-input"
           type="text"
@@ -96,18 +97,18 @@ export function GuestIdentity({
           onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
           placeholder="Enter your name to vote"
           maxLength={30}
-          className="flex-1 rounded-md border border-white/20 bg-white/5 px-3 py-2 text-sm text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          className="min-w-0 flex-1 rounded-md border border-white/20 bg-white/5 px-3 py-2 text-sm text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
         />
-        <button
+        <Button
+          size="sm"
           onClick={handleConfirm}
           disabled={!draft.trim() || loading}
-          className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? "..." : "Join"}
-        </button>
+          {loading ? "Joining..." : "Join"}
+        </Button>
       </div>
       {error ? (
-        <p className="mt-1.5 text-xs text-red-400">{error}</p>
+        <p role="alert" className="mt-1.5 text-sm text-red-300">{error}</p>
       ) : (
         <p className="mt-1.5 text-xs text-foreground-muted">
           Your name will be shown alongside your votes.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button } from "~/components/ui/Button";
 import { Play, X } from "lucide-react";
 
 export interface NextEpisode {
@@ -36,7 +37,7 @@ export function NextEpisodeCard({
   }, [remaining, onPlay, autoPlay]);
 
   return (
-    <div className="absolute bottom-28 right-4 z-40 w-80 overflow-hidden rounded-lg bg-black/90 shadow-2xl ring-1 ring-white/20">
+    <div className="absolute bottom-28 right-4 z-40 max-h-[calc(100dvh-8rem)] w-80 max-w-[calc(100%-2rem)] overflow-y-auto rounded-lg bg-black/90 shadow-2xl ring-1 ring-white/20">
       <div className="relative aspect-video bg-white/5">
         {episode.thumbUrl && (
           <img
@@ -60,17 +61,17 @@ export function NextEpisodeCard({
         <p className="mt-0.5 truncate text-sm font-medium text-white">
           {episode.title}
         </p>
-        <button
+        <Button size="sm"
           onClick={onPlay}
-          className="relative mt-3 flex min-h-11 w-full items-center justify-center gap-2 overflow-hidden rounded bg-white/20 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/30"
+          className="relative mt-3 w-full gap-2 overflow-hidden"
         >
           <span
-            className="absolute inset-y-0 left-0 bg-mango/60 transition-[width] duration-1000 ease-linear"
+            className="absolute bottom-0 left-0 h-1 bg-accent-foreground transition-[width] duration-1000 ease-linear"
             style={{ width: `${autoPlay && seconds > 0 ? ((seconds - remaining) / seconds) * 100 : 0}%` }}
           />
           <Play className="relative h-4 w-4" fill="currentColor" />
-          <span className="relative">{autoPlay ? `Play in ${remaining}s` : "Play next episode"}</span>
-        </button>
+          <span className="relative">{autoPlay ? `Play in ${remaining}s` : "Play Next Episode"}</span>
+        </Button>
       </div>
     </div>
   );

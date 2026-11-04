@@ -96,12 +96,12 @@ export default function RequestsPage() {
       )}
       {!error && !items.length && (
         <div className="rounded-lg border border-border-subtle p-8">
-          <h2 className="text-lg font-medium">No requests here yet</h2>
+          <h2 className="text-lg font-medium">No Requests Here Yet</h2>
           <Link
             to="/app/discover"
-            className="mt-3 inline-block text-accent-primary"
+            className={`${controlClass} mt-3`}
           >
-            Discover something to request →
+            Discover Something to Request
           </Link>
         </div>
       )}
@@ -119,7 +119,7 @@ export default function RequestsPage() {
               />
             )}
             <div className="min-w-0 flex-1">
-              <h2 className="font-semibold"><Link to={`/app/media/${item.media.mediaType === "tv" ? "show" : "movie"}/tmdb-${item.media.tmdbId}`}>{item.title}</Link></h2>
+              <h2 className="break-words font-semibold"><Link to={`/app/media/${item.media.mediaType === "tv" ? "show" : "movie"}/tmdb-${item.media.tmdbId}`}>{item.title}</Link></h2>
               <p className="mt-1 text-sm text-foreground-secondary">
                 {item.media.mediaType === "tv" ? "Series" : "Movie"}
                 {item.is4k ? " · 4K" : ""} · {item.createdAt.slice(0, 10)}
@@ -144,7 +144,7 @@ export default function RequestsPage() {
                     disabled={navigation.state !== "idle"}
                     className={controlClass}
                   >
-                    Cancel request
+                    Cancel Request
                   </button>
                 </Form>
               )}
@@ -152,7 +152,7 @@ export default function RequestsPage() {
                 to={`/app/issues?type=${item.media.mediaType}&tmdbId=${item.media.tmdbId}`}
                 className={controlClass}
               >
-                Report issue
+                Report Issue
               </Link>
             </div>
           </article>

@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useId, type ReactNode } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
+import { buttonStyles } from './Button';
+import { usePopupBounds } from '~/hooks/usePopupBounds';
 
 export interface FilterOption<T extends string = string> {
   value: T;
@@ -34,6 +36,9 @@ export function FilterDropdown<T extends string = string>({
 }: FilterDropdownProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionsId = useId();
+  const panel = usePopupBounds(isOpen, "menu");
 
   // Close on click outside
   useEffect(() => {
@@ -56,6 +61,7 @@ export function FilterDropdown<T extends string = string>({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     };
 
@@ -97,21 +103,27 @@ export function FilterDropdown<T extends string = string>({
       const option = options.find((o) => o.value === selected[0]);
       return option?.label ?? 'All';
     }
-    return `${selected.length} selected`;
+    return `${selected.length} Selected`;
   };
 
   // Check if anything other than "all" is selected
   const hasActiveFilter = allValue ? !selected.includes(allValue) && selected.length > 0 : selected.length > 0;
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="relative max-w-full" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setIsOpen(false);
+    }}>
       <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={optionsId}
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+        className={buttonStyles({ variant: 'ghost', size: 'sm', className: `max-w-full gap-1.5 border ${
           hasActiveFilter
-            ? 'border-accent-primary bg-accent-primary/20 text-accent-primary'
-            : 'border-border-subtle bg-background-elevated text-foreground-secondary hover:text-foreground-primary'
-        }`}
+            ? 'border-accent-primary !bg-accent-primary/20 !text-accent-primary'
+            : 'border-border-subtle !bg-background-elevated !text-foreground-secondary hover:!text-foreground-primary'
+        }` })}
       >
         <span>{label}</span>
         <span className="text-foreground-muted">·</span>
@@ -120,26 +132,28 @@ export function FilterDropdown<T extends string = string>({
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-border-subtle bg-background-elevated py-1 shadow-xl">
+        <div ref={panel} id={optionsId} className="absolute left-0 top-full z-50 mt-1 w-full overflow-y-auto overscroll-contain rounded-lg border border-border-subtle bg-background-elevated py-1 shadow-xl">
           {options.map((option) => {
             const isSelected = selected.includes(option.value);
             return (
               <button
                 key={option.value}
+                type="button"
+                aria-pressed={isSelected}
                 onClick={() => handleToggle(option.value)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-background-hover"
+                className={buttonStyles({ variant: 'ghost', size: 'sm', className: 'w-full gap-2 text-left' })}
               >
                 <span
-                  className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
                     isSelected
-                      ? 'border-accent-primary bg-accent-primary text-white'
+                      ? 'border-accent-primary bg-accent-primary text-accent-foreground'
                       : 'border-border-subtle bg-background-primary'
                   }`}
                 >
                   {isSelected && <Check className="h-3 w-3" />}
                 </span>
                 {option.icon && <span className="flex-shrink-0">{option.icon}</span>}
-                <span className="flex-1 text-foreground-primary">{option.label}</span>
+                <span className="min-w-0 flex-1 break-words text-foreground-primary">{option.label}</span>
                 {option.count !== undefined && (
                   <span className="text-foreground-muted">({option.count})</span>
                 )}

@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { List, Check, Loader2, Plus, X } from "lucide-react";
 import type { PlexPlaylist } from "~/lib/plex/types";
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
 
 interface PlaylistWithMembership extends PlexPlaylist {
   containsItem: boolean;
@@ -37,10 +38,12 @@ export function ListSelectorModal({
   onClose,
   onSuccess,
 }: ListSelectorModalProps) {
-  const modalRef = useRef<HTMLDivElement>(null);
+  usePageScrollLock(true);
+  const modalRef = useRef<HTMLDialogElement>(null);
   const [playlists, setPlaylists] = useState<PlaylistWithMembership[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingPlaylistId, setLoadingPlaylistId] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   // Fetch playlists with membership info
@@ -70,63 +73,35 @@ export function ListSelectorModal({
     fetchPlaylists();
   }, [fetchPlaylists]);
 
-  // Close on escape key
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // Close on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
-        // Stop propagation to prevent the click from reaching the card
-        e.stopPropagation();
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    // Delay to prevent immediate close from the triggering click
-    const timeoutId = setTimeout(() => {
-      // Use capture phase to intercept clicks before they reach the card
-      document.addEventListener("mousedown", handleClickOutside, true);
-    }, 100);
-
+    const dialog = modalRef.current;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog?.showModal();
     return () => {
-      clearTimeout(timeoutId);
-      document.removeEventListener("mousedown", handleClickOutside, true);
+      dialog?.close();
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
     };
-  }, [onClose]);
+  }, []);
 
   // Adjust position to stay within viewport
   useEffect(() => {
-    if (modalRef.current) {
-      const rect = modalRef.current.getBoundingClientRect();
-      const padding = 8;
-
-      // Adjust if modal would overflow right edge
-      if (rect.right > window.innerWidth - padding) {
-        modalRef.current.style.left = `${window.innerWidth - rect.width - padding}px`;
-      }
-
-      // Adjust if modal would overflow bottom edge
-      if (rect.bottom > window.innerHeight - padding) {
-        modalRef.current.style.top = `${window.innerHeight - rect.height - padding}px`;
-      }
-    }
-  }, [position, playlists]);
+    const dialog = modalRef.current;
+    if (!dialog) return;
+    const place = () => {
+      const rect = dialog.getBoundingClientRect();
+      dialog.style.left = `${Math.max(8, Math.min(position.x, window.innerWidth - rect.width - 8))}px`;
+      dialog.style.top = `${Math.max(8, Math.min(position.y, window.innerHeight - rect.height - 8))}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [position, playlists, mutationError, isLoading]);
 
   // Toggle playlist membership
   const handleTogglePlaylist = async (playlist: PlaylistWithMembership) => {
     if (loadingPlaylistId) return; // Prevent concurrent operations
 
+    setMutationError("");
     setLoadingPlaylistId(playlist.ratingKey);
 
     try {
@@ -149,63 +124,77 @@ export function ListSelectorModal({
       setPlaylists((prev) =>
         prev.map((p) =>
           p.ratingKey === playlist.ratingKey
-            ? { ...p, containsItem: !isRemoving, playlistItemId: isRemoving ? null : "updated" }
+            ? { ...p, containsItem: !isRemoving, playlistItemId: null, leafCount: p.leafCount + (isRemoving ? -1 : 1) }
             : p
         )
       );
 
       onSuccess?.();
     } catch (err) {
-      console.error("Playlist operation failed:", err);
+      setMutationError(err instanceof Error ? err.message : "Could not update this playlist.");
     } finally {
       setLoadingPlaylistId(null);
     }
   };
 
+  function close() {
+    modalRef.current?.close();
+    onClose();
+  }
+
   return (
-    <div
+    <dialog
       ref={modalRef}
-      className="fixed z-[100] min-w-[240px] max-w-[320px] animate-fadeIn overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
+      aria-label="Add to Playlist"
+      onCancel={(event) => { event.preventDefault(); close(); }}
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
+      }}
+      className="fixed inset-auto m-0 max-h-[calc(100dvh-1rem)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-border-subtle bg-background-elevated p-0 text-foreground-primary shadow-xl backdrop:bg-black/40"
       style={{
         left: position.x,
         top: position.y,
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-700 px-3 py-2">
+      <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
         <div className="flex items-center gap-2">
           <List className="h-4 w-4 text-mango" />
           <span className="text-sm font-medium text-white">Add to Playlist</span>
         </div>
         <button
-          onClick={onClose}
-          className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+          aria-label="Close"
+          onClick={close}
+          className="min-h-11 min-w-11 inline-flex items-center justify-center rounded p-1 text-foreground-secondary transition-colors hover:bg-white/10 hover:text-white"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
       {/* Item title */}
-      <div className="border-b border-zinc-800 px-3 py-2">
-        <p className="truncate text-xs text-zinc-400">{itemTitle}</p>
+      <div className="border-b border-border-subtle px-3 py-2">
+        <p className="truncate text-xs text-foreground-secondary">{itemTitle}</p>
       </div>
 
       {/* Content */}
       <div className="max-h-[300px] overflow-y-auto">
         {isLoading && (
-          <div className="flex items-center justify-center py-8">
+          <div role="status" aria-label="Loading Playlists" className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-mango" />
           </div>
         )}
 
+        {mutationError && <p role="alert" className="px-3 py-2 text-sm text-red-400">{mutationError}</p>}
         {error && (
-          <div className="px-3 py-4 text-center text-sm text-red-400">
+          <div role="alert" className="px-3 py-4 text-center text-sm text-red-400">
             {error}
           </div>
         )}
 
         {!isLoading && !error && playlists.length === 0 && (
-          <div className="px-3 py-6 text-center text-sm text-zinc-400">
+          <div className="px-3 py-6 text-center text-sm text-foreground-secondary">
             <p>No playlists found.</p>
             <p className="mt-1 text-xs">Create a playlist in Plex first.</p>
           </div>
@@ -221,11 +210,12 @@ export function ListSelectorModal({
                 <button
                   key={playlist.ratingKey}
                   onClick={() => handleTogglePlaylist(playlist)}
-                  disabled={isUpdating}
+                  disabled={loadingPlaylistId !== null}
+                  aria-pressed={isInPlaylist}
                   className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
                     isUpdating
                       ? "cursor-wait opacity-50"
-                      : "hover:bg-zinc-800"
+                      : "hover:bg-white/10"
                   }`}
                 >
                   {/* Checkbox indicator */}
@@ -233,7 +223,7 @@ export function ListSelectorModal({
                     className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors ${
                       isInPlaylist
                         ? "border-mango bg-mango"
-                        : "border-zinc-600 bg-transparent"
+                        : "border-border-emphasis bg-transparent"
                     }`}
                   >
                     {isUpdating ? (
@@ -246,14 +236,14 @@ export function ListSelectorModal({
                   {/* Playlist info */}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-white">{playlist.title}</p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-foreground-muted">
                       {playlist.leafCount} {playlist.leafCount === 1 ? "item" : "items"}
                     </p>
                   </div>
 
                   {/* Add indicator for empty checkbox */}
                   {!isInPlaylist && !isUpdating && (
-                    <Plus className="h-4 w-4 flex-shrink-0 text-zinc-500" />
+                    <Plus className="h-4 w-4 flex-shrink-0 text-foreground-muted" />
                   )}
                 </button>
               );
@@ -261,6 +251,6 @@ export function ListSelectorModal({
           </div>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }

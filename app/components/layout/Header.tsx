@@ -5,7 +5,7 @@
  * navigation links, and user menu integration.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { NavLink, Link, useNavigate, useFetcher, useLocation } from "@remix-run/react";
 import { Bell, Menu, Search } from "lucide-react";
 import { UserMenu } from "~/components/UserMenu";
@@ -14,7 +14,6 @@ import { Logo } from "~/components/ui";
 import { Container } from "./Container";
 import { MobileMenu } from "./MobileMenu";
 import type { PlexUser } from "~/lib/auth/plex.server";
-import { saveClientPlaybackCaps } from "~/lib/playback-caps";
 
 interface HeaderProps {
   user: PlexUser;
@@ -42,7 +41,7 @@ function NavLinkItem({ item }: { item: NavItem }) {
       to={item.to}
       end={item.to === "/app"}
       className={({ isActive }) =>
-        `flex min-h-11 items-center text-sm font-medium transition-colors duration-200 ${
+        `flex min-h-11 min-w-11 items-center text-sm font-medium transition-colors duration-200 ${
           isActive || (item.to === "/app/stuff" && pathname.startsWith("/app/lists/"))
             ? "text-foreground-primary"
             : "text-foreground-secondary hover:text-foreground-primary"
@@ -58,6 +57,22 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
   const items = discoveryDisabled ? navItems.filter((item) => item.to !== "/app/discover") : navItems;
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const changeActivity = useCallback((open: boolean) => {
+    setActivityOpen(open);
+    if (open) setIsMobileMenuOpen(false);
+    else if (!window.matchMedia("(min-width: 768px)").matches) menuButton.current?.focus();
+  }, []);
+  useEffect(() => {
+    const breakpoint = window.matchMedia("(min-width: 768px)");
+    const closeOverlays = () => {
+      setIsMobileMenuOpen(false);
+      setActivityOpen(false);
+    };
+    breakpoint.addEventListener("change", closeOverlays);
+    return () => breakpoint.removeEventListener("change", closeOverlays);
+  }, []);
   const inbox = useFetcher<{ unread: number }>();
   const loadInbox = inbox.load;
   useEffect(() => {
@@ -98,9 +113,6 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
 
   const navigate = useNavigate();
-  // Header is on every app page, so this runs before the first playback loader.
-  useEffect(() => saveClientPlaybackCaps(), []);
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -115,18 +127,18 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
   return (
     <>
       <header
-        className={`fixed left-0 right-0 top-0 z-50 h-16 transition-colors duration-300 ${
+        className={`fixed left-0 right-0 top-0 z-50 h-[var(--app-header-offset)] pt-safe transition-colors duration-300 ${
           isScrolled
             ? "bg-background-primary/95 backdrop-blur-sm"
             : "bg-gradient-to-b from-black/80 to-transparent"
         }`}
       >
         <Container size="wide">
-          <div className="flex h-16 items-center justify-between">
+          <div className="flex h-[var(--app-header-height)] items-center justify-between gap-4">
             {/* Left section: Logo + Navigation */}
-            <div className="flex items-center gap-8">
+            <div className="flex shrink-0 items-center gap-8">
               {/* Logo */}
-              <Link to="/app" aria-label="Watchtower home" className="flex items-center">
+              <Link to="/app" aria-label="Watchtower Home" className="flex h-11 shrink-0 items-center">
                 <Logo />
               </Link>
 
@@ -139,8 +151,8 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
             </div>
 
             {/* Right section: Actions + User Menu */}
-            <div className="flex items-center gap-4">
-              <Link to="/app/notifications" aria-label={`Notifications${inbox.data?.unread ? `, ${inbox.data.unread} unread` : ""}`} className="relative flex h-11 w-11 items-center justify-center rounded-md text-foreground-secondary hover:bg-background-elevated">
+            <div className="flex shrink-0 items-center gap-2 md:gap-4">
+              <Link to="/app/notifications" aria-label={`Notifications${inbox.data?.unread ? `, ${inbox.data.unread} unread` : ""}`} className="relative hidden h-11 w-11 shrink-0 md:flex items-center justify-center rounded-md text-foreground-secondary hover:bg-background-elevated">
                 <Bell className="h-5 w-5" />
                 {!!inbox.data?.unread && <span className="absolute right-0 top-0 rounded-full bg-accent-primary px-1.5 text-xs text-background-primary">{inbox.data.unread}</span>}
               </Link>
@@ -154,29 +166,18 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
               </Link>
 
               {/* Streaming Dashboard */}
-              <StreamingDashboard />
+              <StreamingDashboard isOpen={activityOpen} onOpenChange={changeActivity} triggerClassName="hidden md:inline-flex" />
 
-              {/* User Menu - visible on all sizes */}
-              <div className="hidden sm:block">
+              <div className="hidden md:block">
                 <UserMenu user={user} />
-              </div>
-
-              {/* Mobile: Compact user avatar */}
-              <div className="flex items-center gap-2 sm:hidden">
-                {user.thumb && (
-                  <img
-                    src={user.thumb}
-                    alt={user.username}
-                    className="h-8 w-8 rounded-full"
-                  />
-                )}
               </div>
 
               {/* Mobile hamburger menu */}
               <button
+                ref={menuButton}
                 onClick={toggleMobileMenu}
                 className="flex min-h-11 min-w-11 items-center justify-center rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary md:hidden"
-                aria-label="Open menu"
+                aria-label="Open Menu"
                 aria-expanded={isMobileMenuOpen}
               >
                 <Menu className="h-6 w-6" />
@@ -190,6 +191,7 @@ export function Header({ user, discoveryDisabled = false }: HeaderProps) {
       <MobileMenu
         isOpen={isMobileMenuOpen}
         onClose={closeMobileMenu}
+        onOpenActivity={() => changeActivity(true)}
         navItems={items}
         user={user}
       />

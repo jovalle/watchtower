@@ -13,7 +13,7 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { Loader2, Search } from "lucide-react";
-import { Container } from "~/components/layout";
+import { Container, PageHeader } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { Typography } from "~/components/ui";
 import { createSeerrClient } from "~/lib/integrations/seerr.server";
@@ -92,33 +92,40 @@ export default function SearchPage() {
   const [value, setValue] = useState(q);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const submittedQuery = useRef<string | null>(null);
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    const trimmed = value.trim();
-    if (trimmed === (searchParams.get("q") || "")) return;
-    debounceRef.current = setTimeout(() => {
-      setSearchParams(trimmed ? { q: trimmed } : {}, {
-        replace: true,
-        preventScrollReset: true,
-      });
-    }, 300);
-    return () => {
+    if (submittedQuery.current !== q) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [value, searchParams, setSearchParams]);
+      setValue(q);
+    }
+    submittedQuery.current = null;
+  }, [q]);
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const changeQuery = (next: string) => {
+    setValue(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const trimmed = next.trim();
+    if (trimmed === (submittedQuery.current ?? searchParams.get("q") ?? "")) return;
+    debounceRef.current = setTimeout(() => {
+      submittedQuery.current = trimmed;
+      setSearchParams(trimmed ? { q: trimmed } : {}, { replace: true, preventScrollReset: true });
+    }, 300);
+  };
 
   const isSearching =
     navigation.state === "loading" &&
     navigation.location?.pathname === "/app/search";
 
   return (
-    <Container className="py-8">
+    <Container size="wide" className="pb-16 pt-8">
+      <PageHeader title="Search" />
       <div className="relative mb-8 max-w-2xl">
         <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-foreground-muted" />
         <input
           type="search"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => changeQuery(e.target.value)}
           placeholder="Search movies and shows"
           aria-label="Search movies and shows"
           // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -137,7 +144,7 @@ export default function SearchPage() {
         </Typography>
       )}
 
-      {(libraryError || discoverError) && <p role="alert" className="mb-4 text-foreground-secondary">Could not search {libraryError && discoverError ? "your library or discovery" : libraryError ? "your library" : "discovery"}. <button className="underline" onClick={() => window.location.reload()}>Try again</button></p>}
+      {(libraryError || discoverError) && <p role="alert" className="mb-4 text-foreground-secondary">Could not search {libraryError && discoverError ? "your library or discovery" : libraryError ? "your library" : "discovery"}. <button className="underline" onClick={() => window.location.reload()}>Try Again</button></p>}
       {q && !libraryError && !discoverError && library.length === 0 && discover.length === 0 && !isSearching && (
         <Typography variant="body" className="text-foreground-secondary">
           No results for “{q}”.
@@ -147,7 +154,7 @@ export default function SearchPage() {
       {library.length > 0 && (
         <section className="mb-10">
           <Typography variant="subtitle" as="h2" className="mb-4">
-            In your library
+            In Your Library
           </Typography>
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
             {library.map((item) => {

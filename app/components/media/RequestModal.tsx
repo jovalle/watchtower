@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, X } from "lucide-react";
+import { Button, buttonStyles } from "~/components/ui";
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
 
 export interface RequestableItem {
   tmdbId: number;
@@ -33,6 +35,7 @@ interface RequestModalProps {
 }
 
 export function RequestModal({ item, onClose }: RequestModalProps) {
+  usePageScrollLock(true);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const mediaType = item.type === "show" ? "tv" : "movie";
   const [status, setStatus] = useState<Status | null>(null);
@@ -59,8 +62,12 @@ export function RequestModal({ item, onClose }: RequestModalProps) {
 
   useEffect(() => {
     const dialog = dialogRef.current;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog?.showModal();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    };
   }, []);
 
   const request = async () => {
@@ -86,31 +93,33 @@ export function RequestModal({ item, onClose }: RequestModalProps) {
     <dialog
       ref={dialogRef}
       onCancel={onClose}
-      className="fixed inset-0 m-0 hidden h-dvh max-h-none w-screen max-w-none items-center justify-center border-0 bg-black/70 p-4 text-foreground-primary open:flex"
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+      }}
+      className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-lg border border-border-subtle bg-background-elevated p-0 text-foreground-primary shadow-2xl backdrop:bg-black/70"
       aria-label={`Request ${item.title}`}
     >
-      <button
-        className="absolute inset-0 cursor-default"
-        onClick={onClose}
-        aria-label="Close"
-      />
-      <div className="relative flex w-full max-w-md gap-4 rounded-lg bg-background-elevated p-5 shadow-2xl ring-1 ring-white/10">
+      <div className="relative flex flex-col gap-4 p-5 sm:flex-row">
         {item.posterUrl && (
           <img
             src={item.posterUrl}
             alt=""
-            className="w-24 flex-shrink-0 self-start rounded"
+            className="aspect-[2/3] w-20 shrink-0 self-start rounded object-cover sm:w-24"
           />
         )}
-        <div className="min-w-0 flex-1">
-          <button
+        <div className="min-w-0 flex-1 break-words">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
-            className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded text-foreground-muted transition-colors hover:text-foreground-primary"
+            className="absolute right-3 top-3"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
-          </button>
-          <h2 className="pr-6 text-lg font-semibold text-foreground-primary">
+          </Button>
+          <h2 className="pr-10 text-lg font-semibold text-foreground-primary">
             {item.title}
           </h2>
           {item.year && (
@@ -123,24 +132,24 @@ export function RequestModal({ item, onClose }: RequestModalProps) {
           {status4k && <p className="text-sm text-foreground-secondary">4K: {STATUS_LABEL[status4k]}</p>}
           {seasons.length > 0 && <ul className="mt-3 max-h-40 overflow-y-auto text-sm">{seasons.map((season) => <li key={season.number}>Season {season.number}: {STATUS_LABEL[season.status]}{season.status4k !== "unknown" ? ` · 4K: ${STATUS_LABEL[season.status4k]}` : ""}</li>)}</ul>}
           {status === "partially_available" && item.type === "show" && <p className="mt-3 text-sm">Some episodes are available. Seerr checks which remaining seasons can be requested.</p>}
-          {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <a href="/app/requests" className="flex min-h-11 items-center rounded-md border border-border-subtle px-4 text-sm">Your requests</a>
+          {error && <p role="alert" className="mt-1 text-sm text-red-400">{error}</p>}
+          <div role="group" aria-label="Request Actions" className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <a href="/app/requests" className={buttonStyles({ variant: "secondary" })}>Your Requests</a>
             {(status === "unknown" || (item.type === "show" && status === "partially_available")) && (
-              <button
+              <Button
                 onClick={request}
                 disabled={isRequesting}
-                className="flex min-h-11 items-center gap-2 rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-background-primary transition-colors hover:bg-accent-primary/90 disabled:opacity-50"
+                className="gap-2"
               >
                 {isRequesting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {status === "partially_available" ? "Request missing seasons" : "Request"}
-              </button>
+                {status === "partially_available" ? "Request Missing Seasons" : "Request"}
+              </Button>
             )}
             <a
               href={item.tmdbUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded-md border border-border-subtle px-4 py-2 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-primary"
+              className={buttonStyles({ variant: "secondary", className: "gap-2" })}
             >
               <ExternalLink className="h-4 w-4" />
               TMDB

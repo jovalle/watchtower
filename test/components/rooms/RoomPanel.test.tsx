@@ -60,7 +60,7 @@ it("distinguishes loading, ready, buffering and reconnecting members", () => {
   expect(screen.getByText("Ready")).toBeInTheDocument();
   expect(screen.getByText("Buffering - blocking")).toBeInTheDocument();
   expect(screen.getByText("Reconnecting")).toBeInTheDocument();
-  fireEvent.click(screen.getByText("Room details"));
+  fireEvent.click(screen.getByText("Room Details"));
   expect(screen.getByText(snapshot.roomId.slice(0, 8))).toBeInTheDocument();
 });
 
@@ -124,7 +124,7 @@ it("collapses while playing, keeps the countdown visible, and reopens when pause
     })
   );
   expect(toggle).toHaveAttribute("aria-expanded", "false");
-  expect(screen.getByRole("button", { name: "I'm ready" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "I'm Ready" })).toBeInTheDocument();
 
   rerender(panel({ ...playing, phase: "paused", nextCountdown: null }));
   expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -144,7 +144,7 @@ it("focuses a terminal message and exposes keyboard-reachable exit actions", () 
   );
 
   expect(screen.getByRole("heading", { name: "This room has ended." })).toHaveFocus();
-  const continueButton = screen.getByRole("button", { name: "Continue solo" });
+  const continueButton = screen.getByRole("button", { name: "Continue Solo" });
   const backButton = screen.getByRole("button", { name: "Back" });
   expect(continueButton.tabIndex).toBe(0);
   expect(backButton.tabIndex).toBe(0);
