@@ -1,6 +1,6 @@
 # Watchtower Web Consistency Audit — 2026-11-03
 
-Completed in the existing WIP worktree. This supersedes the narrower completeness claims in the earlier layout verification. Changes are uncommitted and undeployed.
+Completed in the existing WIP worktree. This supersedes the narrower completeness claims in the earlier layout verification. The audit was subsequently checkpointed as `566ee65`; see [WIP Integration](wip-integration-2026-11-03.md) for later changes and verification. It remains undeployed.
 
 ## Scope and Result
 
