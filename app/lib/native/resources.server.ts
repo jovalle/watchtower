@@ -2,7 +2,6 @@ import type { MeResponse } from "./contract";
 import type { NativePrincipal } from "./principal.server";
 import type { DeviceSessionRecord } from "./device-store.server";
 import { getIntegrations } from "~/lib/integrations/storage.server";
-import { isWatchTogetherEnabled } from "~/lib/rooms/coordinator.server";
 import {
   DEFAULT_PREFERENCES,
   getUserSettings,
@@ -38,7 +37,7 @@ export async function meResponse(
       profiles: process.env.WATCHTOWER_PLEX_HOME_PROFILES === "1",
       requests: Boolean(integrations.seerr),
       discovery: !preferences.discoveryDisabled,
-      rooms: isWatchTogetherEnabled(),
+      rooms: false,
     },
   };
 }

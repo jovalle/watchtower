@@ -3,7 +3,6 @@ import packageJson from "../../package.json";
 import { getServerConfig } from "~/lib/config/server-config.server";
 import type { InstanceResponse } from "~/lib/native/contract";
 import { nativeJson, requireMethod, withNativeErrors } from "~/lib/native/http.server";
-import { isWatchTogetherEnabled } from "~/lib/rooms/coordinator.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   return withNativeErrors(request, async (requestId) => {
@@ -16,7 +15,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       features: {
         pairing: true,
         profiles: process.env.WATCHTOWER_PLEX_HOME_PROFILES === "1",
-        rooms: isWatchTogetherEnabled(),
+        rooms: false,
       },
       compatibility: { minClientVersionCode: null, upgradeMessage: null },
       pairing: { verificationPath: "/link" },

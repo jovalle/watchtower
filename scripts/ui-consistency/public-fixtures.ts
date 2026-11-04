@@ -13,8 +13,6 @@ export const cases: Case[] = [
   c("access-denied", "/access-denied?error=This%20profile%20does%20not%20have%20access%20to%20the%20library.", "access-denied", { username: long }),
   c("auth-cancelled", "/auth/callback", "auth.callback", { redirectTo: "/app" }),
   c("intro", "/intro", "intro", null),
-  c("join-missing", "/join", "join", { signedIn: false }),
-  c("room-join-missing", "/app/rooms/join", "app.rooms.join", null),
   c("setup-code", "/setup", "setup", { step: "code", username: "Fixture Host" }),
   c("setup-code-error", "/setup", "setup", { step: "code", username: "Fixture Host" }, undefined, { error: "That setup code is not valid." }),
   c("setup-empty", "/setup", "setup", { step: "select", username: long, current: null, servers: [] }),

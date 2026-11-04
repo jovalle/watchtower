@@ -1,5 +1,7 @@
 # Android TV implementation handoff research
 
+> Historical document: this records the earlier combined Android TV and Watch Together work. After the 2026-11-03 split, `codex/android-tv` contains standalone TV functionality only; room implementation, room-only tests, harness, and evidence were removed. The complete combined snapshot and original evidence remain on `codex/watch-together`. Room requirements and results below do not describe the current Android branch. Current setup and commands are in [`android-tv/README.md`](../../../android-tv/README.md).
+
 Research date: 2026-09-27. Repository inspected at `8578769ae3273a5918910b769053d494c56c7ae6`, `/Users/jay/Projects/watchtower`. Recheck the assigned worktree and uncommitted changes before implementation. This document specifies intended work; it does not claim implementation, SDK builds, actual TV compatibility, or Plex/Netflix feature certification.
 
 These are supporting research notes. [Implementation](IMPLEMENTATION.md) and [shared contract](../shared-contract.md) govern the selected design, including opaque expiring device sessions, identity-version checks, cross-channel signing, and both sideload/Google Play distribution. Alternatives discussed here are not additional simultaneous requirements.

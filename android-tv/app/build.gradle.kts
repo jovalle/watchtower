@@ -32,8 +32,6 @@ android {
         versionCode = tvVersionCode
         versionName = tvVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Harness-only credential hook; scripts/tv-e2e/room-e2e.ts invokes it directly with `am instrument -e class`.
-        testInstrumentationRunnerArguments["notClass"] = "io.github.jovalle.watchtower.tv.e2e.SeedCredentialTest"
     }
 
     signingConfigs {
@@ -84,8 +82,6 @@ android {
 
 tasks.withType<Test>().configureEach {
     systemProperty("watchtower.contracts", rootProject.projectDir.resolve("../contracts").absolutePath)
-    // Watch Together owns these fixtures; present only on branches that include its room API.
-    systemProperty("watchtower.roomFixtures", rootProject.projectDir.resolve("../test/fixtures/rooms/v1/fixtures.json").absolutePath)
 }
 
 dependencies {
@@ -109,7 +105,6 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.ui.compose)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.sse)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
