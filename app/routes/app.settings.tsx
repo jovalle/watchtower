@@ -10,7 +10,6 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
-  Settings,
   Save,
   Loader2,
   CheckCircle,
@@ -18,7 +17,8 @@ import {
   XCircle,
   Trash2,
 } from "lucide-react";
-import { Container } from "~/components/layout";
+import { Container, PageHeader } from "~/components/layout";
+import { buttonStyles } from "~/components/ui/Button";
 import { Typography, Toaster, toast } from "~/components/ui";
 import { requireUser } from "~/lib/auth/user.server";
 import { isServerOwner } from "~/lib/auth/session.server";
@@ -57,12 +57,12 @@ const PREFERENCE_GROUPS: Array<{
     items: [
       {
         key: "autoPlayNextEpisode",
-        label: "Autoplay next episode",
+        label: "Autoplay Next Episode",
         description: "Start the next episode after the countdown. You can cancel it in the player.",
       },
       {
         key: "autoSkipIntro",
-        label: "Auto-skip intros",
+        label: "Auto-Skip Intros",
         description:
           "Jump past intros automatically when Plex has detected them.",
       },
@@ -89,7 +89,7 @@ const PREFERENCE_GROUPS: Array<{
       },
       {
         key: "showCollections",
-        label: "Promoted collections",
+        label: "Promoted Collections",
         description: "Collections the server owner promoted to Home in Plex.",
       },
     ],
@@ -99,7 +99,7 @@ const PREFERENCE_GROUPS: Array<{
     items: [
       {
         key: "discoveryDisabled",
-        label: "Library only",
+        label: "Library Only",
         description:
           "Hide titles that aren't in the library: TMDB trending, search results, and recommendations.",
       },
@@ -171,9 +171,9 @@ function PreferencesSection({ initial }: { initial: UserPreferences }) {
         </section>
       ))}
       {error && (
-        <div className="mt-3 flex items-center gap-2 text-red-500">
+        <div role="alert" className="mt-3 flex min-w-0 items-center gap-2 break-words text-red-400 [&>svg]:shrink-0">
           <AlertCircle className="h-4 w-4" />
-          <span className="text-sm">{error}</span>
+          <span className="min-w-0 break-words text-sm">{error}</span>
         </div>
       )}
     </>
@@ -555,16 +555,10 @@ export default function SettingsPage() {
   };
 
   return (
-    <Container className="py-8 max-w-2xl">
+    <Container size="wide" className="pb-16 pt-8">
+      <PageHeader title="Settings" />
+      <div className="max-w-2xl">
       <Toaster />
-      {/* Header */}
-      <div className="mb-8 flex items-center gap-3">
-        <Settings className="h-8 w-8 text-foreground-secondary" />
-        <Typography variant="title" as="h1">
-          Settings
-        </Typography>
-      </div>
-
       {/* Watchlist Sources Section */}
       <section className="rounded-lg border border-border-subtle bg-background-elevated p-6">
         <div className="mb-6">
@@ -593,7 +587,7 @@ export default function SettingsPage() {
                 value={traktUsername}
                 onChange={(e) => setTraktUsername(e.target.value)}
                 placeholder="your-trakt-username"
-                className="w-full rounded-md border border-border-subtle bg-background-primary px-4 py-2.5 pr-10 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+                className="min-h-11 min-w-0 w-full rounded-md border border-border-emphasis bg-background-elevated px-4 py-2.5 pr-10 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
               />
               {/* Validation indicator */}
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -604,7 +598,7 @@ export default function SettingsPage() {
                   <CheckCircle className="h-5 w-5 text-green-500" />
                 )}
                 {traktValidation.status === "invalid" && (
-                  <XCircle className="h-5 w-5 text-red-500" />
+                  <XCircle className="h-5 w-5 text-red-400" />
                 )}
               </div>
             </div>
@@ -617,7 +611,7 @@ export default function SettingsPage() {
               )}
             {traktValidation.status === "invalid" &&
               traktValidation.message && (
-                <p className="mt-1.5 text-sm text-red-500">
+                <p className="mt-1.5 text-sm text-red-400">
                   {traktValidation.message}
                 </p>
               )}
@@ -643,7 +637,7 @@ export default function SettingsPage() {
                 value={imdbWatchlistIds}
                 onChange={(e) => setImdbWatchlistIds(e.target.value)}
                 placeholder="ur12345678, ls87654321"
-                className="w-full rounded-md border border-border-subtle bg-background-primary px-4 py-2.5 pr-10 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+                className="min-h-11 min-w-0 w-full rounded-md border border-border-emphasis bg-background-elevated px-4 py-2.5 pr-10 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
               />
               {/* Overall validation indicator */}
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -658,7 +652,7 @@ export default function SettingsPage() {
                 {imdbValidations.length > 0 &&
                   imdbValidations.some((v) => v.status === "invalid") &&
                   !imdbValidations.some((v) => v.status === "validating") && (
-                    <XCircle className="h-5 w-5 text-red-500" />
+                    <XCircle className="h-5 w-5 text-red-400" />
                   )}
               </div>
             </div>
@@ -668,12 +662,12 @@ export default function SettingsPage() {
                 {imdbValidations.map((v) => (
                   <div
                     key={v.listId}
-                    className="flex items-center gap-2 text-sm"
+                    className="flex min-w-0 items-center gap-2 break-words text-sm [&>svg]:shrink-0"
                   >
                     {v.status === "validating" && (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground-muted" />
-                        <span className="text-foreground-muted">
+                        <span className="min-w-0 break-words text-foreground-muted">
                           {v.listId}: Validating...
                         </span>
                       </>
@@ -681,15 +675,15 @@ export default function SettingsPage() {
                     {v.status === "valid" && (
                       <>
                         <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                        <span className="text-green-500">
+                        <span className="min-w-0 break-words text-green-500">
                           {v.listId}: Valid ({v.itemCount} items)
                         </span>
                       </>
                     )}
                     {v.status === "invalid" && (
                       <>
-                        <XCircle className="h-3.5 w-3.5 text-red-500" />
-                        <span className="text-red-500">
+                        <XCircle className="h-3.5 w-3.5 text-red-400" />
+                        <span className="min-w-0 break-words text-red-400">
                           {v.listId}: {v.message}
                         </span>
                       </>
@@ -713,11 +707,11 @@ export default function SettingsPage() {
           </div>
 
           {/* Save button and status */}
-          <div className="flex items-center gap-4 pt-2">
+          <div className="flex flex-wrap items-center gap-4 pt-2">
             <button
               type="submit"
               disabled={saveStatus === "saving" || !hasChanges}
-              className="flex items-center gap-2 rounded-md bg-accent-primary px-4 py-2 font-medium text-background-primary transition-colors hover:bg-accent-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className={buttonStyles({ size: "sm", className: "gap-2" })}
             >
               {saveStatus === "saving" ? (
                 <>
@@ -734,16 +728,16 @@ export default function SettingsPage() {
 
             {/* Status messages */}
             {saveStatus === "success" && (
-              <div className="flex items-center gap-2 text-green-500">
+              <div role="status" className="flex items-center gap-2 text-green-500">
                 <CheckCircle className="h-4 w-4" />
                 <span className="text-sm">Settings saved</span>
               </div>
             )}
 
             {saveStatus === "error" && (
-              <div className="flex items-center gap-2 text-red-500">
+              <div role="alert" className="flex min-w-0 items-center gap-2 break-words text-red-400 [&>svg]:shrink-0">
                 <AlertCircle className="h-4 w-4" />
-                <span className="text-sm">{errorMessage}</span>
+                <span className="min-w-0 break-words text-sm">{errorMessage}</span>
               </div>
             )}
           </div>
@@ -769,21 +763,21 @@ export default function SettingsPage() {
           </div>
 
           {plexServer && (
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
+            <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row">
+              <div className="min-w-0 max-w-full sm:flex-1">
                 <Typography
                   variant="body"
                   className="font-medium text-foreground-primary"
                 >
                   Plex Server
                 </Typography>
-                <Typography variant="caption" className="text-foreground-muted">
+                <Typography variant="caption" className="break-words text-foreground-muted">
                   {plexServer.name} at {plexServer.url}
                 </Typography>
               </div>
               <a
                 href="/setup"
-                className="rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated"
+                className={buttonStyles({ variant: "secondary", size: "sm" })}
               >
                 Change
               </a>
@@ -792,8 +786,8 @@ export default function SettingsPage() {
 
           {/* Clear Cache */}
           <div>
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+              <div className="min-w-0 max-w-full sm:flex-1">
                 <Typography
                   variant="body"
                   className="font-medium text-foreground-primary"
@@ -807,18 +801,18 @@ export default function SettingsPage() {
               </div>
 
               {clearCacheStatus === "confirming" ? (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setClearCacheStatus("idle")}
-                    className="rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated"
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={handleClearCache}
-                    className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-700"
+                    className={buttonStyles({ variant: "ghost", size: "sm", className: "!bg-red-600 hover:!bg-red-700" })}
                   >
                     Confirm Clear
                   </button>
@@ -828,7 +822,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setClearCacheStatus("confirming")}
                   disabled={clearCacheStatus === "clearing"}
-                  className="flex items-center gap-2 rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                  className={buttonStyles({ variant: "secondary", size: "sm", className: "shrink-0 gap-2" })}
                 >
                   {clearCacheStatus === "clearing" ? (
                     <>
@@ -847,16 +841,16 @@ export default function SettingsPage() {
 
             {/* Status messages */}
             {clearCacheStatus === "success" && (
-              <div className="mt-3 flex items-center gap-2 text-green-500">
+              <div role="status" className="mt-3 flex items-center gap-2 text-green-500">
                 <CheckCircle className="h-4 w-4" />
-                <span className="text-sm">{clearCacheMessage}</span>
+                <span className="min-w-0 break-words text-sm">{clearCacheMessage}</span>
               </div>
             )}
 
             {clearCacheStatus === "error" && (
-              <div className="mt-3 flex items-center gap-2 text-red-500">
+              <div role="alert" className="mt-3 flex min-w-0 items-center gap-2 break-words text-red-400 [&>svg]:shrink-0">
                 <AlertCircle className="h-4 w-4" />
-                <span className="text-sm">{clearCacheMessage}</span>
+                <span className="min-w-0 break-words text-sm">{clearCacheMessage}</span>
               </div>
             )}
           </div>
@@ -869,6 +863,7 @@ export default function SettingsPage() {
           Changes take effect immediately. Your watchlist page will show items
           from all configured sources after refresh.
         </Typography>
+      </div>
       </div>
     </Container>
   );

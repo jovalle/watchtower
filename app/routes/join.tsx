@@ -50,9 +50,9 @@ export default function JoinLanding() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background-primary p-6 text-foreground-primary">
-      <div className="max-w-md text-center">
+      <div className="w-full max-w-md break-words text-center">
         <h1 className="text-2xl font-semibold">Joining Watch Together</h1>
-        <p className="mt-3 text-foreground-secondary">
+        <p role="status" className="mt-3 text-foreground-secondary">
           {error ?? "Checking your invitation..."}
         </p>
       </div>

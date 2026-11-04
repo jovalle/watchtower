@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { CheckCircle, Loader2, Radar, XCircle } from "lucide-react";
 import { Typography, toast } from "~/components/ui";
+import { buttonStyles } from "~/components/ui/Button";
 import type { PublicIntegrationsConfig } from "~/lib/integrations/types";
 
 type Result = { ok: boolean; message: string } | null;
 
 const inputClass =
-  "w-full rounded-md border border-border-subtle bg-background-primary px-4 py-2.5 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary";
-const buttonClass =
-  "flex items-center gap-2 rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated disabled:cursor-not-allowed disabled:opacity-50";
+  "min-h-11 min-w-0 w-full rounded-md border border-border-emphasis bg-background-elevated px-4 py-2.5 text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary";
+const buttonClass = buttonStyles({ variant: "secondary", size: "sm", className: "gap-2" });
 
 async function post(body: Record<string, unknown>) {
   const res = await fetch("/api/integrations", {
@@ -23,8 +23,9 @@ function ResultLine({ result }: { result: Result }) {
   if (!result) return null;
   return (
     <p
-      className={`mt-2 flex items-center gap-2 text-sm ${
-        result.ok ? "text-green-500" : "text-red-500"
+      role={result.ok ? "status" : "alert"}
+      className={`mt-2 flex items-center gap-2 break-words text-sm [&>svg]:shrink-0 ${
+        result.ok ? "text-green-500" : "text-red-400"
       }`}
     >
       {result.ok ? (
@@ -32,7 +33,7 @@ function ResultLine({ result }: { result: Result }) {
       ) : (
         <XCircle className="h-4 w-4" />
       )}
-      {result.message}
+      <span className="min-w-0 break-words">{result.message}</span>
     </p>
   );
 }
@@ -155,7 +156,7 @@ export function IntegrationsSection({
           are made as each user&apos;s own Seerr account. Find the API key in
           Seerr under Settings → General.
         </Typography>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input
             type="url"
             value={seerrUrl}
@@ -185,7 +186,7 @@ export function IntegrationsSection({
           placeholder={
             config.seerr?.hasApiKey ? "Saved; leave blank to keep" : "API key"
           }
-          aria-label="Seerr API key"
+          aria-label="Seerr API Key"
           autoComplete="off"
           className={inputClass}
         />
@@ -243,7 +244,7 @@ export function IntegrationsSection({
           value={traktId}
           onChange={(e) => setTraktId(e.target.value)}
           placeholder="Client ID"
-          aria-label="Trakt client ID"
+          aria-label="Trakt Client ID"
           autoComplete="off"
           className={inputClass}
         />
@@ -256,7 +257,7 @@ export function IntegrationsSection({
               ? "Saved; leave blank to keep"
               : "Client secret"
           }
-          aria-label="Trakt client secret"
+          aria-label="Trakt Client Secret"
           autoComplete="off"
           className={inputClass}
         />

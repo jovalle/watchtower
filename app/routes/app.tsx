@@ -11,9 +11,10 @@
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData, useLocation } from "@remix-run/react";
+import { Outlet, useLoaderData, useLocation, useMatches, useRouteLoaderData, useRouteError, isRouteErrorResponse, Link } from "@remix-run/react";
 import { useEffect, useRef } from "react";
-import { Header } from "~/components/layout";
+import { Header, Container, PageHeader } from "~/components/layout";
+import { buttonStyles } from "~/components/ui/Button";
 import {
   requirePlexToken,
   clearSession,
@@ -29,6 +30,7 @@ import { getServerConfig } from "~/lib/config/server-config.server";
 import { getUserSettings } from "~/lib/settings/storage.server";
 import { useRouteFocus } from "~/hooks/useRouteFocus";
 import { useRemoteNavigation } from "~/hooks/useRemoteNavigation";
+import { saveClientPlaybackCaps } from "~/lib/playback-caps";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // Require authentication - redirects to Plex login if no token
@@ -92,6 +94,8 @@ export default function AppLayout() {
   useRouteFocus(main);
   const { user, discoveryDisabled } = useLoaderData<typeof loader>();
   const location = useLocation();
+  const isPlayer = useMatches().some((match) => match.id === "routes/app.watch.$ratingKey");
+  useEffect(() => saveClientPlaybackCaps(), []);
   const playbackBackTo = useRef("/app");
   useEffect(() => {
     const isLibrary = /^\/app\/watch\/(movies|series|recent)\/?$/.test(location.pathname);
@@ -103,10 +107,10 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen">
       {/* Header with navigation */}
-      <Header user={user} discoveryDisabled={discoveryDisabled} />
+      {!isPlayer && <Header user={user} discoveryDisabled={discoveryDisabled} />}
 
       {/* Main content - add top padding to account for fixed header */}
-      <main ref={main} tabIndex={-1} className="pt-16">
+      <main ref={main} tabIndex={-1} className={isPlayer ? "" : "pt-[var(--app-header-offset)]"}>
         <Outlet context={{ user, playbackBackTo: playbackBackTo.current }} />
       </main>
     </div>
@@ -119,4 +123,22 @@ export default function AppLayout() {
 export function useUser(): PlexUser {
   const { user } = useLoaderData<typeof loader>();
   return user;
+}
+
+export function ErrorBoundary() {
+  const data = useRouteLoaderData<typeof loader>("routes/app");
+  const error = useRouteError();
+  const title = isRouteErrorResponse(error) && error.status === 404 ? "Page Not Found" : "Something Went Wrong";
+  return (
+    <div className="min-h-screen">
+      {data?.user && <Header user={data.user} discoveryDisabled={data.discoveryDisabled} />}
+      <main className={data?.user ? "pt-[var(--app-header-offset)]" : ""}>
+        <Container size="wide" className="py-8">
+          <PageHeader title={title} />
+          <p className="text-foreground-secondary">This page could not be loaded. Try again or return home.</p>
+          <Link to="/app" className={buttonStyles({ variant: "secondary", className: "mt-6" })}>Return Home</Link>
+        </Container>
+      </main>
+    </div>
+  );
 }

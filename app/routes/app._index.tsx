@@ -1,3 +1,4 @@
+import { useWatchlistActions } from "~/hooks/useWatchlistActions";
 /**
  * Authenticated home page - the main landing page for logged-in users.
  * Features a cinematic Billboard component for the hero section with real Plex data.
@@ -434,19 +435,20 @@ export default function AppIndex() {
   // Billboard cycling state
   const [billboardIndex, setBillboardIndex] = useState(0);
   const [isBillboardHovered, setIsBillboardHovered] = useState(false);
+  const [billboardFocused, setBillboardFocused] = useState(false);
   const billboard = billboardCandidates[billboardIndex] || null;
 
   // Cycle through billboard candidates every 10 seconds (pauses when hovered)
   useEffect(() => {
     if (billboardCandidates.length <= 1) return;
-    if (isBillboardHovered) return; // Don't cycle when hovered
+    if (isBillboardHovered || billboardFocused) return;
 
     const interval = setInterval(() => {
       setBillboardIndex((prev) => (prev + 1) % billboardCandidates.length);
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [billboardCandidates.length, isBillboardHovered]);
+  }, [billboardCandidates.length, isBillboardHovered, billboardFocused]);
 
   // Revalidate when page becomes visible (returning from video player)
   // This ensures Continue Watching updates after watching something
@@ -461,10 +463,8 @@ export default function AppIndex() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [revalidator]);
 
-  // Local state for optimistic updates
-  const [localWatchlistState, setLocalWatchlistState] = useState<
-    Record<string, boolean>
-  >({});
+  const watchlist = useWatchlistActions();
+  const [actionError, setActionError] = useState("");
   const [removedFromContinueWatching, setRemovedFromContinueWatching] =
     useState<Set<string>>(new Set());
 
@@ -488,13 +488,7 @@ export default function AppIndex() {
   };
 
   const handleCardClick = (item: MediaItemView) => {
-    const mediaType = item.type === "episode" ? "show" : item.type;
-    // For episodes, navigate to the show's detail page
-    const ratingKey =
-      item.type === "episode" && item.showTitle
-        ? item.ratingKey // Would need grandparentRatingKey for show page
-        : item.ratingKey;
-    navigate(`/app/media/${mediaType}/${ratingKey}`);
+    navigate(`/app/media/${item.type}/${item.ratingKey}`);
   };
 
   const handleContextMenu = useCallback(
@@ -512,53 +506,9 @@ export default function AppIndex() {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  const handleAddToWatchlist = useCallback(async (item: MediaItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({
-          ...prev,
-          [item.ratingKey]: false,
-        }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-    }
-  }, []);
-
-  const handleRemoveFromWatchlist = useCallback(async (item: MediaItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-    }
-  }, []);
-
   const handleRemoveFromContinueWatching = useCallback(
     async (item: MediaItemView) => {
+      setActionError("");
       // Optimistic update - hide from UI immediately
       setRemovedFromContinueWatching((prev) =>
         new Set(prev).add(item.ratingKey)
@@ -575,7 +525,7 @@ export default function AppIndex() {
           // Revalidate data after successful removal
           revalidator.revalidate();
         } else {
-          // Revert on failure
+          setActionError("Could not remove the title from Continue Watching. Try again.");
           setRemovedFromContinueWatching((prev) => {
             const newSet = new Set(prev);
             newSet.delete(item.ratingKey);
@@ -583,7 +533,7 @@ export default function AppIndex() {
           });
         }
       } catch {
-        // Revert on error
+        setActionError("Could not remove the title from Continue Watching. Try again.");
         setRemovedFromContinueWatching((prev) => {
           const newSet = new Set(prev);
           newSet.delete(item.ratingKey);
@@ -594,31 +544,26 @@ export default function AppIndex() {
     [revalidator]
   );
 
-  // Get the effective watchlist state for an item
-  const getIsInWatchlist = (item: MediaItemView): boolean => {
-    if (item.ratingKey in localWatchlistState) {
-      return localWatchlistState[item.ratingKey];
-    }
-    return item.isInWatchlist;
-  };
 
   // Build context menu items for the current item
   const getContextMenuItems = (item: MediaItemView): ContextMenuItem[] => {
-    const isInWatchlist = getIsInWatchlist(item);
+    const isInWatchlist = watchlist.isSaved(item);
     const menuItems: ContextMenuItem[] = [];
 
     if (isInWatchlist) {
       menuItems.push({
         label: "Remove from Watchlist",
         icon: <ListX className="h-4 w-4" />,
-        onClick: () => handleRemoveFromWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
         destructive: true,
       });
     } else {
       menuItems.push({
         label: "Add to Watchlist",
         icon: <Plus className="h-4 w-4" />,
-        onClick: () => handleAddToWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
       });
     }
 
@@ -654,6 +599,7 @@ export default function AppIndex() {
           logoUrl={logoUrls[billboard.ratingKey] || billboard.logoUrl}
           onPlay={() => handlePlay(billboard.ratingKey)}
           onMoreInfo={() => handleMoreInfo(billboard.type, billboard.ratingKey)}
+          onFocusChange={setBillboardFocused}
           onMouseEnter={() => setIsBillboardHovered(true)}
           onMouseLeave={() => setIsBillboardHovered(false)}
         />
@@ -670,6 +616,7 @@ export default function AppIndex() {
 
       {/* Media rows below the billboard */}
       <Container size="wide" className="relative z-10 -mt-16 space-y-8">
+        {(watchlist.error || actionError) && <p role="alert" className="my-4 text-red-400">{watchlist.error || actionError}</p>}
         {feedErrors.map((message) => <p key={message} role="alert" className="text-red-400">{message}</p>)}
         {/* Continue Watching row */}
         {filteredContinueWatching.length > 0 && (
@@ -697,7 +644,7 @@ export default function AppIndex() {
         {nextRows.map((row) => <MediaRow key={row.title} title={row.title}>
           {row.items.map((item) => <MediaCard key={item.key} imageUrl={item.imageUrl} title={item.title} year={item.year} onClick={() => navigate(item.href)} onPlay={item.ratingKey ? () => handlePlay(item.ratingKey!) : undefined} />)}
         </MediaRow>)}
-        <Suspense fallback={<p role="status">Loading recommendations…</p>}>
+        <Suspense fallback={<p role="status">Loading Recommendations…</p>}>
           <Await resolve={extraRows} errorElement={<p role="alert">Could not load recommendations.</p>}>
             {(rows) => rows.map((row, index) => (
               <MediaRow key={`${index}:${row.title}`} title={row.title}>
@@ -720,18 +667,12 @@ export default function AppIndex() {
                 viewCount={item.viewCount}
                 leafCount={item.leafCount}
                 viewedLeafCount={item.viewedLeafCount}
-                isInWatchlist={getIsInWatchlist(item)}
+                isInWatchlist={watchlist.isSaved(item)}
                 logoUrl={logoUrls[item.ratingKey] || item.logoUrl}
                 onClick={() => handleCardClick(item)}
                 onPlay={() => handlePlay(item.ratingKey)}
-                onAddToWatchlist={() => {
-                  const isInWatchlist = getIsInWatchlist(item);
-                  if (isInWatchlist) {
-                    handleRemoveFromWatchlist(item);
-                  } else {
-                    handleAddToWatchlist(item);
-                  }
-                }}
+                watchlistPending={watchlist.isPending(item.ratingKey)}
+                    onAddToWatchlist={() => watchlist.toggle(item)}
                 onContextMenu={(position) => handleContextMenu(item, position)}
               />
             ))}

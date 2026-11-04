@@ -11,6 +11,7 @@ import {
   createUserSession,
   sanitizeRedirectTo,
 } from "~/lib/auth/session.server";
+import { Button, buttonStyles } from "~/components/ui";
 import { completeLogin } from "~/lib/auth/plex.server";
 
 export const meta: MetaFunction = () => {
@@ -50,8 +51,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function AuthCallback() {
   const { redirectTo } = useLoaderData<typeof loader>();
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center"><h1 className="text-2xl font-bold">Sign-in was cancelled or expired</h1><p className="mt-3 text-foreground-muted">Try signing in again, or return to the home page.</p><Form method="post" action={`/auth/redirect?redirectTo=${encodeURIComponent(redirectTo)}`}><button className="mt-6 rounded bg-accent-primary px-5 py-3 text-accent-foreground">Try again</button></Form><Link className="mt-4 inline-block underline" to="/">Go home</Link></div>
-    </div>
+    <main className="flex min-h-screen items-center justify-center px-6 py-12">
+      <div className="w-full max-w-md text-center">
+        <h1 className="text-2xl font-bold">Sign-In Was Cancelled or Expired</h1>
+        <p className="mt-3 text-foreground-secondary">Try signing in again, or return to the home page.</p>
+        <Form method="post" action={`/auth/redirect?redirectTo=${encodeURIComponent(redirectTo)}`}>
+          <Button type="submit" className="mt-6">Try Again</Button>
+        </Form>
+        <Link className={buttonStyles({ variant: "ghost", className: "mt-4" })} to="/">Go Home</Link>
+      </div>
+    </main>
   );
 }
