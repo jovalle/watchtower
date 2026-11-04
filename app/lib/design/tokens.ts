@@ -14,7 +14,7 @@ export const tokens = {
   foreground: {
     primary: '#ffffff', // Pure white for primary text
     secondary: '#d1d5db', // Gray-300 for secondary text
-    muted: '#6b7280', // Gray-500 for muted/disabled text
+    muted: '#9ca3af', // Readable secondary metadata on every app surface
   },
   accent: {
     primary: '#FDBE02', // Mango for primary actions

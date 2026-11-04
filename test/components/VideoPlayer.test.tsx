@@ -152,7 +152,7 @@ it.each([true, false])("honors next-episode autoplay=%s at completion", async (a
     expect(navigate).toHaveBeenCalledTimes(1);
   } else {
     expect(navigate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Play next episode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play Next Episode" }));
     expect(navigate).toHaveBeenCalledWith("/app/watch/43", { replace: true });
   }
 });
@@ -193,4 +193,37 @@ it("offers the native receiver picker only after the browser reports availabilit
     expect(picker).toHaveBeenCalledOnce();
     expect(video).toHaveAttribute("src", "/api/plex/stream/42");
   } finally { Reflect.deleteProperty(HTMLVideoElement.prototype, "webkitShowPlaybackTargetPicker"); }
+});
+
+it("keeps the closed episode drawer out of keyboard navigation and restores focus on Escape", () => {
+  render(<VideoPlayer src="/api/plex/stream/42" title="Example" ratingKey="42" episodes={[{ ratingKey:"9", title:"Other Episode", index:2 }]} />);
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const video = screen.getByLabelText("Video player: Example");
+  fireEvent.canPlay(video);
+  expect(screen.queryByRole("button", {name:/Other Episode/})).toBeNull();
+  const trigger = screen.getByRole("button", {name:/episode list/i});
+  trigger.focus();
+  fireEvent.click(trigger);
+  const close = screen.getByRole("button", {name:"Close Episode List"});
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, {key:"Escape"});
+  expect(trigger).toHaveFocus();
+  expect(screen.queryByRole("button", {name:/Other Episode/})).toBeNull();
+});
+
+it.each([
+  ["intro", "Skip Intro"],
+  ["credits", "Play Next Episode"],
+] as const)("keeps the %s action out of the open episode drawer", (type, label) => {
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  render(<VideoPlayer src="/api/plex/stream/42" title="Example" ratingKey="42"
+    markers={[{ type, start:0, end:30 }]} autoPlayNextEpisode={false}
+    nextEpisode={{ ratingKey:"43", title:"Next", label:"S1:E2" }}
+    episodes={[{ ratingKey:"43", title:"Next", index:2 }]} />);
+  fireEvent.playing(screen.getByLabelText("Video player: Example"));
+  expect(screen.getByRole("button", {name:label})).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", {name:"Episode List"}));
+  expect(screen.queryByRole("button", {name:label})).toBeNull();
+  fireEvent.click(screen.getByRole("button", {name:"Close Episode List"}));
+  expect(screen.getByRole("button", {name:label})).toBeEnabled();
 });

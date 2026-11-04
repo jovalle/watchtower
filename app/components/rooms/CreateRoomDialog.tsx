@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useContainedTab } from "~/hooks/useContainedTab";
 import { Button, buttonStyles } from "~/components/ui";
 
 type CreateRoomDialogProps = {
@@ -22,11 +23,13 @@ export function CreateRoomDialog({
   onCreate,
   onCancel,
 }: CreateRoomDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useContainedTab(dialogRef);
   const firstButtonRef = useRef<HTMLButtonElement>(null);
   const submittedRef = useRef(false);
 
   useEffect(() => {
-    firstButtonRef.current?.focus();
+    (firstButtonRef.current?.disabled ? dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])") : firstButtonRef.current)?.focus();
   }, []);
 
   useEffect(() => {
@@ -40,17 +43,21 @@ export function CreateRoomDialog({
   };
 
   return (
+    // This modal handles Escape while the contained-focus hook handles Tab.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
-      className="absolute inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+      ref={dialogRef}
+      onKeyDown={(event) => { if (event.key === "Escape" && !pending) { event.stopPropagation(); onCancel(); } }}
+      className="absolute inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/80 p-4 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-room-title"
     >
-      <div className="w-full max-w-md rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
+      <div className="w-full max-w-md my-auto rounded-lg border border-border-emphasis bg-background-elevated p-6 text-foreground-primary shadow-2xl">
         <h2 id="create-room-title" className="text-xl font-semibold">
-          Watch together
+          Watch Together
         </h2>
-        <p className="mt-2 text-sm text-foreground-secondary">{title}</p>
+        <p className="mt-2 break-words text-sm text-foreground-secondary">{title}</p>
         {disabledReason && (
           <p className="mt-4 rounded border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-100">
             {disabledReason}
@@ -69,7 +76,7 @@ export function CreateRoomDialog({
             onClick={() => create(0)}
             className={buttonStyles()}
           >
-            {pending ? "Creating room..." : "Start from beginning"}
+            {pending ? "Creating Room..." : "Start from Beginning"}
           </button>
           {resumePositionMs > 0 && (
             <Button
@@ -78,7 +85,7 @@ export function CreateRoomDialog({
               disabled={pending || disabled}
               onClick={() => create(resumePositionMs)}
             >
-              Start from saved position
+              Start from Saved Position
             </Button>
           )}
           <Button

@@ -1,6 +1,7 @@
 import type { MetaFunction } from "@remix-run/node";
 import { useEffect } from "react";
-import { useNavigate } from "@remix-run/react";
+import { buttonStyles, Logo } from "~/components/ui";
+import { Link, useNavigate } from "@remix-run/react";
 
 export const meta: MetaFunction = () => {
   return [
@@ -23,6 +24,9 @@ export default function Intro() {
     <>
       <style>{styles}</style>
       <div id="container">
+        <h1 className="sr-only">Welcome to Watchtower</h1>
+        <div className="intro-reduced"><Logo /></div>
+        <Link to="/app" className={buttonStyles({ variant: "ghost", className: "absolute bottom-6 right-6 z-10" })}>Skip Intro</Link>
         <div className="netflixintro" data-letter="W">
           {/* Left vertical bar */}
           <div className="helper-1">
@@ -58,6 +62,12 @@ export default function Intro() {
 }
 
 const styles = `
+.intro-reduced { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .netflixintro { display: none; }
+  .intro-reduced { display: block; }
+}
+
 * {
   margin: 0;
   padding: 0;

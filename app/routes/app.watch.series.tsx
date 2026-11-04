@@ -1,3 +1,4 @@
+import { useWatchlistActions } from "~/hooks/useWatchlistActions";
 import WatchNavigation from "~/components/library/WatchNavigation";
 /**
  * Series library page - displays all TV series with filtering and sorting.
@@ -11,13 +12,14 @@ import {
   useLoaderData,
   useSearchParams,
   useNavigation,
+  useRevalidator,
   useNavigate,
 } from "@remix-run/react";
 import { Tv, Plus, ListX } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { LibraryHeader, AlphabetSidebar } from "~/components/library";
-import { ContextMenu, type ContextMenuItem } from "~/components/ui";
+import { Button, ContextMenu, type ContextMenuItem } from "~/components/ui";
 import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
@@ -43,6 +45,7 @@ interface ShowItemView {
   viewedLeafCount?: number; // Watched episodes
   isInWatchlist: boolean;
   // Sort-relevant fields
+  criticRating?: number;
   audienceRating?: number;
   userRating?: number;
   releaseDate?: string;
@@ -203,6 +206,7 @@ export async function loader({
         viewedLeafCount: item.viewedLeafCount,
         isInWatchlist: watchlistGuids.has(item.guid),
         // Sort-relevant fields
+        criticRating: item.rating,
         audienceRating: item.audienceRating,
         userRating: item.userRating,
         releaseDate: item.originallyAvailableAt,
@@ -242,7 +246,7 @@ export async function loader({
     const getRatingValue = (item: ShowItemView): number | null => {
       if (sort === "userRating") return item.userRating ?? null;
       if (sort === "audienceRating") return item.audienceRating ?? null;
-      return item.audienceRating ?? null;
+      return item.criticRating ?? null;
     };
 
     items = [...items].sort((a, b) => {
@@ -337,12 +341,11 @@ export default function TVShowsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const navigate = useNavigate();
-  const isLoading = navigation.state === "loading";
+  const isLoading = navigation.state === "loading" && navigation.location?.pathname === "/app/watch/series";
 
-  // Local state for optimistic updates
-  const [localWatchlistState, setLocalWatchlistState] = useState<
-    Record<string, boolean>
-  >({});
+  const revalidator = useRevalidator();
+  const watchlist = useWatchlistActions();
+  const [actionError, setActionError] = useState("");
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -366,72 +369,21 @@ export default function TVShowsPage() {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  const handleAddToWatchlist = useCallback(async (item: ShowItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({
-          ...prev,
-          [item.ratingKey]: false,
-        }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-    }
-  }, []);
-
-  const handleRemoveFromWatchlist = useCallback(async (item: ShowItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-    }
-  }, []);
-
   const handleMarkAsUnwatched = useCallback(async (item: ShowItemView) => {
     try {
-      await fetch("/api/plex/scrobble", {
+      setActionError("");
+      const response = await fetch("/api/plex/scrobble", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ratingKey: item.ratingKey }),
       });
-      // Would need a full reload to show updated state
-      // For now, we just close the menu
+      if (!response.ok) throw new Error();
+      revalidator.revalidate();
     } catch {
-      // Silent fail
+      setActionError("Could not update the watched status. Try again.");
     }
-  }, []);
+  }, [revalidator]);
 
-  // Get the effective watchlist state for an item
-  const getIsInWatchlist = (item: ShowItemView): boolean => {
-    if (item.ratingKey in localWatchlistState) {
-      return localWatchlistState[item.ratingKey];
-    }
-    return item.isInWatchlist;
-  };
 
   // Check if a TV show is fully watched (all episodes watched)
   const getIsWatched = (item: ShowItemView): boolean => {
@@ -447,7 +399,7 @@ export default function TVShowsPage() {
 
   // Build context menu items for the current item
   const getContextMenuItems = (item: ShowItemView): ContextMenuItem[] => {
-    const isInWatchlist = getIsInWatchlist(item);
+    const isInWatchlist = watchlist.isSaved(item);
     const isWatched = getIsWatched(item);
     const menuItems: ContextMenuItem[] = [];
 
@@ -455,14 +407,16 @@ export default function TVShowsPage() {
       menuItems.push({
         label: "Remove from Watchlist",
         icon: <ListX className="h-4 w-4" />,
-        onClick: () => handleRemoveFromWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
         destructive: true,
       });
     } else {
       menuItems.push({
         label: "Add to Watchlist",
         icon: <Plus className="h-4 w-4" />,
-        onClick: () => handleAddToWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
       });
     }
 
@@ -611,7 +565,7 @@ export default function TVShowsPage() {
               newParams.set("dir", newDirection);
               setSearchParams(newParams);
             }}
-            onShuffle={handleShuffle}
+            onShuffle={keys.length ? handleShuffle : undefined}
             onClearFilters={handleClearFilters}
             genres={availableFilters.genres}
             currentGenre={currentFilters.genre}
@@ -621,32 +575,31 @@ export default function TVShowsPage() {
             onYearFilter={handleYearFilter}
           />
 
-          {/* Loading State */}
-          {isLoading && (
-            <div className="mt-8 flex items-center justify-center py-16">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
-            </div>
-          )}
+          {isLoading && <p role="status" className="sr-only">Loading Series</p>}
 
+          {(watchlist.error || actionError) && <p role="alert" className="my-4 text-red-400">{watchlist.error || actionError}</p>}
           {/* Empty State */}
-          {!isLoading && items.length === 0 && (
+          {items.length === 0 && (
             <div className="mt-8 flex flex-col items-center justify-center py-16 text-center">
               <Tv className="mb-4 h-16 w-16 text-foreground-muted" />
               <p className="mb-2 text-lg font-medium text-foreground-primary">
-                No series found
+                No Series Found
               </p>
               <p className="text-foreground-secondary">
-                {libraryKey
-                  ? "Your series library appears to be empty."
-                  : "No series library found on your Plex server."}
+                {!libraryKey
+                  ? "No series library found on your Plex server."
+                  : currentFilters.filter !== "all" || currentFilters.genre || currentFilters.year
+                    ? "No titles match your filters. Try clearing them."
+                    : "Your series library is empty."}
               </p>
             </div>
           )}
 
           {/* Series Grid - Vertical Posters */}
-          {!isLoading && items.length > 0 && (
+          {items.length > 0 && (
             <div
               ref={gridRef}
+              aria-busy={isLoading}
               className="mt-6 grid grid-cols-3 gap-4 pr-12 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
             >
               {items.map((item) => (
@@ -663,8 +616,8 @@ export default function TVShowsPage() {
                     leafCount={item.leafCount}
                     viewedLeafCount={item.viewedLeafCount}
                     rating={item.userRating}
-                    score={item.audienceRating}
-                    isInWatchlist={getIsInWatchlist(item)}
+                    score={isSortingByCriticScore ? item.criticRating : item.audienceRating}
+                    isInWatchlist={watchlist.isSaved(item)}
                     sortIndicator={
                       !isSortingByAudienceScore &&
                       !isSortingByCriticScore &&
@@ -683,14 +636,8 @@ export default function TVShowsPage() {
                       navigate(`/app/media/show/${item.ratingKey}`)
                     }
                     onPlay={() => navigate(`/app/media/show/${item.ratingKey}`)}
-                    onAddToWatchlist={() => {
-                      const isInWatchlist = getIsInWatchlist(item);
-                      if (isInWatchlist) {
-                        handleRemoveFromWatchlist(item);
-                      } else {
-                        handleAddToWatchlist(item);
-                      }
-                    }}
+                    watchlistPending={watchlist.isPending(item.ratingKey)}
+                    onAddToWatchlist={() => watchlist.toggle(item)}
                     onContextMenu={(position) =>
                       handleContextMenu(item, position)
                     }
@@ -700,10 +647,10 @@ export default function TVShowsPage() {
             </div>
           )}
 
-          {pages > 1 && !isLoading && <nav aria-label="Library pages" className="mt-8 flex items-center justify-center gap-4">
-            <button className="min-h-11 rounded border px-4 disabled:opacity-40" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</button>
+          {pages > 1 && <nav aria-label="Library pages" className="mt-8 flex items-center justify-center gap-4">
+            <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</Button>
             <span aria-live="polite">Page {page} of {pages}</span>
-            <button className="min-h-11 rounded border px-4 disabled:opacity-40" disabled={page === pages} onClick={() => changePage(page + 1)}>Next</button>
+            <Button variant="secondary" size="sm" disabled={page === pages} onClick={() => changePage(page + 1)}>Next</Button>
           </nav>}
 
           {/* Context Menu */}
@@ -717,8 +664,7 @@ export default function TVShowsPage() {
         </Container>
 
         {/* Alphabet Sidebar */}
-        {!isLoading &&
-          items.length > 0 &&
+        {items.length > 0 &&
           currentFilters.sort.startsWith("titleSort") && (
             <AlphabetSidebar
               availableLetters={Object.keys(letters)}

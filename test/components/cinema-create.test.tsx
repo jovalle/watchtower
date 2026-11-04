@@ -1,0 +1,20 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { afterEach, expect, it, vi } from "vitest";
+import PrivateLayout from "~/routes/private";
+import VoteLayout from "~/routes/vote";
+vi.mock("@remix-run/react", async () => await import("react-router-dom"));
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it.each([["private", PrivateLayout], ["vote", VoteLayout]] as const)("keeps %s creation failures visible with the entered name", async (path, Layout) => {
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute("open", ""); });
+  HTMLDialogElement.prototype.close = vi.fn();
+  vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  const router = createMemoryRouter([{ path: `/${path}`, element: <Layout />, loader: () => ({ user: { id: 1, username: "Host", thumb: "" }, isOwner: true }), children: [{ index: true, element: <p>Dashboard</p> }] }, { path: "/api/vote/showings", action: () => ({ error: "Could not create showing. Try again." }) }], { initialEntries: [`/${path}`] });
+  render(<RouterProvider router={router} />);
+  fireEvent.click(await screen.findByRole("button", { name: "New Showing" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Showing Name" }), { target: { value: "Friday Night" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create Showing" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not create showing. Try again.");
+  expect(screen.getByRole("textbox", { name: "Showing Name" })).toHaveValue("Friday Night");
+});

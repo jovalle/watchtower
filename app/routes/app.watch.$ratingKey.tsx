@@ -519,7 +519,7 @@ export default function WatchPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black">
+    <div data-player-page className="fixed inset-0 z-50 bg-black">
       {((!roomId && !togetherRequested) || watchRoom.controller) ? (
         <VideoPlayer
           key={streamUrl}

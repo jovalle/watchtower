@@ -1,35 +1,13 @@
-import { NavLink } from "@remix-run/react";
-import { Container } from "~/components/layout";
+import { Container, PageHeader, SectionNavigation } from "~/components/layout";
 
 export default function WatchNavigation() {
   return (
     <Container size="wide" className="pt-8">
-      <h1 className="text-3xl font-bold">Watch</h1>
-      <nav
-        aria-label="Watch sections"
-        className="mt-6 flex gap-6 border-b border-border-subtle"
-      >
-        {[
-          ["Movies", "/app/watch/movies"],
-          ["Series", "/app/watch/series"],
-          ["New in library", "/app/watch/recent"],
-        ].map(([label, to]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end
-            className={({ isActive }) =>
-              `border-b-2 px-1 py-3 text-sm font-medium ${
-                isActive
-                  ? "border-accent-primary text-accent-primary"
-                  : "border-transparent text-foreground-secondary hover:text-foreground-primary"
-              }`
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
-      </nav>
+      <PageHeader title="Watch" navigation={<SectionNavigation label="Watch sections" items={[
+        { label: "Movies", to: "/app/watch/movies" },
+        { label: "Series", to: "/app/watch/series" },
+        { label: "New in Library", to: "/app/watch/recent" },
+      ]} />} />
     </Container>
   );
 }
