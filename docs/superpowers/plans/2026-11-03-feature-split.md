@@ -16,12 +16,12 @@
 
 - [x] Create a managed Watch Together worktree at cf2ee33 and name codex/watch-together.
 - [x] Rename existing WIP branch codex/android-tv.
-- [ ] Observe native rooms:false boundary tests fail before removal.
-- [ ] Remove room web/server modules and restore solo playback with the layout audit preserved.
-- [ ] Remove Android room client/screens/navigation and room-only harnesses/tests/resources.
-- [ ] Retain standalone native/device/playback contract tests; preserve rooms:false in API v1 responses.
-- [ ] Run full web suite, typecheck, lint, fixture lint, build and reference checks; attempt native checks with the available toolchain.
-- [ ] Independent review, fix important findings, commit the Android separation and branch-location docs.
+- [x] Observe native rooms:false boundary tests fail before removal.
+- [x] Remove room web/server modules and restore solo playback with the layout audit preserved.
+- [x] Remove Android room client/screens/navigation and room-only harnesses/tests/resources.
+- [x] Retain standalone native/device/playback contract tests; preserve rooms:false in API v1 responses.
+- [x] Run full web suite, typecheck, lint, fixture lint, build and reference checks; attempt native checks with the available toolchain.
+- [x] Independent review, fix important findings, commit the Android separation and branch-location docs.
 
 ## Preservation Checks
 

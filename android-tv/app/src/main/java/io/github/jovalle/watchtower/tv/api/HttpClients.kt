@@ -73,9 +73,6 @@ class HttpClients(userAgent: String) {
     fun forSession(snapshot: SessionSnapshot, sendIdentityVersion: Boolean = true): OkHttpClient =
         base.newBuilder().addInterceptor(SessionHeaderInterceptor(snapshot, sendIdentityVersion)).build()
 
-    /** Long-lived streams (SSE) must not hit the read timeout between events. */
-    fun streaming(snapshot: SessionSnapshot): OkHttpClient =
-        forSession(snapshot).newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
 }
 
 /** Suspends until the call completes; cancelling the coroutine cancels the HTTP call. */

@@ -1,5 +1,7 @@
 # WIP Integration — 2026-11-03
 
+> Historical combined-worktree report. The features are now separated; see [Feature Workspaces](feature-workspaces.md).
+
 The combined `codex/watchtower-wip` checkout now includes the completed layout audit, all five newer `main` fixes, and the preserved Watch Together player/HLS behavior. The separate Android TV and Watch Together feature histories are ancestors of WIP. No main working files, deployment, or remote branch was changed.
 
 ## Preserved and Integrated
