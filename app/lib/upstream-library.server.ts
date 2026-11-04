@@ -95,7 +95,8 @@ export async function loadUpstreamLibrary(client: PlexClient, sections: string[]
   }
   const chunks = await Promise.all(first.map((part, i) => starts[i] === 0 && part.items.length >= Math.min(PAGE_SIZE, part.total) ? part.items : read(part, starts[i], PAGE_SIZE)));
   const items = chunks.flat().sort(compare).slice(0, PAGE_SIZE);
-  const firstKey = first.flatMap((part) => part.items.slice(0, 1)).sort(compare)[0]?.ratingKey || "";
+  const firstItems = await Promise.all(first.flatMap((part, index) => part.total ? [at(index, 0)] : []));
+  const firstKey = firstItems.sort(compare)[0]?.ratingKey || "";
   const counts = new Map<string, number>();
   for (const part of first) for (const letter of part.letters) counts.set(letter.title, (counts.get(letter.title) || 0) + (letter.size || 0));
   const letters: Record<string, { page: number; ratingKey: string }> = {};

@@ -901,3 +901,48 @@ it("only scrobbles a room after continuous local playback crosses 90 percent", a
     ).toHaveLength(1)
   );
 });
+
+it("keeps room controls inside fullscreen playback and reachable while loading", () => {
+  renderPlayer(controller(true), { roomPanel: <button>Room Actions</button> });
+  const video = screen.getByLabelText("Video player: Example");
+  const actions = screen.getByRole("button", { name: "Room Actions" });
+  expect(video.parentElement).toContainElement(actions);
+  expect(actions.closest("[inert], [hidden]")).toBeNull();
+});
+
+it.each(["reconnecting", "countdown", "not-ready"])("restores room controls when %s needs attention", (state) => {
+  const snapshot: RoomSnapshot = {
+    ...baseSnapshot,
+    phase: "playing",
+    participants: baseSnapshot.participants.map((participant) => ({ ...participant, ready: true })),
+    anchor: { positionMs: 0, effectiveAtMs: performance.now(), rate: 1 },
+  };
+  const room = controller(true, snapshot);
+  const player = (current: WatchRoomController) => <VideoPlayer
+    src={`/api/plex/stream/42?session=${session}`} title="Example" ratingKey="42" durationMs={100_000}
+    room={current} roomPanel={<button>Room Actions</button>}
+  />;
+  const { rerender } = render(player(room));
+  const video = screen.getByLabelText("Video player: Example");
+  fireEvent.canPlay(video);
+  fireEvent.playing(video);
+  const actions = screen.getByRole("button", { name: "Room Actions" });
+  fireEvent.mouseLeave(video.parentElement!);
+  expect(actions.closest("[inert]")).not.toBeNull();
+  const updated = { ...room, snapshot: { ...room.snapshot } };
+  if (state === "reconnecting") updated.status = "reconnecting";
+  if (state === "countdown") updated.snapshot.nextCountdown = { deadlineMs: performance.now() + 10_000 };
+  if (state === "not-ready") updated.snapshot.participants = updated.snapshot.participants.map((participant) => ({ ...participant, ready: false }));
+  rerender(player(updated));
+  expect(actions.closest("[inert], [hidden]")).toBeNull();
+});
+
+it("keeps room controls behind player settings without losing their state", () => {
+  renderPlayer(controller(true), { roomPanel: <button>Room Actions</button>, audioTracks: [{ id: 1, displayTitle: "English", selected: true }] });
+  fireEvent.canPlay(screen.getByLabelText("Video player: Example"));
+  const actions = screen.getByRole("button", { name: "Room Actions" });
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(actions.closest("[hidden]")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(actions.closest("[hidden]")).toBeNull();
+});

@@ -4,10 +4,10 @@ Watch Together lets people who each have access to the same title on this Plex s
 
 ## Start a room
 
-1. Open a movie or episode and choose **Watch together**.
+1. Open a movie or episode and choose **Watch Together**.
 2. Choose **Start from beginning** or, when you have saved progress, **Start from saved position**. The room starts paused in a lobby.
 3. Copy the invite link from the **Watch Together** panel and share it privately. The secret part of the link is after `#` and is not sent to servers in the address or in logs. Anyone signed in to Watchtower with access to the title can use it until it expires (at most 24 hours) or you rotate or revoke it.
-4. Everyone selects **I'm ready**. That tap also lets the browser play sound later. When every participant shows **Ready**, the host selects **Start**; playback begins together about one second later.
+4. Everyone selects **I'm Ready**. That tap also lets the browser play sound later. When every participant shows **Ready**, the host selects **Start**; playback begins together about one second later.
 
 Invitations never grant library access. A person without access to the title gets an access message, and no room details are shown to them.
 
@@ -17,7 +17,7 @@ The host controls the shared timeline: play, pause, seeking (keyboard, progress 
 
 Keyboard seeking works when the progress bar has focus; elsewhere the arrow keys move focus between controls.
 
-The **Watch Together** panel sits at the top left of the player. It collapses while the room plays so it never covers the player's menus, and it keeps the room status, the next-episode countdown and **I'm ready** visible. Select the panel header to see members, the invite and **Room details**.
+The **Watch Together** controls sit at the top right inside the player, including in fullscreen. They fade with the player controls and stay visible while loading, waiting for **I'm Ready**, counting down, or reconnecting. Select **Watch Together** to open members, invitations, and **Room Details**. Player settings temporarily hide the room controls without resetting the panel.
 
 The host can transfer host control, remove a viewer and end the room. Removing a viewer does not change the invite link; use **Also rotate invite link** to stop the old link. A removed viewer cannot rejoin that room.
 

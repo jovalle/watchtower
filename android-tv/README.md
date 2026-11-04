@@ -2,7 +2,7 @@
 
 Watchtower Android TV is a native Kotlin application for Android TV and Google TV. Its UI uses Jetpack Compose for TV, and playback uses AndroidX Media3. It is not a WebView wrapper. The app talks to the Watchtower native JSON API under `/api/v1`; the Watchtower server remains responsible for Plex access, authorization, media decisions, and protected resources.
 
-This branch is `codex/android-tv`. It contains the TV client and the native API work. Watch Together room E2E requires a server branch that also contains the Watch Together room API; see [the acceptance handoff](../docs/handoffs/android-tv/ACCEPTANCE.md) for the recorded branch and evidence.
+The combined `codex/watchtower-wip` branch contains this TV client, the native API, and the Watch Together room server. The separate TV/integration branch names have been archived; their feature history remains in WIP. See [the acceptance handoff](../docs/handoffs/android-tv/ACCEPTANCE.md) for the historical acceptance evidence.
 
 ## Requirements
 

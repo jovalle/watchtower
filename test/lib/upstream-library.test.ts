@@ -69,3 +69,19 @@ it("fails visibly if any accessible section cannot provide a page", async () => 
     : { success: false as const, error: { code: 503, message: "offline" } });
   await expect(loadUpstreamLibrary({ getLibraryFacet, getLibraryPage } as never, ["1", "2"], { sort: "titleSort" }, 1)).rejects.toMatchObject({ status: 503 });
 });
+
+
+it.each(["rating", "audienceRating", "userRating"])("keeps the global first play key when all titles lack %s on a later page", async (sort) => {
+  const all = Array.from({ length: 50 }, (_, index) => ({ ratingKey: `unrated-${index}`, title: `Title ${String(index).padStart(2, "0")}` }));
+  const client = {
+    getLibraryFacet: async () => ({ success: true as const, data: [] }),
+    getLibraryPage: async (_section: string, options: { offset: number; limit: number; filter?: string }) => {
+      const source = options.filter?.includes(`${sort}%3E=0`) ? [] : all;
+      return { success: true as const, data: { total: source.length, offset: options.offset, items: source.slice(options.offset, options.offset + options.limit) } };
+    },
+  };
+  const result = await loadUpstreamLibrary(client as never, ["1"], { sort }, 2);
+  expect(result.total).toBe(50);
+  expect(result.items.map((item) => item.ratingKey)).toEqual(["unrated-48", "unrated-49"]);
+  expect(result.firstKey).toBe("unrated-0");
+});
