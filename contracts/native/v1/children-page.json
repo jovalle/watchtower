@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "ratingKey": "7002",
+      "type": "episode",
+      "title": "Episode Two",
+      "year": 2020,
+      "posterUrl": null,
+      "backdropUrl": null,
+      "thumbUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F7002%2Fthumb%2F1700000000&w=640&h=360",
+      "durationMs": 2580000,
+      "viewOffsetMs": null,
+      "viewCount": 1,
+      "leafCount": null,
+      "viewedLeafCount": null,
+      "contentRating": "TV-14",
+      "showTitle": "Test Show",
+      "seasonNumber": 1,
+      "episodeNumber": 2,
+      "parentRatingKey": "7001",
+      "grandparentRatingKey": "7000",
+      "external": null,
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "genres": [],
+      "ratings": []
+    }
+  ],
+  "nextCursor": null,
+  "totalCount": 1
+}

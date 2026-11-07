@@ -4,33 +4,33 @@ import { redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
 import { Play, Tv, Film, Users, Plus, X } from "lucide-react";
 import { getPlexToken } from "~/lib/auth/session.server";
-import { Logo } from "~/components/ui";
+import { Button, Logo } from "~/components/ui";
 
 const FAQ_ITEMS = [
   {
-    question: "What is Watchtower?",
+    question: "What Is Watchtower?",
     answer:
       "Watchtower is a private streaming interface for our household media library. It provides a modern, Netflix-style experience for browsing and enjoying movies and TV shows.",
   },
   {
-    question: "What is wrong with Netflix?",
+    question: "Who Can Use Watchtower?",
     answer:
-      "What's great about Netflix today? Prices keep going up, content quality keeps going down. With Watchtower, you get a curated collection without the ads or subscriptions.",
+      "Watchtower is for friends and family with access to this Plex library. Ask the server owner if you need an invitation.",
   },
   {
-    question: "How do I sign in?",
+    question: "How Do I Sign In?",
     answer:
       "Sign in using your Plex account. If you need help getting set up with Plex, just ask and we'll get you sorted.",
   },
   {
-    question: "What devices can I watch on?",
+    question: "What Devices Can I Watch On?",
     answer:
-      "Stream on any device with a web browser — smart TVs, laptops, tablets, and phones. For the best TV experience, use the Plex app on Roku, Apple TV, Android TV, or Fire TV.",
+      "Watch in a compatible browser on a laptop, phone, or tablet. Playback support varies by device and media format. For TV viewing, the Plex app is recommended.",
   },
   {
-    question: "How do I request something to watch?",
+    question: "How Do I Request Something to Watch?",
     answer:
-      "Have a movie or show you'd like to see? Just let us know and we'll look into adding it to the collection.",
+      "Search for a movie or show and open its details to request it when requests are enabled. You can check your requests from your profile menu.",
   },
 ];
 
@@ -41,6 +41,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
     <div className="mb-2">
       <button
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
         className="flex w-full items-center justify-between bg-[#2d2d2d] px-6 py-5 text-left text-lg font-normal text-foreground-primary transition-colors hover:bg-[#3d3d3d] md:text-xl"
       >
         {question}
@@ -51,8 +52,9 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
         )}
       </button>
       <div
+        hidden={!isOpen}
         className={`overflow-hidden bg-[#2d2d2d] transition-all duration-300 ${
-          isOpen ? "max-h-96" : "max-h-0"
+          isOpen ? "max-h-none" : "max-h-0"
         }`}
       >
         <p className="border-t border-background-primary px-6 py-5 text-lg text-foreground-primary md:text-xl">
@@ -107,6 +109,7 @@ export default function Index() {
         {/* Hero Content */}
         <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 text-center">
           <div className="max-w-3xl space-y-6">
+            <h1 className="sr-only">Watchtower</h1>
             <Logo className="mx-auto h-12 md:h-16 lg:h-20" />
             <p className="mx-auto max-w-xl text-lg text-foreground-secondary md:text-xl">
               Your very own movie theater. <br />
@@ -115,10 +118,11 @@ export default function Index() {
 
             {/* CTA Button */}
             <Form method="post" action="/auth/redirect" className="pt-4">
-              <button
+              <Button
+                size="lg"
                 type="submit"
                 disabled={isSubmitting}
-                className="inline-flex items-center gap-3 rounded-md bg-accent-primary px-8 py-4 text-lg font-semibold text-accent-foreground origin-center transition-[transform,background-color] duration-200 hover:bg-accent-hover hover:scale-105 active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100"
+                className="gap-3"
               >
                 {isSubmitting ? (
                   <>
@@ -147,11 +151,12 @@ export default function Index() {
                 ) : (
                   <>
                     <Play className="h-5 w-5 fill-current" />
-                    Start Watching
+                    Sign In with Plex
                   </>
                 )}
-              </button>
+              </Button>
             </Form>
+            <p className="text-sm text-foreground-muted">A Plex account with access to this library is required.</p>
           </div>
         </main>
 
@@ -202,8 +207,8 @@ export default function Index() {
                 Watch Anywhere
               </h3>
               <p className="text-foreground-secondary">
-                Stream on your TV, laptop, phone, or tablet — wherever you feel
-                like watching.
+                Watch on a compatible laptop, phone, or tablet. For TV viewing,
+                use the Plex app.
               </p>
             </div>
 
@@ -246,19 +251,19 @@ export default function Index() {
       <section className="border-t-8 border-background-elevated bg-background-primary py-16">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <h2 className="mb-4 text-2xl font-bold text-foreground-primary md:text-3xl">
-            Ready to watch?
+            Ready to Watch?
           </h2>
           <p className="mb-6 text-foreground-secondary">
             Sign in with your Plex account to get started.
           </p>
           <Form method="post" action="/auth/redirect">
-            <button
+            <Button
               type="submit"
               disabled={isSubmitting}
-              className="inline-flex items-center gap-2 rounded-md bg-accent-primary px-6 py-3 font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
+              className="gap-2"
             >
-              Sign in with Plex
-            </button>
+              Sign In with Plex
+            </Button>
           </Form>
         </div>
       </section>

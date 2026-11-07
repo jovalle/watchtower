@@ -1,0 +1,12 @@
+<resources>
+    <string name="saving">Saving…</string>
+    <string name="checking_availability">Checking availability…</string>
+    <string name="request_missing_seasons">Request Missing Seasons</string>
+    <string name="open_library_title">Open in Library</string>
+    <string name="requests_unavailable_profile">Requests are unavailable for this profile.</string>
+    <string name="request_not_available">Not Yet Available</string>
+    <string name="request_already_requested">Already Requested</string>
+    <string name="request_awaiting_approval">Awaiting Approval</string>
+    <string name="request_blocked">Blocked</string>
+    <string name="request_partially_available">Partially Available</string>
+</resources>

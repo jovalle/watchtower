@@ -163,7 +163,9 @@ export function VideoPlayer({
   const progressBarRef = useRef<HTMLDivElement>(null);
   const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hlsRef = useRef<HlsType | null>(null);
-  const episodePanelRef = useRef<HTMLDivElement>(null);
+  const episodeTrigger = useRef<HTMLButtonElement>(null);
+  const episodeClose = useRef<HTMLButtonElement>(null);
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -198,8 +200,14 @@ export function VideoPlayer({
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [settingsTab, setSettingsTab] = useState<
     "quality" | "audio" | "subtitles"
-  >("quality");
+  >(availableQualities.length ? "quality" : audioTracks.length ? "audio" : "subtitles");
   const [showEpisodePanel, setShowEpisodePanel] = useState(false);
+  useEffect(() => {
+    if (!showEpisodePanel) return;
+    const trigger = episodeTrigger.current;
+    episodeClose.current?.focus();
+    return () => trigger?.focus();
+  }, [showEpisodePanel]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number | null>(
     audioTracks.find((t) => t.selected)?.id || null
   );
@@ -1202,17 +1210,19 @@ export function VideoPlayer({
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || (e.target instanceof HTMLElement && e.target.closest("button, a, input, select, textarea, [contenteditable=true]"))) return;
+      if (e.defaultPrevented || (e.key !== "Escape" && e.target instanceof HTMLElement && e.target.closest("button, a, input, select, textarea, [contenteditable=true]"))) return;
       const video = videoRef.current;
       if (!video) return;
 
       switch (e.key) {
         case "Escape":
+          if (!showEpisodePanel && !showSettingsPanel && !showQualityMenu) return;
           e.preventDefault();
           if (showEpisodePanel) {
             setShowEpisodePanel(false);
           } else if (showSettingsPanel) {
             setShowSettingsPanel(false);
+            settingsTrigger.current?.focus();
           } else if (showQualityMenu) {
             setShowQualityMenu(false);
           }
@@ -1537,6 +1547,7 @@ export function VideoPlayer({
           <div className="absolute left-0 top-0 p-4">
             <button
               onClick={() => navigate(backTo, { replace: true })}
+              aria-label="Back"
               className="flex items-center gap-2 rounded-full bg-black/50 p-2 text-white transition-colors hover:bg-black/70"
             >
               <ArrowLeft className="h-6 w-6" />
@@ -1559,12 +1570,12 @@ export function VideoPlayer({
       {/* Error overlay */}
       {(progressError || watchedError) && !error && <div role="alert" className="absolute inset-x-4 top-20 z-40 flex flex-wrap items-center gap-3 rounded-md bg-black/90 p-3 text-sm text-white">
         <span>{watchedError ? "Couldn't save watched status." : "Couldn't save playback progress."}</span>
-        <button onClick={() => { if (watchedError) void markWatched(true); if (progressError) void reportProgress(isPlaying ? "playing" : "paused"); }} className="min-h-11 rounded border border-white/40 px-3">Retry saving</button>
+        <button onClick={() => { if (watchedError) void markWatched(true); if (progressError) void reportProgress(isPlaying ? "playing" : "paused"); }} className="min-h-11 rounded border border-white/40 px-3">Retry Saving</button>
       </div>}
       {error && (
         <div className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80">
-          <p className="text-lg text-white">{error}</p>
-          <div className="flex items-center gap-3">
+          <p role="alert" className="max-w-full break-words px-4 text-center text-lg text-white">{error}</p>
+          <div className="flex flex-wrap items-center justify-center gap-3 px-3">
             <button
               onClick={() => window.location.reload()}
               className="rounded bg-mango px-6 py-2 font-medium text-black transition-colors hover:bg-mango-hover"
@@ -1591,14 +1602,15 @@ export function VideoPlayer({
 
       {/* Controls overlay */}
       <div
-        className={`absolute inset-0 z-30 flex flex-col justify-between transition-opacity duration-300 ${
+        ref={(controls) => { controls?.toggleAttribute("inert", Boolean(isLoading || error || showEpisodePanel)); }}
+        className={`absolute inset-0 z-30 flex flex-col justify-between overflow-y-auto transition-opacity duration-300 ${
           (showControls || isSeeking) && !isLoading && !error
             ? "opacity-100"
             : "pointer-events-none opacity-0"
         }`}
       >
         {/* Top bar */}
-        <div className="bg-gradient-to-b from-black/70 via-black/30 to-transparent p-4 pb-12">
+        <div className="shrink-0 bg-gradient-to-b from-black/70 via-black/30 to-transparent p-4 pb-12 [@media(max-height:480px)]:p-2 [@media(max-height:480px)]:pb-4">
           <button
             onClick={() => navigate(backTo, { replace: true })}
             aria-label="Back"
@@ -1611,7 +1623,7 @@ export function VideoPlayer({
 
         {/* Click area to toggle play/pause */}
         <div
-          className="flex-1 cursor-pointer"
+          className="min-h-0 flex-1 cursor-pointer"
           onClick={togglePlay}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -1625,11 +1637,11 @@ export function VideoPlayer({
         />
 
         {/* Bottom controls */}
-        <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4 pt-12">
+        <div className="shrink-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4 pt-12 [@media(max-height:480px)]:p-2 [@media(max-height:480px)]:pt-4">
           {/* Title */}
-          <div className="mb-4">
-            <h1 className="text-lg font-bold text-white sm:text-xl">{title}</h1>
-            {subtitle && <p className="text-sm text-white/70">{subtitle}</p>}
+          <div className="mb-4 [@media(max-height:480px)]:mb-2">
+            <h1 className="truncate text-lg font-bold text-white sm:text-xl">{title}</h1>
+            {subtitle && <p className="truncate text-sm text-white/70">{subtitle}</p>}
           </div>
 
           {/* Progress bar */}
@@ -1809,7 +1821,7 @@ export function VideoPlayer({
                   step={0.1}
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="hidden h-1 w-16 cursor-pointer accent-white sm:block"
+                  className="hidden h-1 w-16 cursor-pointer accent-white sm:block [@media(max-height:480px)]:!hidden"
                   aria-label="Volume"
                 />
               </div>
@@ -1818,7 +1830,7 @@ export function VideoPlayer({
             <div className="flex items-center gap-2">
               {/* Playback status */}
               <div
-                className="relative hidden items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-xs text-white/70 sm:flex cursor-help"
+                className="relative hidden min-h-11 min-w-11 items-center justify-center gap-1.5 rounded bg-black/60 px-2 py-1 text-xs text-white/70 sm:flex cursor-help"
                 tabIndex={0}
                 role="button"
                 aria-label="Stream information"
@@ -1835,12 +1847,12 @@ export function VideoPlayer({
                 ) : (
                   <Zap className="h-3 w-3 text-green-400" />
                 )}
-                <span>{getMethodLabel()}</span>
+                <span className="[@media(max-height:480px)]:hidden">{getMethodLabel()}</span>
                 {quality && (
-                  <span className="text-white/50">• Requested: {quality.label}</span>
+                  <span className="text-white/50 [@media(max-height:480px)]:hidden">• Requested: {quality.label}</span>
                 )}
 
-                {deliveredSize && <span>• Delivered: {deliveredSize}</span>}
+                {deliveredSize && <span className="[@media(max-height:480px)]:hidden">• Delivered: {deliveredSize}</span>}
 
                 {showTooltip && mediaInfo && (
                   <div className="absolute bottom-full right-0 mb-2 w-56 rounded-lg bg-black/95 p-3 shadow-2xl ring-1 ring-white/20 text-left">
@@ -1886,7 +1898,9 @@ export function VideoPlayer({
                 <button
                   onClick={() => setShowEpisodePanel(true)}
                   className="rounded p-2 text-white transition-colors hover:bg-white/10"
-                  aria-label="Episode list"
+                  ref={episodeTrigger}
+                  aria-expanded={showEpisodePanel}
+                  aria-label="Episode List"
                 >
                   <ListVideo className="h-5 w-5" />
                 </button>
@@ -1901,6 +1915,8 @@ export function VideoPlayer({
                   className={`rounded p-2 transition-colors hover:bg-white/10 ${
                     selectedSubtitleTrack ? "text-mango" : "text-white"
                   }`}
+                  ref={settingsTrigger}
+                  aria-expanded={showSettingsPanel}
                   aria-label="Settings"
                 >
                   <Settings className="h-5 w-5" />
@@ -1942,7 +1958,7 @@ export function VideoPlayer({
       {activeMarker?.type === "intro" &&
         !isLoading &&
         !error &&
-        !showSettingsPanel && (
+        !showSettingsPanel && !showEpisodePanel && (
           <button
             onClick={() => seekToPosition(activeMarker.end, true)}
             className="absolute bottom-28 right-4 z-40 rounded border border-white/40 bg-black/70 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-white hover:text-black"
@@ -1952,7 +1968,7 @@ export function VideoPlayer({
         )}
 
       {/* Next episode countdown during credits or after the episode ends */}
-      {showNextUp && nextEpisode && !error && !showSettingsPanel && (
+      {showNextUp && nextEpisode && !error && !showSettingsPanel && !showEpisodePanel && (
         <NextEpisodeCard
           key={nextEpisode.ratingKey}
           episode={nextEpisode}
@@ -1964,11 +1980,12 @@ export function VideoPlayer({
 
       {/* Settings Panel - Audio, Subtitles, Quality */}
       {showSettingsPanel && (
-        <div className="absolute bottom-24 right-4 z-40 w-72 overflow-hidden rounded-lg bg-black/95 shadow-xl ring-1 ring-white/20">
+        <div className="absolute bottom-24 right-4 z-40 max-h-[calc(100dvh-7rem)] w-72 max-w-[calc(100%-2rem)] overflow-y-auto rounded-lg bg-black/95 shadow-xl ring-1 ring-white/20">
           {/* Tabs */}
           <div className="flex border-b border-white/10">
             {availableQualities.length > 0 && (
               <button
+                aria-pressed={settingsTab === "quality"}
                 onClick={() => setSettingsTab("quality")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
                   settingsTab === "quality"
@@ -1981,6 +1998,7 @@ export function VideoPlayer({
             )}
             {audioTracks.length >= 1 && (
               <button
+                aria-pressed={settingsTab === "audio"}
                 onClick={() => setSettingsTab("audio")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
                   settingsTab === "audio"
@@ -1993,6 +2011,7 @@ export function VideoPlayer({
             )}
             {subtitleTracks.length > 0 && (
               <button
+                aria-pressed={settingsTab === "subtitles"}
                 onClick={() => setSettingsTab("subtitles")}
                 className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
                   settingsTab === "subtitles"
@@ -2013,6 +2032,7 @@ export function VideoPlayer({
                 {availableQualities.map((q) => (
                   <button
                     key={q.id}
+                    aria-pressed={quality?.id === q.id}
                     onClick={() => {
                       handleQualityChange(q);
                       setShowSettingsPanel(false);
@@ -2036,6 +2056,7 @@ export function VideoPlayer({
                 {audioTracks.map((track) => (
                   <button
                     key={track.id}
+                    aria-pressed={selectedAudioTrack === track.id}
                     onClick={() => handleTrackSelect("audio", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                       selectedAudioTrack === track.id
@@ -2064,6 +2085,7 @@ export function VideoPlayer({
             {settingsTab === "subtitles" && (
               <div>
                 <button
+                  aria-pressed={selectedSubtitleTrack === null}
                   onClick={() => handleTrackSelect("subtitle", 0)}
                   className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                     selectedSubtitleTrack === null
@@ -2079,6 +2101,7 @@ export function VideoPlayer({
                 {subtitleTracks.map((track) => (
                   <button
                     key={track.id}
+                    aria-pressed={selectedSubtitleTrack === track.id}
                     onClick={() => handleTrackSelect("subtitle", track.id)}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-white/10 ${
                       selectedSubtitleTrack === track.id
@@ -2114,18 +2137,18 @@ export function VideoPlayer({
       )}
 
       {/* Episode Panel - Slide out from right */}
-      <div
-        ref={episodePanelRef}
-        className={`absolute right-0 top-0 z-50 h-full w-full max-w-md transform bg-black/95 shadow-2xl transition-transform duration-300 ease-out ${
-          showEpisodePanel ? "translate-x-0" : "translate-x-full"
-        }`}
+      {showEpisodePanel && <div
+        role="region" aria-label="Episode List"
+        className="absolute right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-black/95 shadow-2xl"
       >
         {/* Panel header */}
         <div className="flex items-center justify-between border-b border-white/10 p-4">
-          <h2 className="text-lg font-semibold text-white">
+          <h2 className="min-w-0 break-words text-lg font-semibold text-white">
             {seasonTitle || `Season ${seasonNumber}`}
           </h2>
           <button
+            ref={episodeClose}
+            aria-label="Close Episode List"
             onClick={() => setShowEpisodePanel(false)}
             className="rounded p-1 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           >
@@ -2134,7 +2157,7 @@ export function VideoPlayer({
         </div>
 
         {/* Episode list */}
-        <div className="h-[calc(100%-64px)] overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {episodes.map((episode) => {
             const isCurrentEpisode = episode.ratingKey === ratingKey;
             const isWatched = (episode.viewCount || 0) > 0;
@@ -2230,7 +2253,7 @@ export function VideoPlayer({
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* Backdrop for episode panel */}
       {showEpisodePanel && (

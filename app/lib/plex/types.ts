@@ -97,9 +97,14 @@ export interface PlexMediaItem {
   thumb?: string;
   art?: string;
   summary?: string;
+  Image?: Array<{ type: string; url: string; alt?: string }>;
+  UltraBlurColors?: Array<{ topLeft?: string; topRight?: string; bottomRight?: string; bottomLeft?: string }>;
   contentRating?: string;
   audienceRating?: number;
+  audienceRatingImage?: string;
   rating?: number;
+  ratingImage?: string;
+  Rating?: PlexRating[];
   userRating?: number; // User's personal rating (0-10 scale)
   lastRatedAt?: number; // Unix timestamp when user last rated this item
   viewCount?: number;
@@ -126,6 +131,14 @@ export interface PlexMediaItem {
   playlistItemID?: number;
 }
 
+export interface PlexHub {
+  hubIdentifier?: string;
+  key?: string;
+  title: string;
+  type?: string;
+  Metadata?: PlexMediaItem[];
+}
+
 /**
  * Tag reference used for genres, directors, writers, etc.
  */
@@ -143,6 +156,12 @@ export interface PlexMarker {
   startTimeOffset: number;
   endTimeOffset: number;
   final?: boolean;
+}
+
+export interface PlexRating {
+  image?: string;
+  type?: string;
+  value: number;
 }
 
 /**
@@ -183,6 +202,10 @@ export interface PlexMetadata extends PlexMediaItem {
     audioCodec?: string;
     videoCodec?: string;
     videoResolution?: string;
+    videoProfile?: string;
+    videoFrameRate?: string;
+    bitDepth?: number;
+    colorTrc?: string;
     container?: string;
     Part?: Array<{
       id: number;
@@ -371,7 +394,10 @@ export interface PlexStream {
   // Video-specific
   width?: number;
   height?: number;
-  frameRate?: string;
+  frameRate?: string | number;
+  bitDepth?: number;
+  aspectRatio?: number;
+  colorTrc?: string;
   // Audio-specific
   channels?: number;
   samplingRate?: number;

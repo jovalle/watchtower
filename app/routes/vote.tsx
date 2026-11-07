@@ -8,6 +8,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
+  Form,
   Link,
   Outlet,
   useLoaderData,
@@ -16,7 +17,9 @@ import {
   useNavigate,
 } from "@remix-run/react";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Logo } from "~/components/ui";
+import { Container } from "~/components/layout";
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
+import { Logo, buttonStyles } from "~/components/ui";
 import { getPlexToken, getSession } from "~/lib/auth/session.server";
 import { getPlexUser, type PlexUser } from "~/lib/auth/plex.server";
 
@@ -91,10 +94,19 @@ export default function VoteLayout() {
 
   // New Showing form state (in navbar)
   const [showForm, setShowForm] = useState(false);
+  const createDialogRef = useRef<HTMLDialogElement>(null);
+  usePageScrollLock(showForm);
+  useEffect(() => {
+    if (!showForm) return;
+    const dialog = createDialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, [showForm]);
   const [newName, setNewName] = useState("");
   const createFetcher = useFetcher<{
     success?: boolean;
     showing?: { id: string };
+    error?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -104,15 +116,21 @@ export default function VoteLayout() {
     `${location.pathname}${location.search}`
   )}`;
 
+  useEffect(() => {
+    if (createFetcher.state === "idle" && createFetcher.data?.success) {
+      setNewName("");
+      setShowForm(false);
+    }
+  }, [createFetcher.state, createFetcher.data]);
+
   const handleCreate = useCallback(() => {
+    if (createFetcher.state !== "idle") return;
     if (!newName.trim()) return;
     createFetcher.submit(JSON.stringify({ name: newName.trim() }), {
       method: "POST",
       action: "/api/vote/showings",
       encType: "application/json",
     });
-    setNewName("");
-    setShowForm(false);
   }, [newName, createFetcher]);
 
   // Redirect to the new showing page after creation
@@ -125,10 +143,10 @@ export default function VoteLayout() {
   return (
     <div className="min-h-screen bg-background-primary overflow-x-hidden">
       {/* Minimal header */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-background-primary/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
+      <header className="sticky top-0 z-40 pt-safe shadow-[inset_0_-1px_var(--color-border-subtle)] bg-background-primary/80 backdrop-blur-xl">
+        <Container size="wide" className="flex h-[var(--app-header-height)] items-center justify-between">
           <div className="flex items-center shrink-0">
-            <Link to="/vote" className="flex items-center">
+            <Link to="/vote" className="flex min-h-11 items-center">
               <Logo />
             </Link>
           </div>
@@ -136,7 +154,7 @@ export default function VoteLayout() {
           {/* Centered title */}
           <Link
             to="/vote"
-            className="flex-1 text-center text-sm sm:text-xl font-black text-amber-50 tracking-widest uppercase hover:text-amber-300 transition-colors truncate mx-2"
+            className="flex-1 text-center text-sm sm:text-xl font-black text-amber-50 tracking-widest hover:text-amber-300 transition-colors truncate mx-2"
             style={{ fontFamily: "'Playfair Display', serif" }}
           >
             Private Cinema
@@ -156,16 +174,16 @@ export default function VoteLayout() {
                 to={loginHref}
                 className="text-sm text-accent-primary hover:underline"
               >
-                Sign in
+                Sign In
               </Link>
             )}
           </div>
-        </div>
+        </Container>
       </header>
 
       {/* Inline create form — slides down from navbar */}
 
-      <main className="mx-auto max-w-5xl px-4 py-8">
+      <Container size="wide" className="py-8"><main className="mx-auto min-w-0 max-w-5xl">
         <Outlet
           context={
             {
@@ -178,39 +196,26 @@ export default function VoteLayout() {
             } satisfies VoteContext
           }
         />
-      </main>
+      </main></Container>
 
       {/* Floating action button + popover modal */}
       {user && isOnDashboard && (
         <>
-          {showForm && (
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => {
-                setShowForm(false);
-                setNewName("");
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setShowForm(false);
-                  setNewName("");
-                }
-              }}
-              role="presentation"
-            />
-          )}
           <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
             {showForm && (
               // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
-              <div
-                className="animate-popUp w-72 rounded-xl border border-amber-500/30 bg-background-primary/95 backdrop-blur-xl p-4 shadow-2xl shadow-amber-500/10"
+              <dialog
+                ref={createDialogRef}
+                onCancel={(event) => { if (createFetcher.state !== "idle") event.preventDefault(); else setShowForm(false); }}
+                className="fixed bottom-24 left-auto right-6 top-auto m-0 max-h-[calc(100dvh-7rem)] w-72 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-xl border border-border-emphasis bg-background-elevated p-4 text-foreground-primary shadow-2xl backdrop:bg-black/50"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-label="Create showing"
+                aria-label="Create Showing"
               >
                 <div className="flex gap-2">
                   <input
+                    aria-label="Showing Name"
+                    disabled={createFetcher.state !== "idle"}
                     type="text"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
@@ -229,9 +234,9 @@ export default function VoteLayout() {
                   />
                   <button
                     onClick={handleCreate}
-                    disabled={!newName.trim()}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    aria-label="Create showing"
+                    disabled={createFetcher.state !== "idle" || newName.trim().length < 3}
+                    className={buttonStyles({ size: "sm", className: "shrink-0" })}
+                    aria-label="Create Showing"
                   >
                     <svg
                       className="h-5 w-5"
@@ -248,11 +253,15 @@ export default function VoteLayout() {
                     </svg>
                   </button>
                 </div>
-              </div>
+                {createFetcher.data?.error && <p role="alert" className="mt-3 text-sm text-red-300">{createFetcher.data.error}</p>}
+                {createFetcher.state !== "idle" && <p role="status" className="mt-3 text-sm text-foreground-secondary">Creating Showing...</p>}
+                <button type="button" disabled={createFetcher.state !== "idle"} onClick={() => setShowForm(false)} className={buttonStyles({ variant: "ghost", size: "sm", className: "mt-3 w-full" })}>Cancel</button>
+              </dialog>
             )}
             <button
               onClick={() => setShowForm(!showForm)}
               className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-black shadow-lg shadow-amber-500/25 hover:bg-amber-400 active:scale-95 transition-all"
+              aria-expanded={showForm}
               aria-label="New Showing"
             >
               <svg
@@ -284,6 +293,7 @@ export default function VoteLayout() {
 function AuthUserMenu({ user }: { user: PlexUser }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -292,15 +302,21 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
         setOpen(false);
       }
     };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); } };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onEscape);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("keydown", onEscape); };
   }, [open]);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative" ref={menuRef} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
       <button
+        ref={triggerRef}
+        type="button"
+        aria-label="Account Menu"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/5 transition-colors"
+        className={buttonStyles({ variant: "ghost", size: "sm", className: "gap-2 px-2" })}
       >
         {user.thumb ? (
           <img src={user.thumb} alt="" className="h-7 w-7 rounded-full" />
@@ -309,7 +325,7 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
             {user.username.charAt(0).toUpperCase()}
           </div>
         )}
-        <span className="hidden sm:inline text-sm font-medium text-foreground-secondary">
+        <span className="hidden max-w-28 truncate sm:inline text-sm font-medium text-foreground-secondary">
           {user.username}
         </span>
         <svg
@@ -328,10 +344,10 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-44 rounded-lg border border-white/10 bg-background-primary py-1 shadow-xl">
+        <div className="absolute right-0 mt-1 w-44 max-w-[calc(100vw-3rem)] rounded-lg border border-white/10 bg-background-primary py-1 shadow-xl">
           <Link
             to="/app"
-            className="flex items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
+            className="flex min-h-11 items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
             onClick={() => setOpen(false)}
           >
             <svg
@@ -349,10 +365,8 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
             </svg>
             Back to App
           </Link>
-          <Link
-            to="/auth/logout"
-            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
-            onClick={() => setOpen(false)}
+          <Form method="post" action="/auth/logout"><button type="submit"
+            className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
           >
             <svg
               className="h-4 w-4"
@@ -367,8 +381,8 @@ function AuthUserMenu({ user }: { user: PlexUser }) {
                 d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75"
               />
             </svg>
-            Sign out
-          </Link>
+            Sign Out
+          </button></Form>
         </div>
       )}
     </div>
@@ -389,6 +403,7 @@ function GuestUserMenu({
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Close on outside click
   useEffect(() => {
@@ -398,22 +413,28 @@ function GuestUserMenu({
         setOpen(false);
       }
     };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); } };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onEscape);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("keydown", onEscape); };
   }, [open]);
 
   const initial = guestName.charAt(0).toUpperCase();
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative" ref={menuRef} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
       <button
+        ref={triggerRef}
+        type="button"
+        aria-label="Account Menu"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/5 transition-colors"
+        className={buttonStyles({ variant: "ghost", size: "sm", className: "gap-2 px-2" })}
       >
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-primary text-xs font-bold text-accent-foreground">
           {initial}
         </div>
-        <span className="hidden sm:inline text-sm font-medium text-foreground-secondary">
+        <span className="hidden max-w-28 truncate sm:inline text-sm font-medium text-foreground-secondary">
           {guestName}
         </span>
         <svg
@@ -432,10 +453,10 @@ function GuestUserMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-44 rounded-lg border border-white/10 bg-background-primary py-1 shadow-xl">
+        <div className="absolute right-0 mt-1 w-44 max-w-[calc(100vw-3rem)] rounded-lg border border-white/10 bg-background-primary py-1 shadow-xl">
           <Link
             to={loginHref}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
+            className="flex min-h-11 items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
             onClick={() => setOpen(false)}
           >
             <svg
@@ -451,14 +472,14 @@ function GuestUserMenu({
                 d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
               />
             </svg>
-            Sign in with Plex
+            Sign In with Plex
           </Link>
           <button
             onClick={() => {
               onLogout();
               setOpen(false);
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
+            className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-sm text-foreground-secondary hover:bg-white/5 hover:text-foreground-primary transition-colors"
           >
             <svg
               className="h-4 w-4"
@@ -473,7 +494,7 @@ function GuestUserMenu({
                 d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75"
               />
             </svg>
-            Log out
+            Log Out
           </button>
         </div>
       )}

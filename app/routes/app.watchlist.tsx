@@ -26,7 +26,7 @@ import {
 import { ListVideo, SortAsc, RefreshCw, Loader2, Film, Tv } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media/PosterCard";
-import { Typography, FilterDropdown } from "~/components/ui";
+import { Button, Typography, FilterDropdown } from "~/components/ui";
 import type { FilterOption } from "~/components/ui";
 import {
   requireServerToken,
@@ -307,43 +307,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /** Loading skeleton for watchlist */
-function WatchlistSkeleton() {
-  return (
-    <Container className="py-6">
-      {/* Header skeleton */}
-      <div className="mb-6 flex items-center justify-between">
-        <div className="h-8 w-32 animate-pulse rounded bg-background-elevated" />
-        <div className="h-6 w-48 animate-pulse rounded bg-background-elevated" />
-      </div>
-
-      {/* Filter bar skeleton */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
-        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
-        <div className="h-8 w-24 animate-pulse rounded bg-background-elevated" />
-        <div className="h-8 w-32 animate-pulse rounded bg-background-elevated" />
-      </div>
-
-      {/* Loading message */}
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <Loader2 className="mb-4 h-12 w-12 animate-spin text-accent-primary" />
-        <Typography variant="subtitle" className="mb-2">
-          Loading your watchlist...
-        </Typography>
-        <Typography variant="body" className="text-foreground-secondary">
-          Fetching from Plex, Trakt, and IMDB
-        </Typography>
-      </div>
-    </Container>
-  );
+function WatchlistSkeleton({ traktEnabled, imdbEnabled }: { traktEnabled: boolean; imdbEnabled: boolean }) {
+  return <WatchlistContent pending traktEnabled={traktEnabled} imdbEnabled={imdbEnabled} watchlistData={{
+    items: [], counts: { all: 0, plex: 0, trakt: 0, imdb: 0 }, isStale: false, cachedAt: 0,
+  }} />;
 }
 
 /** Main watchlist content - receives resolved data */
 function WatchlistContent({
+  pending = false,
   watchlistData,
   traktEnabled,
   imdbEnabled,
 }: {
+  pending?: boolean;
   watchlistData: WatchlistData;
   traktEnabled: boolean;
   imdbEnabled: boolean;
@@ -713,20 +690,17 @@ function WatchlistContent({
     !availabilityFilters.includes("all");
 
   return (
-    <Container size="wide" className="py-8">
+    <div>
       {refreshErrors?.map(error => <p key={error} role="alert" className="mb-4 rounded border border-foreground-muted p-4 text-foreground-primary">{error}</p>)}
       {/* Header with title and controls */}
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <fieldset disabled={pending} aria-busy={pending} className="mb-8 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between [&_button]:min-h-11">
         <div className="flex items-center gap-3">
-          <Typography variant="title" as="h1">
-            Watchlist
-          </Typography>
           {/* Refresh button */}
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border-subtle bg-background-elevated text-foreground-secondary transition-colors hover:bg-background-hover hover:text-foreground-primary disabled:opacity-50"
-            title={isRefreshing ? "Refreshing..." : "Refresh watchlist"}
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-border-subtle bg-background-elevated text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary disabled:opacity-50"
+            title={isRefreshing ? "Refreshing..." : "Refresh Watchlist"}
           >
             {isRefreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -765,13 +739,14 @@ function WatchlistContent({
           />
 
           {/* Sort dropdown */}
-          {effectiveItems.length > 0 && (
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
               <SortAsc className="h-4 w-4 text-foreground-secondary" />
               <select
                 value={sortOption}
+                aria-label="Sort Watchlist"
+                disabled={pending || effectiveItems.length === 0}
                 onChange={(e) => setFilter("sort", [e.target.value])}
-                className="rounded-md border border-border-subtle bg-background-elevated px-3 py-1.5 text-sm text-foreground-primary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+                className="min-h-11 rounded-md border border-border-subtle bg-background-elevated px-3 py-1.5 text-sm text-foreground-primary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
               >
                 {SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -779,18 +754,17 @@ function WatchlistContent({
                   </option>
                 ))}
               </select>
-            </div>
-          )}
+          </div>
         </div>
-      </div>
+      </fieldset>
 
-      {filteredAndSortedItems.length === 0 ? (
+      {pending ? <p role="status" className="py-20 text-center text-foreground-secondary">Loading Your Watchlist...</p> : filteredAndSortedItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <ListVideo className="mb-4 h-16 w-16 text-foreground-muted" />
           <Typography variant="subtitle" className="mb-2">
             {effectiveItems.length === 0
-              ? "Your watchlist is empty"
-              : "No items match your filters"}
+              ? "Your Watchlist Is Empty"
+              : "No Items Match Your Filters"}
           </Typography>
           <Typography
             variant="body"
@@ -812,10 +786,10 @@ function WatchlistContent({
             {effectiveIsStale && !isRefreshing && (
               <button
                 onClick={handleRefresh}
-                className="flex items-center gap-1 rounded-full bg-mango/10 px-2 py-0.5 text-xs text-mango transition-colors hover:bg-mango/20"
+                className="flex min-h-11 items-center gap-1 rounded-full bg-mango/10 px-2 py-0.5 text-xs text-mango transition-colors hover:bg-mango/20"
               >
                 <RefreshCw className="h-3 w-3" />
-                Update available
+                Update Available
               </button>
             )}
           </div>
@@ -847,14 +821,14 @@ function WatchlistContent({
             >
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
               <span className="ml-3 text-sm text-foreground-muted">
-                Loading more ({filteredAndSortedItems.length - displayedCount}{" "}
+                Loading More ({filteredAndSortedItems.length - displayedCount}{" "}
                 remaining)
               </span>
             </div>
           )}
         </>
       )}
-    </Container>
+    </div>
   );
 }
 
@@ -869,8 +843,10 @@ export default function WatchlistPage() {
   };
 
   return (
-    <Suspense fallback={<WatchlistSkeleton />}>
-      <Await resolve={watchlistData} errorElement={<Container className="py-8"><p role="alert">Could not refresh your watchlist. Your saved lists have not been changed.</p><button className="mt-4 min-h-11 rounded border px-4" onClick={() => window.location.reload()}>Retry</button></Container>}>
+    <Container size="wide" className="pb-16 pt-6">
+      <h2 className="mb-4 flex min-h-11 items-center text-xl font-semibold">Watchlist</h2>
+      <Suspense fallback={<WatchlistSkeleton traktEnabled={traktEnabled} imdbEnabled={imdbEnabled} />}>
+      <Await resolve={watchlistData} errorElement={<div><p role="alert">Could not refresh your watchlist. Your saved lists have not been changed.</p><Button variant="secondary" className="mt-4" onClick={() => window.location.reload()}>Retry</Button></div>}>
         {(resolvedData) => (
           <WatchlistContent
             watchlistData={resolvedData}
@@ -879,6 +855,7 @@ export default function WatchlistPage() {
           />
         )}
       </Await>
-    </Suspense>
+      </Suspense>
+    </Container>
   );
 }

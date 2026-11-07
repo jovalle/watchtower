@@ -12,6 +12,10 @@ import type {
   TMDBImagesResponse,
   TMDBFindResponse,
   TMDBFindResult,
+  TMDBCastMember,
+  TMDBPerson,
+  TMDBPersonCredit,
+  TMDBPersonSearchResult,
 } from "./types";
 import { getCachedLogo, cacheLogo } from "./cache.server";
 
@@ -161,7 +165,40 @@ export class TMDBClient {
       posterPath: item.poster_path,
       backdropPath: item.backdrop_path,
       year: (item.release_date || item.first_air_date || "").slice(0, 4),
+      voteAverage: item.vote_average,
+      voteCount: item.vote_count,
     };
+  }
+
+  async getTitleCast(
+    type: "movie" | "show",
+    id: number,
+    episode?: { season: number; episode: number },
+  ): Promise<TMDBResult<TMDBCastMember[]>> {
+    const path = episode && type === "show"
+      ? `/tv/${id}/season/${episode.season}/episode/${episode.episode}/credits`
+      : `/${type === "show" ? "tv" : "movie"}/${id}/credits`;
+    const result = await this.request<{ cast: TMDBCastMember[]; guest_stars?: TMDBCastMember[] }>(path);
+    return result.success ? { success: true, data: [...result.data.cast, ...(result.data.guest_stars ?? [])] } : result;
+  }
+
+  async getPerson(id: number): Promise<TMDBResult<TMDBPerson>> {
+    return this.request<TMDBPerson>(`/person/${id}`);
+  }
+
+  async getPersonCredits(id: number): Promise<TMDBResult<TMDBPersonCredit[]>> {
+    const result = await this.request<{ cast: TMDBPersonCredit[] }>(`/person/${id}/combined_credits`);
+    return result.success ? { success: true, data: result.data.cast } : result;
+  }
+
+  async getPersonKnownFor(id: number, name: string): Promise<TMDBResult<TMDBPersonCredit[] | null>> {
+    const query = new URLSearchParams({ query: name, include_adult: "false" });
+    const result = await this.request<TMDBPaginatedResponse<TMDBPersonSearchResult>>(`/search/person?${query}`);
+    if (!result.success) return result;
+    // Identity is already verified through source-title credits; search only supplies this exact ID's works.
+    const matches = Array.isArray(result.data?.results) ? result.data.results.filter((person) => person?.id === id && !person.adult) : [];
+    const works = matches.length === 1 ? matches[0].known_for : null;
+    return { success: true, data: Array.isArray(works) ? works : null };
   }
 
   /**

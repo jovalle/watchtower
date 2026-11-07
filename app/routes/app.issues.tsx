@@ -21,6 +21,7 @@ import {
 import {
   actionClass,
   controlClass,
+  inputClass,
   ListFilter,
   Pagination,
   SeerrError,
@@ -129,16 +130,16 @@ export default function IssuesPage() {
       {!error && (
         <>
           <section className="mb-8 rounded-lg border border-border-subtle bg-background-secondary p-5">
-            <h2 className="mb-4 text-lg font-semibold">Report an issue</h2>
+            <h2 className="mb-4 text-lg font-semibold">Report an Issue</h2>
             <Form method="get" className="flex flex-wrap items-end gap-3">
               <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
-                Find a movie or series
+                Find a Movie or Series
                 <input
                   name="q"
                   defaultValue={q}
                   required
                   maxLength={200}
-                  className={controlClass}
+                  className={inputClass}
                 />
               </label>
               <button className={controlClass}>Search</button>
@@ -153,15 +154,15 @@ export default function IssuesPage() {
                 <Link
                   key={`${item.mediaType}-${item.id}`}
                   to={`?type=${item.mediaType}&tmdbId=${item.id}`}
-                  className={controlClass}
+                  className={`${controlClass} max-w-full break-words`}
                 >
-                  {item.title || item.name}
+                  <span className="min-w-0 break-words">{item.title || item.name}</span>
                 </Link>
               ))}
             </div>
             {selected?.mediaInfo && (
               <Form method="post" className="mt-5 space-y-4">
-                <h3 className="font-medium">
+                <h3 className="break-words font-medium">
                   {selected.title || selected.name}
                 </h3>
                 <input
@@ -171,7 +172,7 @@ export default function IssuesPage() {
                 />
                 <label className="flex flex-col gap-2 text-sm">
                   Problem
-                  <select name="issueType" className={controlClass}>
+                  <select name="issueType" className={inputClass}>
                     {Object.entries(issueTypes).map(([id, label]) => (
                       <option key={id} value={id}>
                         {label}
@@ -187,7 +188,7 @@ export default function IssuesPage() {
                     maxLength={5000}
                     rows={3}
                     placeholder="What went wrong? For series, include the season and episode."
-                    className={controlClass}
+                    className={inputClass}
                   />
                 </label>
                 <button
@@ -196,7 +197,7 @@ export default function IssuesPage() {
                 >
                   {navigation.state === "submitting"
                     ? "Reporting…"
-                    : "Report issue"}
+                    : "Report Issue"}
                 </button>
               </Form>
             )}
@@ -232,16 +233,16 @@ export default function IssuesPage() {
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <h2 className="font-semibold">{item.title}</h2>
+                  <h2 className="break-words font-semibold">{item.title}</h2>
                   <p className="mt-1 text-sm text-foreground-secondary">
                     {issueTypes[item.issueType] || "Other"} ·{" "}
                     {item.createdAt.slice(0, 10)}
                   </p>
-                  <p className="mt-2 line-clamp-2 text-sm text-foreground-secondary">
+                  <p className="mt-2 line-clamp-2 break-words text-sm text-foreground-secondary">
                     {item.comments[0]?.message}
                   </p>
                 </div>
-                <span className="text-sm text-accent-primary">
+                <span className="shrink-0 text-sm text-accent-primary">
                   {item.status === 2 ? "Resolved" : "Open"}
                 </span>
               </Link>

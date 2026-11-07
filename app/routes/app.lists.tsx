@@ -31,6 +31,7 @@ interface ListCardData {
 }
 
 interface LoaderData {
+  errors: string[];
   playlists: ListCardData[];
   collections: ListCardData[];
 }
@@ -58,7 +59,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   // Fetch playlists
+  const errors: string[] = [];
   const playlistsResult = await client.getPlaylists();
+  if (!playlistsResult.success) errors.push("Could not load your playlists.");
   const playlists: ListCardData[] = playlistsResult.success
     ? playlistsResult.data.map((p: PlexPlaylist) => ({
         ratingKey: p.ratingKey,
@@ -72,11 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Fetch collections from all video libraries
   const librariesResult = await client.getLibraries();
   const collections: ListCardData[] = [];
+  if (!librariesResult.success) errors.push("Could not load your collections.");
 
   if (librariesResult.success) {
     for (const library of librariesResult.data) {
       if (library.type === "movie" || library.type === "show") {
         const collectionsResult = await client.getCollections(library.key);
+        if (!collectionsResult.success) errors.push(`Could not load collections from ${library.title}.`);
         if (collectionsResult.success) {
           for (const c of collectionsResult.data) {
             collections.push({
@@ -96,6 +101,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json<LoaderData>({
     playlists,
     collections,
+    errors,
   });
 }
 
@@ -152,20 +158,19 @@ function ListCard({ item }: { item: ListCardData }) {
 }
 
 export default function ListsPage() {
-  const { playlists, collections } = useLoaderData<typeof loader>();
+  const { playlists, collections, errors = [] } = useLoaderData<typeof loader>();
   const totalItems = playlists.length + collections.length;
 
   return (
-    <Container size="wide" className="py-8">
-      <Typography variant="title" as="h1" className="mb-8">
-        Lists
-      </Typography>
+    <Container size="wide" className="pb-16 pt-6">
+      <h2 className="mb-8 flex min-h-11 items-center text-xl font-semibold">Lists</h2>
 
-      {totalItems === 0 ? (
+      {errors.map((message) => <p key={message} role="alert" className="mb-4 text-foreground-secondary">{message}</p>)}
+      {totalItems === 0 && !errors.length ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FolderOpen className="mb-4 h-16 w-16 text-foreground-muted" />
           <Typography variant="subtitle" className="mb-2">
-            No lists found
+            No Lists Found
           </Typography>
           <Typography
             variant="body"

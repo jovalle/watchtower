@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { buttonStyles } from "./Button";
 
 export interface ContextMenuItem {
   /** Display label for the menu item */
@@ -33,6 +34,11 @@ interface ContextMenuProps {
  */
 export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    (menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)") ?? menuRef.current)?.focus();
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, []);
 
   // Close on escape key
   useEffect(() => {
@@ -88,7 +94,23 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[160px] animate-fadeIn overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+      role="menu"
+      tabIndex={-1}
+      aria-label="Media Actions"
+      onKeyDown={(event) => {
+        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        let next = index;
+        if (event.key === "ArrowDown") next = (index + 1) % buttons.length;
+        else if (event.key === "ArrowUp") next = (index - 1 + buttons.length) % buttons.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = buttons.length - 1;
+        else if (event.key === "Tab") { onClose(); return; }
+        else return;
+        event.preventDefault();
+        buttons[next]?.focus();
+      }}
+      className="fixed z-50 min-w-[160px] max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] animate-fadeIn overflow-y-auto rounded-lg border border-border-emphasis bg-background-elevated py-1 shadow-xl"
       style={{
         left: position.x,
         top: position.y,
@@ -97,18 +119,20 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
       {items.map((item, index) => (
         <button
           key={index}
+          type="button"
+          role="menuitem"
           onClick={() => handleItemClick(item)}
           disabled={item.disabled}
-          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+          className={buttonStyles({ variant: "ghost", size: "sm", className: `w-full !justify-start gap-2 text-left ${
             item.disabled
-              ? "cursor-not-allowed text-zinc-500"
+              ? "cursor-not-allowed !text-foreground-muted"
               : item.destructive
-                ? "text-red-400 hover:bg-red-500/20"
-                : "text-white hover:bg-zinc-800"
-          }`}
+                ? "!text-red-400 hover:!bg-red-500/20"
+                : "text-foreground-primary"
+          }` })}
         >
           {item.icon && <span className="flex-shrink-0">{item.icon}</span>}
-          <span>{item.label}</span>
+          <span className="min-w-0 break-words">{item.label}</span>
         </button>
       ))}
     </div>

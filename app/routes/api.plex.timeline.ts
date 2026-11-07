@@ -10,6 +10,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { PlexClient } from "~/lib/plex/client.server";
 import { requireServerToken } from "~/lib/auth/session.server";
 import { env } from "~/lib/env.server";
+import { invalidateLibraryIndex } from "~/lib/library-index.server";
 import { invalidateCache, getUserCacheKey } from "~/lib/plex/cache.server";
 import { getCurrentUser } from "~/lib/auth/user.server";
 import { scrobbleTimeline } from "~/lib/trakt/scrobble.server";
@@ -120,6 +121,7 @@ export async function action({
     // Invalidate user's home cache when playback stops so Continue Watching updates immediately
     if (state !== "playing") {
       await invalidateCache(getUserCacheKey("home", token));
+      invalidateLibraryIndex(token);
     }
 
     const user = await getCurrentUser(request);

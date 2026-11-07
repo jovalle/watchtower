@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Download, X } from "lucide-react";
+import { Button } from "~/components/ui/Button";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -40,10 +41,8 @@ export function InstallPrompt() {
   const handleInstall = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === "accepted") {
-      setShowBanner(false);
-    }
+    await deferredPrompt.userChoice;
+    setShowBanner(false);
     setDeferredPrompt(null);
   };
 
@@ -57,27 +56,28 @@ export function InstallPrompt() {
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-50 p-4 pb-safe bg-background-primary border-t border-border-subtle">
-      <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Download className="h-5 w-5 text-accent-primary" />
+      <div className="max-w-screen-2xl mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Download className="h-5 w-5 shrink-0 text-accent-primary" />
           <span className="text-sm text-foreground-primary">
             Install Watchtower for quick access
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            size="sm"
             onClick={handleInstall}
-            className="px-4 py-2 bg-accent-primary text-black text-sm font-medium rounded-md hover:bg-accent-hover transition-colors"
           >
             Install
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleDismiss}
-            className="p-2 text-foreground-muted hover:text-foreground-primary transition-colors"
             aria-label="Dismiss"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { Container } from "~/components/layout/Container";
 import { Play, Info } from "lucide-react";
 import { Typography, Button } from "~/components/ui";
 
@@ -15,6 +16,7 @@ interface BillboardProps {
   onMouseEnter?: () => void;
   /** Handler when mouse leaves billboard (for resuming transitions) */
   onMouseLeave?: () => void;
+  onFocusChange?: (focused: boolean) => void;
 }
 
 export function Billboard({
@@ -29,12 +31,15 @@ export function Billboard({
   onMoreInfo,
   onMouseEnter,
   onMouseLeave,
+  onFocusChange,
 }: BillboardProps) {
   const hasMetadata = year || rating || duration;
 
   return (
     <div
       className="relative h-[70vh] min-h-[500px] w-full overflow-hidden"
+      onFocus={() => onFocusChange?.(true)}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onFocusChange?.(false); }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -57,17 +62,17 @@ export function Billboard({
 
       {/* Content container - matches Container component centering on ultrawide */}
       <div className="absolute inset-x-0 bottom-24">
-        <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8">
+        <Container size="wide">
           <div className="max-w-xl animate-slideUp">
         {/* Logo or title */}
         {logoUrl ? (
           <img
             src={logoUrl}
             alt={title}
-            className="mb-4 h-auto max-w-[400px]"
+            className="mb-4 max-h-36 w-auto max-w-[min(100%,400px)] object-contain object-left"
           />
         ) : (
-          <Typography variant="hero" className="mb-4">
+          <Typography variant="hero" className="mb-4 break-words">
             {title}
           </Typography>
         )}
@@ -112,7 +117,7 @@ export function Billboard({
           </Button>
         </div>
           </div>
-        </div>
+        </Container>
       </div>
     </div>
   );
