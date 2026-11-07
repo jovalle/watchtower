@@ -4,141 +4,72 @@ All notable changes to Watchtower are documented here. Versions follow [Semantic
 
 ## [1.9.0](https://github.com/jovalle/watchtower/compare/v1.8.1...v1.9.0) (2026-11-07)
 
+Watch Together is not included in this release.
+
 ### 🚀 Features
 
-- **android-tv:** Join and host Watch Together rooms ([`0438f96`](https://github.com/jovalle/watchtower/commit/0438f9674cb8767b2c6c743002354b7240c2676f))
+- **android-tv:** Collections, playlists, ratings, requests and preferences ([`02d5c78`](https://github.com/jovalle/watchtower/commit/02d5c78dcb8fd80db0f312e96c19a00c833942ec))
 
-  Kotlin client for the Watch Together room API (no local coordinator): protocol models checked against the WT fixtures, clock sampling and reconciliation ported from sync.ts, retried mutations, SSE with staleness recovery, and a RoomManager that ends on leave, terminal events or any identity change. In a room every transport intent, including MediaSession and remote keys, becomes a host-only room command; automatic skip/next are denied and the host requests auto-advance at credits like the web player. Presence reports the native playback id, claims readiness only at the room target and replaces streams as replacingSource. Adds details/drawer entry points, a lobby with invite QR (fragment link), invite entry and watchtower://join links.
+  Adds library collections and playlists (paged; add from details, remove with confirmation), a D-pad rating control with rollback, Seerr request availability/requests and issue reports behind features.requests, paging for seasons and episodes beyond 100, server and device-local playback preferences and focus restoration. Identity changes drop stale results and reload for the new profile.
 
-- **android-tv:** Validate room snapshots like WT's parseSnapshot ([`3a7bde7`](https://github.com/jovalle/watchtower/commit/3a7bde7e57c43b9a1958e5edf5c4ff871f5143da))
-- **android-tv:** Collections, playlists, ratings, requests and preferences ([`9751b0d`](https://github.com/jovalle/watchtower/commit/9751b0d146c4cc0eb85007508aad21646ed97539))
-
-  Adds library collections and playlists (paged; add from details, remove with confirmation), a D-pad rating control with rollback, Seerr request availability/requests and issue reports behind features.requests, paging for seasons and episodes beyond 100, server and device-local playback preferences, localized room errors, and focus restoration. Identity changes drop stale results and reload for the new profile.
-
-- **android-tv:** Expand browsing and playback experience ([`9f1b34a`](https://github.com/jovalle/watchtower/commit/9f1b34aa0c243a107c5e56d51ecf19eb07813820))
-- **integration:** Accept Android TV device sessions on Watch Together routes ([`8c368d2`](https://github.com/jovalle/watchtower/commit/8c368d293312c6cbec11f2c176fa9f7086b09747))
-
-  Bearer room requests resolve through the native principal (identity version required, no cookie fallback, CSRF proof only for cookie requests); rooms advertise the WATCH_TOGETHER rollout switch; revoking, signing out or switching the profile of a TV ends its memberships. Adds native bearer room integration tests.
-
+- **android-tv:** Expand browsing and playback experience ([`d6b3e6a`](https://github.com/jovalle/watchtower/commit/d6b3e6a3ec0c4162a32a48acc6eaee6c3fa18169))
 - **integrations:** Prefer Seerr environment configuration ([`7345470`](https://github.com/jovalle/watchtower/commit/734547060be92290a56f4ca6bf32b71458fad806))
-- **native:** Add device pairing, bearer principals and the v1 JSON facade ([`7b00837`](https://github.com/jovalle/watchtower/commit/7b00837e691e1cf4817843ed479f7193c886b79f))
+- **native:** Add device pairing, bearer principals and the v1 JSON facade ([`ae2c404`](https://github.com/jovalle/watchtower/commit/ae2c4042f9241306ce34397c913487aa71ef0bf2))
 
   Browser-approved pairing with lost-response replay, sealed server-side Plex credentials, identity-versioned bearer principals, catalog/playback routes, device-scoped playback sessions and a shared HLS proxy core. Includes a fake Plex harness for isolated TV end-to-end runs.
 
-- **native:** Notify listeners when a device identity ends ([`2e5f3e8`](https://github.com/jovalle/watchtower/commit/2e5f3e8358d28399a286c3046638c2e989c2a695))
+- **native:** Notify listeners when a device identity ends ([`c387da2`](https://github.com/jovalle/watchtower/commit/c387da2d18fe9f7034b9e1307bc1441d76730456))
 
-  Revocation and profile replacement emit (userId, deviceSessionId) so dependent state such as Watch Together memberships can be released without coupling the device store to rooms.
+  Revocation and profile replacement emit the user and device-session identity so dependent state can be cleaned up.
 
-- **native:** Expand Android TV catalog and playback services ([`d2ee94f`](https://github.com/jovalle/watchtower/commit/d2ee94fd9be2e299961f80b563e90992bef89fa1))
-- **rooms:** Freeze room protocol v1 and per-device playback scope ([`0d0033e`](https://github.com/jovalle/watchtower/commit/0d0033e83c0bfdb8c5fecca99a57bf3a1bc6eafb))
-- **rooms:** Add authenticated room coordinator, API and SSE ([`c2e7fbb`](https://github.com/jovalle/watchtower/commit/c2e7fbb09e0088bf22d8707266591a3057e58c1b))
-- **rooms:** Add web room UI and synchronized player adapter ([`501570b`](https://github.com/jovalle/watchtower/commit/501570b335558abc74b5e2b56e45436405d59954))
-- **tv:** Freeze the native API v1 contract and scaffold the Android TV app ([`762cc03`](https://github.com/jovalle/watchtower/commit/762cc03bb118f4c0b7b77bedf2bc2564185e6d0a))
+- **native:** Expand Android TV catalog and playback services ([`110c071`](https://github.com/jovalle/watchtower/commit/110c071c581cde1371baca40893301f3317aac01))
+- **tv:** Freeze the native API v1 contract and scaffold the Android TV app ([`eb823ef`](https://github.com/jovalle/watchtower/commit/eb823ef892ab8af182a603ff5d030a59da0843db))
 
   Pin AGP 9.4.1, Gradle 9.8.0 (verified wrapper), Kotlin 2.4.20, Compose for TV and Media3 1.11.1. Adds golden JSON fixtures shared by the server and Kotlin tests, the Kotlin DTOs and API client, Keystore-encrypted credential storage, and the pairing and identity session manager.
 
-- **tv:** Add per-profile local playback preferences ([`292f5cc`](https://github.com/jovalle/watchtower/commit/292f5cce42a33708f1a1c979ab882f4ea791ccec))
-- **tv:** Add pairing, profiles, catalog, search, settings and Watch Next UI ([`f1692e1`](https://github.com/jovalle/watchtower/commit/f1692e17054ae0a9e3253c18a7face4c4eda09b9))
-- **tv:** Add the Media3 player with absolute timeline, tracks, progress and MediaSession ([`10e402a`](https://github.com/jovalle/watchtower/commit/10e402ac80e93c71f2de1c7c08499eaa84c29e6c))
+- **tv:** Add per-profile local playback preferences ([`7a19103`](https://github.com/jovalle/watchtower/commit/7a191035eeb4b2aa044c0ad8a33b58331591ae75))
+- **tv:** Add pairing, profiles, catalog, search, settings and Watch Next UI ([`707d7d8`](https://github.com/jovalle/watchtower/commit/707d7d8da5a0e2d3a1b396dcbc61060b95de1dd3))
+- **tv:** Add the Media3 player with absolute timeline, tracks, progress and MediaSession ([`bce6f89`](https://github.com/jovalle/watchtower/commit/bce6f8931220eb402d7a939bd0ef0a43cbaafe56))
 
   One ExoPlayer per player destination on a SurfaceView, authenticated same-origin data sources, multipart and HLS timeline mapping, sequenced progress with stop cleanup, local/replacement track and quality changes, markers and next-episode countdown, bounded decoder fallback, and a gated MediaSession.
 
 ### 🐛 Bug Fixes
 
-- **android-tv:** Run the room observation tick ([`adc1756`](https://github.com/jovalle/watchtower/commit/adc175675b6c8310030dd9178d7e42b938e02480))
+- **android-tv:** Keep the navigation rail from covering the screen ([`243c5dd`](https://github.com/jovalle/watchtower/commit/243c5ddd19e5a969c5df85711f584336ddd8bdc1))
 
-  The first tick compared elapsedRealtime against Long.MIN_VALUE, which overflows, so drift correction, readiness re-evaluation, presence observation and host auto-advance never ran while playing. Found by the room E2E (TV stayed 4.7 s behind the room anchor). Adds opt-in tracing to the E2E driver.
+  fillMaxSize() before width() fixed the rail to the full width, squeezing every screen (home, details, player) into a 48 px column and out of the accessibility tree. Adds a layout regression test (fails at 960 dp before the fix).
 
-- **android-tv:** Keep the navigation rail from covering the screen ([`2b529d5`](https://github.com/jovalle/watchtower/commit/2b529d5cb71e30bd35a0a7679d8124561251f368))
-
-  fillMaxSize() before width() fixed the rail to the full width, squeezing every screen (home, details, lobby, player) into a 48 px column and out of the accessibility tree. Found by the room E2E; adds a layout regression test (fails at 960 dp before the fix).
-
-- **android-tv:** Compensate seek latency on room hard seeks ([`4058b9e`](https://github.com/jovalle/watchtower/commit/4058b9e91fbb379358a9eb3b6142c12e8a370cd9))
-
-  A TV rebuffers after seeking, so a hard seek to the room target resumed ~600 ms behind and rate correction took ~40 s to close it. Hard seeks during room playback now land ahead by the measured seek-to-ready time (capped at 2 s). The E2E driver selects TV controls with D-pad focus instead of touch.
-
-- **android-tv:** Focus Play when details open ([`c87a664`](https://github.com/jovalle/watchtower/commit/c87a664b9cd3785108d6eb97cafd063e99572ac7))
+- **android-tv:** Focus Play when details open ([`b0e652c`](https://github.com/jovalle/watchtower/commit/b0e652c8867e9e6fd5ed7d1acb05c47c82852417))
 
   On Android TV 12 (API 31) the details screen started with no focused control, so the first D-pad press did nothing visible. The E2E driver now also presses to establish focus and can trace focus moves.
 
-- **android-tv:** Keep room playback fail-closed and room-authoritative ([`e247361`](https://github.com/jovalle/watchtower/commit/e2473619412859fd1550ab77f4ef6c7daa1da409))
-
-  Room routes without an active session recover once and otherwise show an exit-only terminal view (never solo playback). Leaving the lobby, replacing a room or starting solo playback leaves the membership. User stream replacements wait for a replacingSource presence acknowledgement. Audio focus loss, becoming-noisy, suppression and activity stop mark the TV unready and stop reconciliation (decoders are released while stopped). Only membership/identity-ending errors end the session; presence 429 retries the latest observation. Guests no longer see countdown actions; terminal events release the player. Player overlays take and trap focus and restore the opener.
-
-- **android-tv:** Scrollable drawer, focus, wrapping actions and release metadata ([`f07eb8e`](https://github.com/jovalle/watchtower/commit/f07eb8e6c0922dc128ba7045aebbced795cd6a41))
+- **android-tv:** Scrollable drawer, focus, wrapping actions and release metadata ([`1b8ee3c`](https://github.com/jovalle/watchtower/commit/1b8ee3ce019e5baf182feee0b274ce2617983ba3))
 
   The drawer scrolls with focus and exposes full labels; details and settings actions wrap at large font scales; Home, Search, Settings, server entry and profiles take deterministic initial focus and Home restores its card; process-restored deep links are kept (saved state stores only a digest); discarding a stored or active identity emits one IdentityChange so identity-scoped cleanup runs; submitted PINs are cleared; backup and device-transfer are excluded on all API levels; versionCode/versionName come from Gradle properties or environment with validation; CI adds lintRelease and names the unsigned AAB explicitly.
 
 - **auth:** Offer retry after incomplete Plex sign-in ([`a5b06b4`](https://github.com/jovalle/watchtower/commit/a5b06b460f65b3aa1409f343db1059e1dd713b1d))
 - **cache:** Restrict public files to cached logos ([`fcc9305`](https://github.com/jovalle/watchtower/commit/fcc9305f597b66c3ac38f25efee02a4dc3e96ec3))
-- **docker:** Include server client IP resolver ([`923d2fa`](https://github.com/jovalle/watchtower/commit/923d2fa43f97c53feb687a2fd6709686a341b7b0))
+- **docker:** Include server client IP resolver ([`c4bd1f0`](https://github.com/jovalle/watchtower/commit/c4bd1f06440b3d0db3e9afb7044327d44999bd40))
 - **landing:** Clarify access and expose FAQ state ([`6246aa5`](https://github.com/jovalle/watchtower/commit/6246aa55c761265ce3ab2f24bf003c27247b93ab))
 - **library:** Clear all filters in one navigation ([`036d210`](https://github.com/jovalle/watchtower/commit/036d2102713c53b2006a6ee8f30347c354302de4))
 - **library:** Prevent duplicate alphabet clicks ([`54b3ed5`](https://github.com/jovalle/watchtower/commit/54b3ed528193959b16341db15e2588da56fe2759))
 - **library:** Allow remote focus through alphabet ([`1f2e6d1`](https://github.com/jovalle/watchtower/commit/1f2e6d10493ea8b831ce91f0ad4c2d71cd1cf845))
-- **native:** Harden re-verification, pairing bounds, HLS rewriting and playback decisions ([`45ea0ee`](https://github.com/jovalle/watchtower/commit/45ea0eefcf1fdd6708617dcc058ca0df22cc180d))
+- **native:** Harden re-verification, pairing bounds, HLS rewriting and playback decisions ([`b2f4622`](https://github.com/jovalle/watchtower/commit/b2f4622aa89147b8a297b2f9c076551ea5f79844))
 
   Distinguish plex.tv denial from outages, bound pairing memory, recover failed claims, normalize Plex codec names, fix subtitle delivery by transport, stop replaced transcoders, populate adjacent items and autoplay, return JSON 405/404 for native routes, and extend the fake Plex harness with shows, multipart and MKV media.
 
-- **native:** Enforce PIN limits, stale verification and queued-write rechecks ([`2e29835`](https://github.com/jovalle/watchtower/commit/2e298353692962712b5d8ee8f35f77e40daadac4))
+- **native:** Enforce PIN limits, stale verification and queued-write rechecks ([`ffd642f`](https://github.com/jovalle/watchtower/commit/ffd642fa61d402b1369d612b04d0d5dbc6c6f0ba))
 
   Protected-profile PIN attempts are serialized and blocked before reaching Plex after five failures; plex.tv verification writes are compare-and-swap on the verified token, identity version and profile so a concurrent profile switch can never receive the previous profile's server token; queued timeline/stop writes recheck the principal right before the Plex call; pairing limits key on the socket peer unless TRUST_PROXY names trusted proxies (forged X-Forwarded-For no longer bypasses them). Tests wait for queued device-store writes before removing their data directory.
 
-- **player:** Integrate room controls with audited playback UI ([`017aa2e`](https://github.com/jovalle/watchtower/commit/017aa2e3f080f595582ecf91e0a2ef4017ea1502))
-- **rooms:** Keep media attached across room snapshots and bound SSE heartbeats ([`7c9e252`](https://github.com/jovalle/watchtower/commit/7c9e25266c90d1f6e596a56678487cf91ba7d800))
-- **rooms:** Stop transcode reload chase and report paused buffering recovery ([`96a8269`](https://github.com/jovalle/watchtower/commit/96a8269d34bf33919e5282481b668ba2280a7349))
-
-  A fresh room source is already opened at the room position, so reconcile no longer reloads it for load-time drift; it reloads only once the source is aligned or when the room seeked during the load. A paused room never fires playing, so canplay now clears buffering and re-reports readiness.
-
-- **rooms:** Keep the room client connected after non-terminal command rejections ([`b676c30`](https://github.com/jovalle/watchtower/commit/b676c30e3269543383c833a88a8f32b86fe2ff54))
-
-  not_host, no next episode, rate limits and upstream errors now drop only that intent; not_found re-reads the room to tell a missing room from a missing next item. A connection that fails terminally shows its reason instead of a stale notice.
-
-- **rooms:** Keep the room panel clear of player menus ([`fcc5ef0`](https://github.com/jovalle/watchtower/commit/fcc5ef0e139318511ca6c962a7c07bba64dd5a1f))
-
-  Dock the panel top-left, collapse it while playing, and keep the live status, next-episode countdown and ready gesture visible when collapsed. Hide it behind terminal overlays.
-
-- **rooms:** Coalesce host seek bursts and keep outgoing media inert ([`f3648a5`](https://github.com/jovalle/watchtower/commit/f3648a521a87cfc0d69ef9a108d8cb4d7d55b0e1))
-
-  Relative host seeks within 250 ms become one room seek, so key repeat no longer floods commands and members. Once the room moves to another title, the outgoing player pauses and stops aligning, claiming readiness and auto-advancing, instead of racing the route with a reload of the old title.
-
-- **rooms:** Resend throttled presence instead of reconnecting ([`9b60433`](https://github.com/jovalle/watchtower/commit/9b604332c4d45aa0677113c6d230d189082bbf5f))
-
-  Presence is latest-state, so a 429 schedules one resend of the newest report instead of tearing down the event stream.
-
-- **rooms:** Keep playback armed when room play() is interrupted ([`dd0758a`](https://github.com/jovalle/watchtower/commit/dd0758a48f744733502fe39660fb1008aecfe206))
-
-  Only NotAllowedError means autoplay was refused; an AbortError from a pause, seek or reload no longer disarms the member for the next title. Ended media stays at the end while the room runs out the title instead of play() restarting it from 0.
-
-- **rooms:** Close authorization, media identity and retry gaps from review ([`b04b429`](https://github.com/jovalle/watchtower/commit/b04b429e5009d7f93bcb49c6f3d4aa308fc6eb25))
-
-  Next-item access is re-checked when members join during authorization; departed members no longer affect the advance. Room members stream only the room's exact media and part, and revalidation removes members whose Plex media changed. Identical command retries get their cached result before phase and rate checks, and membership history is bounded.
-
-- **rooms:** Validate nested snapshot media and participant fields ([`5063680`](https://github.com/jovalle/watchtower/commit/5063680bb2bcd9ddc20e9e37145130045c14807a))
-- **rooms:** Recover from a failed first contact and a refused source replacement ([`8211386`](https://github.com/jovalle/watchtower/commit/8211386be91493962a90b00d3046c28d2cd21a54))
-
-  A failed first clock or room read enters the reconnect loop instead of staying connecting. When a source replacement is not acknowledged the player restores its prior presence and re-claims readiness, and a pending coalesced seek is dropped when the room media generation changes.
-
-- **rooms:** Make takeover and terminal overlays modal ([`63bdfef`](https://github.com/jovalle/watchtower/commit/63bdfef32361a5e7f78a92684c82699abee72e5f))
-
-  Both alertdialogs set aria-modal and keep Tab inside the overlay so covered player controls are unreachable.
-
-- **rooms:** Keep solo playback sessions in their original scope ([`f0fd030`](https://github.com/jovalle/watchtower/commit/f0fd030da7a9ed5e988486773c8e657833cac64c))
-
-  Only room playback sessions are scoped to the device cookie; solo sessions keep the pre-feature shared per-account scope, so solo replacement ordering is unchanged.
-
-- **rooms:** Start and resume from the held position ([`3848e23`](https://github.com/jovalle/watchtower/commit/3848e233d573a4779441f71105e2f133a7c6094d))
-
-  play switched the phase to playing before reading the held position, so the lobby or pause wait was added to the new anchor and everyone jumped forward. Reported by the Android TV room E2E.
-
 - **search:** Report provider failures ([`b8398e9`](https://github.com/jovalle/watchtower/commit/b8398e986333dadada932302730cfc09a33fb5bb))
 - **trailer:** Use an accessible modal dialog ([`3ff8f00`](https://github.com/jovalle/watchtower/commit/3ff8f00e898e035c9a791271051f0e29e258296b))
-- **tv:** Declare speech recognizer package visibility for voice search ([`4a267d7`](https://github.com/jovalle/watchtower/commit/4a267d7d71fcabbbf45b34d12ab499bef6c13dd0))
-- **tv:** Gate automatic skip/next and every MediaSession path, and capture the final position before release ([`a97e127`](https://github.com/jovalle/watchtower/commit/a97e12779bd663cdf0df4e67dbc515b1c1b56558))
+- **tv:** Declare speech recognizer package visibility for voice search ([`fb284a2`](https://github.com/jovalle/watchtower/commit/fb284a2fea3d84a7acb6b4fe8eb7889b012c9041))
+- **tv:** Capture the final player position before release ([`6a9bdcd`](https://github.com/jovalle/watchtower/commit/6a9bdcd90c25866d1f3b4b73fe77fe140d03f6a2))
 
-  Auto-skip and autoplay-next now pass the transport authority, MediaSession setPlayWhenReady/next/previous/default-position calls route through the intent gate, media-swapping and speed commands are withheld, the final stop no longer reads a released player off its thread, and sidecars attach only to their part.
+  The final playback stop captures position before the player is released.
 
-- **ui:** Preserve completed layout consistency audit ([`566ee65`](https://github.com/jovalle/watchtower/commit/566ee65ebe3b541786859b749f2676251d008265))
+- **ui:** Preserve completed layout consistency audit ([`0b6b207`](https://github.com/jovalle/watchtower/commit/0b6b207279c4b1f9169643b1c9c81b0386b0e974))
 
 ### ⚡ Performance
 
@@ -148,74 +79,31 @@ All notable changes to Watchtower are documented here. Versions follow [Semantic
 
 ### ♻️ Refactoring
 
-- **android-tv:** Finalize standalone feature workspace ([`423ad49`](https://github.com/jovalle/watchtower/commit/423ad490f7717082fd0394cffeb22dfd39db59ae))
-- **playback:** Share the device-scoped session API with Watch Together ([`fa4fec7`](https://github.com/jovalle/watchtower/commit/fa4fec7bb2f9cf7285793436e743e88e3c8c13f6))
-
-  Adopt the scope parameter and field from work/watch-together (0d0033e) for web sessions and scope native sessions to their device session, so both tracks order replacements per device through one generation key.
+- **android-tv:** Finalize standalone feature workspace ([`03e6f83`](https://github.com/jovalle/watchtower/commit/03e6f83a065954b1c240100bd52fdbe7d172c1d5))
 
 ### 📚 Documentation
 
-- **android-tv:** Record E2E, release, 16 KB and signing evidence ([`d006ca1`](https://github.com/jovalle/watchtower/commit/d006ca1bcfdf8e1184d281ccdeab018dd1fcfda8))
+- **android-tv:** Developer guide, acceptance matrix and release procedure ([`6cc5146`](https://github.com/jovalle/watchtower/commit/6cc5146a9c9e36b4b1a4186ca194f710dd198f52))
 
-  Sanitized results from the combined room E2E (Google TV API 36 and Android TV API 31 emulators), artifact checksums and badging, native-library 16 KB audit, release launch smoke on API 31/36/16 KB emulators, and the upgrade/signing compatibility check, plus the audit and smoke scripts that produce them.
+  README covers build, test, local harness, versioning, signing variables and sideload upgrades. ACCEPTANCE maps TV-01..TV-32 and TVT-01..TVT-15 to commits, tests and evidence with conservative statuses, environment, commands, review dispositions and blocked gates. RELEASE covers signing without secrets, cross-channel signing with Play App Signing, the Play TV requirement review, privacy inventory, reviewer access, checklist, rollback and API compatibility.
 
-- **android-tv:** Developer guide, acceptance matrix and release procedure ([`edc4be3`](https://github.com/jovalle/watchtower/commit/edc4be3797d36da6a5c71cf020246c7c5cc43431))
-
-  README covers build, test, local harness, versioning, signing variables and sideload upgrades. ACCEPTANCE maps TV-01..TV-32 and TVT-01..TVT-15 to commits, tests and evidence with conservative statuses, environment, commands, review dispositions, Watch Together hand-offs and blocked gates. RELEASE covers signing without secrets, cross-channel signing with Play App Signing, the Play TV requirement review, privacy inventory, reviewer access, checklist, rollback and API compatibility.
-
-- **android-tv:** Record final combined runs against Watch Together 8299dc1 ([`fe6ec24`](https://github.com/jovalle/watchtower/commit/fe6ec243fe7db9e5dc83d114c78ba738c793137c))
-
-  Watch Together fixed the play-anchor jump (3848e23); with it merged the API 31 sync check passes. Final results: Google TV API 36 27/27, Android TV API 31 13/14 with the details-focus failure after scenario A left open.
-
-- **handoffs:** Add the Watch Together and Android TV handoff pack ([`b27504e`](https://github.com/jovalle/watchtower/commit/b27504e9fbd959b65467e55f566fc0eda3b06e7e))
-- **handoffs:** Add web and Android TV handoff pack ([`d59c1c3`](https://github.com/jovalle/watchtower/commit/d59c1c317b7591471842c1329d172c76409b17cf))
-- **rooms:** Add local Watch Together acceptance harness ([`2eab39c`](https://github.com/jovalle/watchtower/commit/2eab39c04258d27295a951697d20ceaa48ddad22))
-- **rooms:** Capture presence, commands and screens in the browser harness ([`956ceee`](https://github.com/jovalle/watchtower/commit/956ceee56872f637b1a7d5ba43c39ede7ed13a4f))
-
-  Failed steps record each viewer's panel and terminal text; runs keep presence reports, command results and player console lines. WT-16 reports the startup owner-token check separately, and WT-08 rewinds before the late join so it happens mid-title.
-
-- **rooms:** Isolate harness ports and refuse to share them ([`e0fac75`](https://github.com/jovalle/watchtower/commit/e0fac75dfc5cb50d9383715e5621784fdfa56afb))
-
-  Another local harness also listened on 32499, so a failed synthetic Plex start let Watchtower talk to it. Ports are now overridable, the synthetic Plex default moves to 32519, and run.mjs aborts when a port is taken or server.json points elsewhere.
-
-- **rooms:** Add the Watch Together user guide and README entry ([`9c5b339`](https://github.com/jovalle/watchtower/commit/9c5b3392a233328ee1550aff18216614f45e78a2))
-
-  Covers starting and joining rooms, host and personal controls, buffering and reconnect behavior, leaving, unsupported cases and troubleshooting; the README adds the feature, links and the WATCH_TOGETHER variable.
-
-- **rooms:** Record acceptance evidence, operations and shared-contract dependencies ([`aac2016`](https://github.com/jovalle/watchtower/commit/aac20165214e62b616f687991ca9c9c9687bb3f0))
-
-  ACCEPTANCE.md maps every WT and WTT ID to observed results, commands, environment and artifacts, with remaining live gates. OPERATIONS.md covers single-process limits, proxy requirements, diagnostics and rollback. DEPENDENCIES.md records the frozen v1 contract, Android boundaries, client lessons and merge order.
-
-- **rooms:** Assert start and resume position continuity in the browser harness ([`eff04db`](https://github.com/jovalle/watchtower/commit/eff04dbe80973a8a1bc7b7e9f8d925b88a4f9c05))
-- **rooms:** Update acceptance evidence to the final code commit ([`8299dc1`](https://github.com/jovalle/watchtower/commit/8299dc10576745a94c72af0bace9183070b43060))
-
-  Records the final protocol and browser runs on 3848e23, the start/resume anchor defect, and the commits the Android integration branch still needs.
-
+- **handoffs:** Add web and Android TV handoff pack ([`c73cca2`](https://github.com/jovalle/watchtower/commit/c73cca2e07658aca8430cdb145efb4c430313af8))
 - Record security response and performance validation ([`d3986d4`](https://github.com/jovalle/watchtower/commit/d3986d4b4beed0919a091acb4a9d1f64bd84365d))
-- Clarify integration playback verification ([`cf2ee33`](https://github.com/jovalle/watchtower/commit/cf2ee33dc7a87a95d0cb1508a58b7f92e012e5de))
 
 <details>
-<summary><strong>🔧 Maintenance</strong> (13)</summary>
+<summary><strong>🔧 Maintenance</strong> (5)</summary>
 
 - Limit Vitest discovery to project files ([`45379e6`](https://github.com/jovalle/watchtower/commit/45379e602e0fe86ded2f262cf120699eaba8db22))
-- **rooms:** Add adversarial security, race and failure coverage ([`75a18dd`](https://github.com/jovalle/watchtower/commit/75a18dd57cf13532abcb514b3a6899d9478b5c2b))
-- **android-tv:** Expose Watch Together room fixtures to unit tests ([`72bb504`](https://github.com/jovalle/watchtower/commit/72bb5046b41db56fd8d0fe874786f9b88b3d5e20))
-- **android-tv:** Add OkHttp SSE for room event streams ([`b585d96`](https://github.com/jovalle/watchtower/commit/b585d96bc8aacce117a1dd7d8f9852f8903a7f99))
-- **tv-e2e:** Drive TV room journeys against a combined server ([`91253ab`](https://github.com/jovalle/watchtower/commit/91253abd38e40fc46fb66f78818641910746d97f))
-- **android-tv:** Keep the room fixture byte-identical to Watch Together's ([`10bb944`](https://github.com/jovalle/watchtower/commit/10bb94404f3117033c1d6da0bbe61c43066e8d26))
-- **tv-e2e:** Fall back to key events where media_session dispatch is unavailable ([`f9c33d2`](https://github.com/jovalle/watchtower/commit/f9c33d2098c04bbe5b9e4dce556acc7417fe6c45))
-- **android-tv:** Keep the E2E credential hook out of connected suites ([`7be5d6f`](https://github.com/jovalle/watchtower/commit/7be5d6fb8fe2c8b4388b185108e42a0305c91726))
-- **android-tv:** Test, lint and build the TV app ([`d00c588`](https://github.com/jovalle/watchtower/commit/d00c5888766af50ad24590c895b170e85f9f6534))
-- **tv-e2e:** Package artifacts and check upgrade/signing compatibility ([`9d3d8ad`](https://github.com/jovalle/watchtower/commit/9d3d8adee5d8379d752ecf83d374b7b483b5c442))
-- **tv-e2e:** Wait for room conditions instead of fixed delays ([`db27cf1`](https://github.com/jovalle/watchtower/commit/db27cf10678613cffebbb76b821a6f59be52f26d))
-- **android-tv:** Publish signed APK with releases ([`30e7a78`](https://github.com/jovalle/watchtower/commit/30e7a781a5453095cb64b1652bfb7e4d5c0934ab))
-- **android-tv:** Use isolated signing project ([`dd9012e`](https://github.com/jovalle/watchtower/commit/dd9012e642f691ea0f59c244ae09d0ee08086d2d))
+- **android-tv:** Test, lint and build the TV app ([`389c329`](https://github.com/jovalle/watchtower/commit/389c329eecd771221f640480ef2190ca6b1c8bb0))
+- **tv-e2e:** Package artifacts and check upgrade/signing compatibility ([`674c37c`](https://github.com/jovalle/watchtower/commit/674c37c7c6e916b028d90fff61dfe62d3d27b9ea))
+- **android-tv:** Publish signed APK with releases ([`c2d29d8`](https://github.com/jovalle/watchtower/commit/c2d29d864ca78ab16f237176ee32b8f2bc919eb6))
+- **android-tv:** Use isolated signing project ([`dd3fbc0`](https://github.com/jovalle/watchtower/commit/dd3fbc0c812a4ba4981b154e920892ef0304d2a2))
 
 </details>
 
 ### merge
 
-- Integrate main fixes into audited WIP ([`7c5c031`](https://github.com/jovalle/watchtower/commit/7c5c031057dca1f0dd707f4065a47fe375fadccb))
+- Integrate main fixes into audited WIP ([`4802c39`](https://github.com/jovalle/watchtower/commit/4802c399e3a136010b8ec8cf487d810a13043ab5))
 
 ### 🐳 Upgrade
 
