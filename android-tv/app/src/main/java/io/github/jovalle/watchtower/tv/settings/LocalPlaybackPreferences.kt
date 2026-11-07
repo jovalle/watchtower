@@ -3,8 +3,10 @@ package io.github.jovalle.watchtower.tv.settings
 import android.content.Context
 import android.content.SharedPreferences
 import java.security.MessageDigest
+import io.github.jovalle.watchtower.tv.playback.validatedPlaybackSpeed
 
 enum class SubtitleMode { AUTO, ALWAYS, FORCED_ONLY, OFF }
+enum class VideoDisplayMode { LETTERBOX, STRETCH, ZOOM }
 
 /** Device-local playback choices for one server profile. Server-side preferences live in /api/v1/preferences. */
 data class ProfilePlaybackPrefs(
@@ -15,6 +17,8 @@ data class ProfilePlaybackPrefs(
     val defaultQuality: String = "original",
     val maxBitrateKbps: Int? = null,
     val matchFrameRate: Boolean = true,
+    val playbackSpeed: Float = 1f,
+    val videoDisplayMode: VideoDisplayMode = VideoDisplayMode.LETTERBOX,
 )
 
 /**
@@ -34,6 +38,8 @@ class LocalPlaybackPreferences(context: Context) {
             defaultQuality = prefs.getString("$k.quality", null) ?: "original",
             maxBitrateKbps = prefs.getInt("$k.maxBitrateKbps", 0).takeIf { it > 0 },
             matchFrameRate = prefs.getBoolean("$k.matchFrameRate", true),
+            playbackSpeed = validatedPlaybackSpeed(prefs.getFloat("$k.playbackSpeed", 1f)),
+            videoDisplayMode = prefs.getString("$k.videoDisplayMode", null)?.let { runCatching { VideoDisplayMode.valueOf(it) }.getOrNull() } ?: VideoDisplayMode.LETTERBOX,
         )
     }
 
@@ -47,6 +53,8 @@ class LocalPlaybackPreferences(context: Context) {
             .putString("$k.quality", value.defaultQuality)
             .putInt("$k.maxBitrateKbps", value.maxBitrateKbps ?: 0)
             .putBoolean("$k.matchFrameRate", value.matchFrameRate)
+            .putFloat("$k.playbackSpeed", validatedPlaybackSpeed(value.playbackSpeed))
+            .putString("$k.videoDisplayMode", value.videoDisplayMode.name)
             .apply()
     }
 

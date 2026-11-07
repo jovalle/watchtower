@@ -1,0 +1,10 @@
+<resources>
+    <string name="details_runtime_hours_minutes">%1$dh %2$dm</string>
+    <string name="details_runtime_minutes">%1$dm</string>
+    <string name="details_rating_score">Rating</string>
+    <string name="details_rating_audience">Audience</string>
+    <string name="details_rating_critics">Critics</string>
+    <string name="details_rating_plex">Plex</string>
+    <string name="details_rating_ten_description">%1$s %2$s %3$s out of 10</string>
+    <string name="details_rating_percent_description">%1$s %2$s %3$s percent</string>
+</resources>
