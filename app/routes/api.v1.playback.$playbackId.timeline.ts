@@ -18,7 +18,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!["playing", "paused", "stopped"].includes(String(body.state)) || !Number.isSafeInteger(body.positionMs) || Number(body.positionMs) < 0 || !Number.isSafeInteger(body.durationMs) || Number(body.durationMs) < 0 || !Number.isSafeInteger(body.sequence) || Number(body.sequence) < 0) {
       throw new NativeError(400, "invalid_request", "Invalid timeline request.");
     }
-    const client = nativePlexClient(principal);
+    const client = nativePlexClient(principal, session.clientId);
     const accepted = await serializedTimeline(session, Number(body.sequence), async () => {
       await recheckPrincipal(principal);
       plexData(await client.reportTimeline({ ratingKey: session.ratingKey, state: body.state as "playing" | "paused" | "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }));

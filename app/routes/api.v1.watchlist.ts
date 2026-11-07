@@ -3,6 +3,7 @@ import { createTMDBClient } from "~/lib/tmdb/client.server";
 import { createTraktClient } from "~/lib/trakt/client.server";
 import { getUserSettings } from "~/lib/settings/storage.server";
 import { getUnifiedWatchlist } from "~/lib/watchlist/service.server";
+import { resolveDiscoverImageUrl } from "~/lib/plex/image-proxy.server";
 import type { WatchlistResponse, WatchlistSource } from "~/lib/native/contract";
 import { imageUrl, nativePlexClient, plexData } from "~/lib/native/catalog.server";
 import { NativeError, nativeEmpty, nativeJson, readJsonObject, requireMethod, withNativeErrors } from "~/lib/native/http.server";
@@ -20,7 +21,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       for (const item of items) { const value = { type: item.type as "movie" | "show", ratingKey: item.ratingKey, thumb: item.thumb, audienceRating: item.audienceRating }; local.set(`${item.type}:${item.guid}`, value); for (const guid of item.Guid ?? []) local.set(`${item.type}:${guid.id}`, value); }
     }
     const settings = await getUserSettings(Number(principal.userId));
-    const result = await getUnifiedWatchlist(discoverClient, principal.plexToken, await createTraktClient(), createTMDBClient(), source as "all" | WatchlistSource, (thumb) => imageUrl(thumb, 400, 600) ?? "", local, settings ?? undefined);
+    const result = await getUnifiedWatchlist(discoverClient, principal.plexToken, await createTraktClient(), createTMDBClient(), source as "all" | WatchlistSource, (thumb, _token, origin) =>
+      origin === "discover" && thumb?.startsWith("/") ? resolveDiscoverImageUrl(thumb, null, null) ?? "" : thumb ?? "", local, settings ?? undefined);
     const response: WatchlistResponse = { items: result.items.map((item) => ({ id: item.id, title: item.title, type: item.type, year: item.year ?? null, posterUrl: item.thumb ? imageUrl(item.thumb, 400, 600) ?? item.thumb : null, sources: item.sources, ratingKey: item.localRatingKey ?? null, plexGuid: item.plexGuid ?? null, external: item.tmdbId ? { provider: "tmdb", id: String(item.tmdbId), type: item.type } : null, imdbId: item.imdbId ?? null, addedAtMs: Math.max(...Object.values(item.addedAt).filter((value): value is number => value !== undefined).map((value) => value * 1000), 0) || null })), counts: result.counts, errors: result.errors };
     return nativeJson(response, requestId);
   });

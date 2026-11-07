@@ -3,6 +3,24 @@ import { NativeError, nativeErrorResponse, nativeMethodNotAllowed, readJsonObjec
 import { loader as nativeNotFound } from "~/routes/api.v1.$";
 
 describe("native HTTP boundaries", () => {
+  it("cancels an oversized chunked body before consuming the remaining stream", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (++pulls === 100) controller.close();
+        else controller.enqueue(new Uint8Array(8192));
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const request = new Request("http://test/api/v1/device-authorizations", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body, duplex: "half",
+    } as RequestInit & { duplex: string });
+    await expect(readJsonObject(request)).rejects.toMatchObject({ status: 413 });
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(100);
+  });
+
   it("rejects non-JSON and oversized bodies with the contract envelope", async () => {
     await expect(readJsonObject(new Request("http://test", { method: "POST", body: "{}" })))
       .rejects.toMatchObject({ status: 415, code: "unsupported_media_type" });
