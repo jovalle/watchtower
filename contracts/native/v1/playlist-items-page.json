@@ -20,7 +20,12 @@
       "parentRatingKey": null,
       "grandparentRatingKey": null,
       "external": null,
-      "playlistItemId": "44"
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "playlistItemId": "44",
+      "genres": [],
+      "ratings": []
     }
   ],
   "nextCursor": null,

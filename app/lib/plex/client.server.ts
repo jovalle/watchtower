@@ -18,6 +18,7 @@ import type {
   PlexLibrarySection,
   PlexLibrarySectionsResponse,
   PlexMediaItem,
+  PlexHub,
   PlexLibraryItemsResponse,
   PlexMetadata,
   PlexMetadataResponse,
@@ -453,6 +454,9 @@ export class PlexClient {
     ratingKey: string,
     options: { includeMarkers?: boolean } = {}
   ): Promise<PlexResult<PlexMetadata>> {
+    if (typeof ratingKey !== "string" || !/^[A-Za-z0-9_-]+$/.test(ratingKey)) {
+      return { success: false, error: { code: 400, status: 400, message: "Invalid metadata selector." } };
+    }
     const query = options.includeMarkers ? "?includeMarkers=1" : "";
     const result = await this.request<PlexMetadataResponse>(
       `/library/metadata/${ratingKey}${query}`
@@ -550,6 +554,15 @@ export class PlexClient {
     ).sort((a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0) || a.ratingKey.localeCompare(b.ratingKey, undefined, { numeric: true })) };
   }
 
+  /** Recommended hubs for one library, in the server's configured order. */
+  async getLibraryHubs(sectionKey: string): Promise<PlexResult<PlexHub[]>> {
+    const result = await this.request<{ MediaContainer: { Hub?: PlexHub[] } }>(
+      `/hubs/sections/${encodeURIComponent(sectionKey)}?count=20`
+    );
+    if (!result.success) return result;
+    return { success: true, data: result.data.MediaContainer.Hub ?? [] };
+  }
+
   /**
    * Get collections the server owner promoted to Home in Plex (Manage Recommendations).
    */
@@ -610,18 +623,11 @@ export class PlexClient {
     sectionKey: string,
     actorId: string
   ): Promise<PlexResult<PlexMediaItem[]>> {
-    const path = `/library/sections/${sectionKey}/all?actor=${actorId}`;
-
-    const result = await this.request<PlexLibraryItemsResponse>(path);
-
-    if (!result.success) {
-      return result;
-    }
-
-    return {
-      success: true,
-      data: result.data.MediaContainer.Metadata || [],
-    };
+    return this.getPages<PlexMediaItem>(
+      `/library/sections/${encodeURIComponent(sectionKey)}/all`,
+      new URLSearchParams({ actor: actorId, includeGuids: "1" }),
+      1000,
+    );
   }
 
   /**
@@ -713,7 +719,7 @@ export class PlexClient {
     };
   }
 
-  async getTranscodeDecision(streamUrl: string): Promise<PlexResult<{ generalDecisionCode: number; videoDecision?: string; audioDecision?: string; subtitleDecision?: string }>> {
+  async getTranscodeDecision(streamUrl: string): Promise<PlexResult<{ generalDecisionCode: number; directPlayApproved: boolean; videoDecision?: string; audioDecision?: string; subtitleDecision?: string }>> {
     const url = new URL(streamUrl);
     url.pathname = "/video/:/transcode/universal/decision";
     const result = await this.request<{
@@ -725,6 +731,7 @@ export class PlexClient {
         Metadata?: Array<{
           Media?: Array<{
             Part?: Array<{
+              decision?: string;
               Stream?: Array<{
                 streamType?: number | string;
                 decision?: string;
@@ -733,10 +740,13 @@ export class PlexClient {
           }>;
         }>;
       };
-    }>(`${url.pathname}${url.search}`);
+    }>(`${url.pathname}${url.search}`, {
+      headers: { "X-Plex-Client-Identifier": url.searchParams.get("X-Plex-Client-Identifier") ?? this.clientId },
+    });
     if (!result.success) return result;
     const container = result.data?.MediaContainer ?? {};
-    const streams = container.Metadata?.[0]?.Media?.[0]?.Part?.[0]?.Stream;
+    const part = container.Metadata?.[0]?.Media?.[0]?.Part?.[0];
+    const streams = part?.Stream;
     const streamDecision = (streamType: number): string | undefined =>
       Array.isArray(streams)
         ? streams.find((stream) => Number(stream?.streamType) === streamType)
@@ -747,6 +757,7 @@ export class PlexClient {
       success: true,
       data: {
         generalDecisionCode: Number.isFinite(decisionCode) ? decisionCode : 0,
+        directPlayApproved: typeof part?.decision === "string" && part.decision.replace(/\s/g, "").toLowerCase() === "directplay",
         videoDecision: streamDecision(1) ?? container.videoDecision,
         audioDecision: streamDecision(2) ?? container.audioDecision,
         subtitleDecision: streamDecision(3) ?? container.subtitleDecision,
@@ -830,7 +841,7 @@ export class PlexClient {
       );
 
       const response = await fetch(`${this.serverUrl}${path}`, {
-        method: "GET",
+        method: "POST",
         headers: this.getHeaders(),
         signal: controller.signal,
       });
@@ -867,6 +878,33 @@ export class PlexClient {
           message: "Unknown error occurred",
         },
       };
+    }
+  }
+
+  async removeFromContinueWatching(ratingKey: string): Promise<PlexResult<void>> {
+    if (typeof ratingKey !== "string" || !/^[A-Za-z0-9_-]+$/.test(ratingKey)) {
+      return { success: false, error: { code: 400, status: 400, message: "Invalid metadata selector." } };
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PLEX_REQUEST_TIMEOUT);
+    try {
+      const query = new URLSearchParams({ ratingKey });
+      const response = await fetch(`${this.serverUrl}/actions/removeFromContinueWatching?${query}`, {
+        method: "PUT",
+        headers: this.getHeaders(),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        if (response.status === 401) await this.onUnauthorized?.();
+        return { success: false, error: { code: response.status, status: response.status, message: `HTTP ${response.status}: ${response.statusText}` } };
+      }
+      return { success: true, data: undefined };
+    } catch (error) {
+      return { success: false, error: { code: -1, message: error instanceof Error
+        ? error.name === "AbortError" ? "Request timed out" : error.message
+        : "Unknown error occurred" } };
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

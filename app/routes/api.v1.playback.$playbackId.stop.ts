@@ -16,14 +16,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (hasFinal && (!Number.isSafeInteger(body.positionMs) || Number(body.positionMs) < 0 || !Number.isSafeInteger(body.durationMs) || Number(body.durationMs) < 0 || !Number.isSafeInteger(body.sequence) || Number(body.sequence) < 0)) {
       throw new NativeError(400, "invalid_request", "Invalid stop request.");
     }
-    if (hasFinal) {
-      const client = nativePlexClient(principal);
-      await serializedTimeline(session, Number(body.sequence), async () => {
-        await recheckPrincipal(principal);
-        plexData(await client.reportTimeline({ ratingKey: session.ratingKey, state: "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }));
-      });
+    try {
+      if (hasFinal) {
+        const client = nativePlexClient(principal, session.clientId);
+        await serializedTimeline(session, Number(body.sequence), async () => {
+          await recheckPrincipal(principal);
+          plexData(await client.reportTimeline({ ratingKey: session.ratingKey, state: "stopped", time: Number(body.positionMs), duration: Number(body.durationMs) }));
+        });
+      }
+    } finally {
+      await transcodeCommand(principal, session, "stop");
     }
-    await transcodeCommand(principal, session, "stop");
     return nativeEmpty(requestId);
   });
 }

@@ -262,6 +262,7 @@ export async function negotiatePlayback(
     ratingKey: request.ratingKey,
     clientId,
     mediaId: String(selected.id),
+    mediaIndex: mediaItems.indexOf(selected),
     partIds: parts.map((part) => String(part.id)),
     partKeys: Object.fromEntries(parts.map((part) => [String(part.id), part.key])),
     allowedSubtitleStreams: Object.fromEntries(subtitles.filter((stream) => stream.key && ["srt", "vtt"].includes(normalizeSubtitleCodec(stream.codec) ?? "")).map((stream) => [String(stream.id), stream.key!])),
