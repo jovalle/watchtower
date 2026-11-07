@@ -1,0 +1,8 @@
+1. fresh install v1 (key A):      Success
+versionCode=1 minSdk=28 targetSdk=36 lastUpdateTime=2026-09-28 01:46:20 firstInstallTime=2026-09-28 01:46:20 
+2. upgrade to v2 (same key A):     Success
+versionCode=2 minSdk=28 targetSdk=36 lastUpdateTime=2026-09-28 01:46:20 firstInstallTime=2026-09-28 01:46:20 
+3. downgrade to v1 (key A):        INSTALL_FAILED_VERSION_DOWNGRADE
+4. v2 signed with key B over A:    INSTALL_FAILED_UPDATE_INCOMPATIBLE
+versionCode=2 minSdk=28 targetSdk=36 lastUpdateTime=2026-09-28 01:46:20 firstInstallTime=2026-09-28 01:46:20 
+5. unsigned v2 over A:             failed to install

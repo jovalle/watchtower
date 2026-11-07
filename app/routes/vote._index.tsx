@@ -23,6 +23,7 @@ import {
   SHOWING_STATUS_COLORS,
   SHOWING_STATUS_SORT_ORDER,
 } from "~/lib/vote/types";
+import { buttonStyles } from "~/components/ui";
 import type { VoteContext } from "~/routes/vote";
 
 export const meta: MetaFunction = () => {
@@ -138,8 +139,8 @@ function PosterCarousel({
             e.preventDefault();
             scrollBy(-1);
           }}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/70 border border-amber-500/20 text-amber-300 opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/90 hover:border-amber-500/40 shadow-lg"
-          aria-label="Scroll left"
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-11 w-11 flex items-center justify-center rounded-full bg-black/70 border border-amber-500/20 text-amber-300 opacity-100 transition-opacity hover:bg-black/90 hover:border-amber-500/40 shadow-lg"
+          aria-label="Scroll Left"
         >
           <svg
             className="h-5 w-5"
@@ -164,8 +165,8 @@ function PosterCarousel({
             e.preventDefault();
             scrollBy(1);
           }}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/70 border border-amber-500/20 text-amber-300 opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/90 hover:border-amber-500/40 shadow-lg"
-          aria-label="Scroll right"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-11 w-11 flex items-center justify-center rounded-full bg-black/70 border border-amber-500/20 text-amber-300 opacity-100 transition-opacity hover:bg-black/90 hover:border-amber-500/40 shadow-lg"
+          aria-label="Scroll Right"
         >
           <svg
             className="h-5 w-5"
@@ -193,10 +194,10 @@ function PosterCarousel({
 
       <div
         ref={scrollRef}
-        className="flex justify-center gap-3 overflow-x-auto scrollbar-hide py-2 px-1 scroll-smooth snap-x snap-mandatory"
+        className="flex justify-start gap-3 overflow-x-auto scrollbar-hide py-2 px-1 scroll-smooth snap-x snap-mandatory"
       >
         {movies.map((m) => (
-          <div key={m.ratingKey} className="shrink-0 snap-start">
+          <div key={m.ratingKey} className="shrink-0 snap-start first:ml-auto last:mr-auto">
             <div className="w-[120px] aspect-[2/3] rounded-md overflow-hidden bg-black/40 ring-1 ring-amber-400/10 shadow-lg shadow-black/40">
               {m.posterUrl ? (
                 <img
@@ -265,17 +266,17 @@ export default function VoteDashboard() {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-center">
         <div className="text-5xl mb-4">🎬</div>
-        <h2 className="text-2xl font-bold text-amber-100 tracking-wide uppercase">
+        <h1 className="text-2xl font-bold text-amber-100 tracking-wide">
           Private Cinema
-        </h2>
+        </h1>
         <p className="mt-3 max-w-sm text-amber-200/60">
           Got a link to a showing? Open it directly to join and vote.
         </p>
         <Link
           to="/auth/redirect?redirectTo=/vote"
-          className="mt-6 inline-flex items-center gap-2 rounded-md bg-amber-500 px-5 py-2.5 text-sm font-bold text-black hover:bg-amber-400 transition-colors uppercase tracking-wide"
+          className={buttonStyles({ className: "mt-6 gap-2" })}
         >
-          Sign in with Plex
+          Sign In with Plex
         </Link>
       </div>
     );
@@ -286,9 +287,9 @@ export default function VoteDashboard() {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-center">
         <div className="text-5xl mb-4">🎟️</div>
-        <h2 className="text-2xl font-bold text-amber-100 tracking-wide uppercase">
+        <h1 className="text-2xl font-bold text-amber-100 tracking-wide">
           No Showings Yet
-        </h2>
+        </h1>
         <p className="mt-3 max-w-sm text-amber-200/60">
           Ask for a showing link to start voting on movies.
         </p>
@@ -298,6 +299,7 @@ export default function VoteDashboard() {
 
   return (
     <div className="flex flex-col items-center w-full">
+      <h1 className="sr-only">Private Cinema</h1>
       {/* Showings */}
       {sortedShowings.length > 0 ? (
         <div className="w-full max-w-2xl flex flex-col gap-12 items-center">
@@ -307,10 +309,9 @@ export default function VoteDashboard() {
             const colors = SHOWING_STATUS_COLORS[status];
 
             return (
-              <Link
+              <article
                 key={s.id}
-                to={`/vote/${s.id}`}
-                className="group w-full block text-center"
+                className="group w-full min-w-0 text-center"
               >
                 {/* Status label */}
                 <div className="flex items-center justify-center gap-3 mb-2">
@@ -318,7 +319,7 @@ export default function VoteDashboard() {
                     className={`h-px flex-1 max-w-16 bg-gradient-to-r from-transparent ${colors.line}`}
                   />
                   <span
-                    className={`${colors.text} text-[10px] tracking-[0.3em] uppercase font-medium`}
+                    className={`${colors.text} text-[10px] tracking-[0.3em] font-medium`}
                   >
                     {statusLabel}
                   </span>
@@ -328,8 +329,8 @@ export default function VoteDashboard() {
                 </div>
 
                 {/* Showing name as the headline */}
-                <h2 className="text-2xl sm:text-3xl font-bold text-amber-50 tracking-wide uppercase group-hover:text-amber-300 transition-colors">
-                  {s.name}
+                <h2 className="text-2xl sm:text-3xl font-bold text-amber-50 tracking-wide break-words group-hover:text-amber-300 transition-colors">
+                  <Link to={`/private/${s.id}`}>{s.name}</Link>
                 </h2>
 
                 {/* Poster carousel */}
@@ -338,7 +339,7 @@ export default function VoteDashboard() {
                 </div>
 
                 {/* Details */}
-                <div className="mt-3 flex items-center justify-center gap-3 text-xs text-amber-200/40">
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 break-words text-xs text-amber-100/80">
                   <span>
                     {s.movieCount} {s.movieCount === 1 ? "movie" : "movies"}
                   </span>
@@ -354,14 +355,14 @@ export default function VoteDashboard() {
 
                 {/* Subtle divider at bottom */}
                 <div className="mt-6 h-px bg-gradient-to-r from-transparent via-amber-500/15 to-transparent" />
-              </Link>
+              </article>
             );
           })}
         </div>
       ) : isAuthenticated ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="text-5xl mb-4">🎬</div>
-          <h2 className="text-xl font-bold text-amber-100 tracking-wide uppercase">
+          <h2 className="text-xl font-bold text-amber-100 tracking-wide">
             No Showings Yet
           </h2>
           <p className="mt-2 max-w-sm text-amber-200/50">

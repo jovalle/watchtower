@@ -1,0 +1,5 @@
+{
+  "items": [
+    { "playlistId": "8001", "title": "Weekend", "itemCount": 3, "durationMs": 21600000, "smart": false, "thumbUrl": "/api/v1/images?src=%2Fplaylists%2F8001%2Fcomposite%2F1700000000&w=400&h=400" }
+  ]
+}

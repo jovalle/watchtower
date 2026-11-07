@@ -5,6 +5,7 @@
  * Index 0 = most preferred (1st choice).
  */
 
+import { Button } from "~/components/ui";
 import { useState, useCallback, useEffect, useRef } from "react";
 
 interface RankableMovie {
@@ -190,11 +191,11 @@ export function RankedChoiceVoter({
           return (
             <div
               key={key}
-              draggable
+              draggable={!isSubmitting}
               onDragStart={() => handleDragStart(idx)}
               onDragOver={(e) => handleDragOver(e, idx)}
               onDragEnd={handleDragEnd}
-              className={`flex items-center gap-3 rounded-lg border p-3 cursor-grab active:cursor-grabbing transition-all ${
+              className={`flex items-center gap-2 rounded-lg border p-3 cursor-grab active:cursor-grabbing transition-all ${
                 dragIdx === idx
                   ? "border-accent-primary bg-accent-primary/10 scale-[1.02]"
                   : "border-white/10 bg-white/5 hover:border-white/20"
@@ -204,6 +205,8 @@ export function RankedChoiceVoter({
               {editingIdx === idx ? (
                 <input
                   ref={editInputRef}
+                  disabled={isSubmitting}
+                  aria-label={`Position for ${movie.title}`}
                   type="number"
                   min={1}
                   max={order.length}
@@ -214,13 +217,15 @@ export function RankedChoiceVoter({
                     if (e.key === "Enter") handleRankCommit(idx);
                     if (e.key === "Escape") setEditingIdx(null);
                   }}
-                  className="h-8 w-8 shrink-0 rounded-full bg-white/10 text-center text-sm font-bold text-foreground-primary focus:outline-none focus:ring-2 focus:ring-accent-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="h-11 w-11 shrink-0 rounded-full bg-white/10 text-center text-sm font-bold text-foreground-primary focus:outline-none focus:ring-2 focus:ring-accent-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               ) : (
                 <button
+                  disabled={isSubmitting}
                   onClick={() => handleRankClick(idx)}
-                  title="Click to set position"
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-colors hover:ring-2 hover:ring-accent-primary/50 ${
+                  title="Set Position"
+                  aria-label={`Set Position for ${movie.title}, Currently ${idx + 1}`}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-colors hover:ring-2 hover:ring-accent-primary/50 ${
                     idx === 0
                       ? "bg-yellow-500/20 text-yellow-400"
                       : idx === 1
@@ -259,9 +264,9 @@ export function RankedChoiceVoter({
               <div className="flex flex-col gap-0.5">
                 <button
                   onClick={() => moveUp(idx)}
-                  disabled={idx === 0}
-                  className="rounded p-0.5 text-foreground-muted hover:text-foreground-primary disabled:opacity-20 transition-colors"
-                  aria-label="Move up"
+                  disabled={isSubmitting || idx === 0}
+                  className="flex h-11 w-11 items-center justify-center rounded text-foreground-muted hover:text-foreground-primary disabled:opacity-20 transition-colors"
+                  aria-label={`Move ${movie.title} Up`}
                 >
                   <svg
                     className="h-4 w-4"
@@ -279,9 +284,9 @@ export function RankedChoiceVoter({
                 </button>
                 <button
                   onClick={() => moveDown(idx)}
-                  disabled={idx === order.length - 1}
-                  className="rounded p-0.5 text-foreground-muted hover:text-foreground-primary disabled:opacity-20 transition-colors"
-                  aria-label="Move down"
+                  disabled={isSubmitting || idx === order.length - 1}
+                  className="flex h-11 w-11 items-center justify-center rounded text-foreground-muted hover:text-foreground-primary disabled:opacity-20 transition-colors"
+                  aria-label={`Move ${movie.title} Down`}
                 >
                   <svg
                     className="h-4 w-4"
@@ -318,17 +323,18 @@ export function RankedChoiceVoter({
         })}
       </div>
 
-      <button
+      <Button
+        size="sm"
         onClick={() => onSubmit(order)}
         disabled={isSubmitting || movies.length === 0}
-        className="w-full rounded-md bg-accent-primary px-4 py-2.5 text-sm font-medium text-accent-foreground hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="w-full"
       >
         {isSubmitting
           ? "Submitting..."
           : hasExistingVote
             ? "Update Vote"
             : "Submit Vote"}
-      </button>
+      </Button>
     </div>
   );
 }

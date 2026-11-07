@@ -46,6 +46,7 @@ interface LoaderData {
   summary?: string;
   itemCount: number;
   items: ListItem[];
+  partial: boolean;
   listType: "playlist" | "collection";
 }
 
@@ -98,9 +99,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (type === "playlist") {
     // Get playlist items
     const itemsResult = await client.getPlaylistItems(ratingKey);
-    if (itemsResult.success) {
-      items = itemsResult.data;
-    }
+    if (!itemsResult.success) throw new Response("Could not load the list.", { status: 503 });
+    items = itemsResult.data;
 
     // Get playlist metadata for title
     const playlistsResult = await client.getPlaylists();
@@ -116,9 +116,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } else {
     // Get collection items
     const itemsResult = await client.getCollectionItems(ratingKey);
-    if (itemsResult.success) {
-      items = itemsResult.data;
-    }
+    if (!itemsResult.success) throw new Response("Could not load the list.", { status: 503 });
+    items = itemsResult.data;
 
     // Get collection metadata for title - need to search all libraries
     const librariesResult = await client.getLibraries();
@@ -206,12 +205,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     summary,
     itemCount: listItems.length,
     items: listItems,
+    partial: showMetadataResults.some(result => !result.success),
     listType: type,
   });
 }
 
 export default function ListDetailPage() {
-  const { title, summary, itemCount, items, listType } =
+  const { title, summary, itemCount, items, listType, partial } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
@@ -234,13 +234,13 @@ export default function ListDetailPage() {
       <div className="mb-8">
         <Link
           to="/app/lists"
-          className="mb-4 inline-flex items-center gap-2 text-sm text-foreground-secondary transition-colors hover:text-foreground-primary"
+          className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm text-foreground-secondary transition-colors hover:text-foreground-primary"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Lists
         </Link>
 
-        <Typography variant="title" as="h1" className="mb-2">
+        <Typography variant="title" as="h1" className="mb-2 break-words">
           {title}
         </Typography>
 
@@ -260,10 +260,11 @@ export default function ListDetailPage() {
       </div>
 
       {/* Items grid */}
-      {items.length === 0 ? (
+      {partial && <p role="alert" className="mb-4 text-foreground-secondary">Could not load all the shows in this list.</p>}
+      {items.length === 0 && !partial ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Typography variant="subtitle" className="mb-2">
-            This {listType} is empty
+            This {listType === "playlist" ? "Playlist" : "Collection"} Is Empty
           </Typography>
           <Typography variant="body" className="text-foreground-secondary">
             Add items to this {listType} in Plex to see them here.

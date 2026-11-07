@@ -30,6 +30,8 @@ import { MAX_PICKS_PER_USER ,
   SHOWING_STATUSES,
 } from "~/lib/vote/types";
 import type { Showing, ShowingStatus, VoterIdentity } from "~/lib/vote/types";
+import { buttonStyles } from "~/components/ui";
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
 import { MovieSelector } from "~/components/vote/MovieSelector";
 import { RankedChoiceVoter } from "~/components/vote/RankedChoiceVoter";
 import { GuestIdentity } from "~/components/vote/GuestIdentity";
@@ -128,14 +130,32 @@ export default function ShowingDetail() {
     hasExistingVote ? "results" : "vote"
   );
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [voteJustSubmitted, setVoteJustSubmitted] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  usePageScrollLock(showDeleteConfirm);
+  useEffect(() => {
+    if (!showDeleteConfirm) return;
+    const dialog = deleteDialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, [showDeleteConfirm]);
 
-  const movieFetcher = useFetcher();
-  const voteFetcher = useFetcher();
-  const deleteFetcher = useFetcher();
-  const renameFetcher = useFetcher();
-  const statusFetcher = useFetcher();
+  const movieFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const voteFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const renameFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const statusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const tabsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (voteFetcher.state === "idle" && voteFetcher.data?.success) setActiveTab("results");
+  }, [voteFetcher.state, voteFetcher.data]);
+  useEffect(() => {
+    if (renameFetcher.state === "idle" && renameFetcher.data?.success) setIsEditingName(false);
+  }, [renameFetcher.state, renameFetcher.data]);
+  useEffect(() => {
+    if (deleteFetcher.state === "idle" && deleteFetcher.data?.success) navigate("/private");
+  }, [deleteFetcher.state, deleteFetcher.data, navigate]);
 
   // SSE live updates — connect to event stream for this showing
   useEffect(() => {
@@ -212,11 +232,16 @@ export default function ShowingDetail() {
       )
     : null;
 
-  const copyLink = useCallback(() => {
+  const copyLink = useCallback(async () => {
     const url = `${window.location.origin}/private/${showing.id}`;
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setShareError(null);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setShareError("Could not copy the link. Copy this page address to share the showing.");
+    }
   }, [showing.id]);
 
   const handleToggleWatched = (ratingKey: string) => {
@@ -225,7 +250,6 @@ export default function ShowingDetail() {
       action: "/api/vote/movies",
       encType: "application/json",
     });
-    setTimeout(() => revalidator.revalidate(), 300);
   };
 
   const handleRemoveMovie = (ratingKey: string) => {
@@ -234,7 +258,6 @@ export default function ShowingDetail() {
       action: "/api/vote/movies",
       encType: "application/json",
     });
-    setTimeout(() => revalidator.revalidate(), 300);
   };
 
   const handleVoteSubmit = (rankings: string[]) => {
@@ -250,13 +273,7 @@ export default function ShowingDetail() {
         encType: "application/json",
       }
     );
-    // Animate to results tab after a short delay
-    setVoteJustSubmitted(true);
-    setTimeout(() => {
-      revalidator.revalidate();
-      setActiveTab("results");
-      setTimeout(() => setVoteJustSubmitted(false), 600);
-    }, 400);
+
   };
 
   const handleDelete = () => {
@@ -278,8 +295,6 @@ export default function ShowingDetail() {
         encType: "application/json",
       }
     );
-    setIsEditingName(false);
-    setTimeout(() => revalidator.revalidate(), 300);
   };
 
   const confirmDelete = () => {
@@ -288,8 +303,7 @@ export default function ShowingDetail() {
       action: "/api/vote/showings",
       encType: "application/json",
     });
-    setShowDeleteConfirm(false);
-    navigate("/private");
+
   };
 
   const existingKeys = new Set(
@@ -297,12 +311,12 @@ export default function ShowingDetail() {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8 break-words">
       {/* Header — centered */}
       <div className="text-center">
         {isEditingName ? (
           <div>
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex min-w-0 items-center justify-center gap-2">
               <input
                 type="text"
                 value={editedName}
@@ -314,13 +328,16 @@ export default function ShowingDetail() {
                     setIsEditingName(false);
                   }
                 }}
-                className="text-2xl sm:text-3xl font-bold text-foreground-primary bg-transparent border-b-2 border-accent-primary outline-none max-w-md"
+                aria-label="Showing Name"
+                disabled={renameFetcher.state !== "idle"}
+                className="min-w-0 w-full max-w-md text-2xl sm:text-3xl font-bold text-foreground-primary bg-transparent border-b-2 border-accent-primary outline-none"
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
               />
               <button
                 onClick={handleRename}
-                className="rounded-md p-1.5 text-green-400 hover:bg-green-500/10 transition-colors"
+                disabled={renameFetcher.state !== "idle"}
+                className={buttonStyles({ variant: "ghost", size: "sm", className: "shrink-0 !text-green-300" })}
                 title="Save"
               >
                 <svg
@@ -342,7 +359,8 @@ export default function ShowingDetail() {
                   setEditedName(showing.name);
                   setIsEditingName(false);
                 }}
-                className="rounded-md p-1.5 text-foreground-muted hover:bg-white/5 transition-colors"
+                disabled={renameFetcher.state !== "idle"}
+                className={buttonStyles({ variant: "ghost", size: "sm", className: "shrink-0" })}
                 title="Cancel"
               >
                 <svg
@@ -388,6 +406,7 @@ export default function ShowingDetail() {
             <ShowingStatusHeader
               status={(showing.status as ShowingStatus) ?? "work_in_progress"}
               canManage={canManage}
+              pending={statusFetcher.state !== "idle"}
               onStatusChange={(newStatus) => {
                 statusFetcher.submit(
                   JSON.stringify({ showingId: showing.id, status: newStatus }),
@@ -397,31 +416,30 @@ export default function ShowingDetail() {
                     encType: "application/json",
                   }
                 );
-                setTimeout(() => revalidator.revalidate(), 300);
-              }}
+                          }}
             />
-            <div className="relative">
+            <div className="relative px-11">
               {canManage ? (
-                <button
+                <h1><button
                   type="button"
-                  className="text-3xl sm:text-4xl font-bold text-amber-50 text-center uppercase tracking-wide cursor-pointer hover:text-amber-300 transition-colors bg-transparent border-none w-full"
+                  className="min-h-11 text-3xl sm:text-4xl font-bold text-amber-50 text-center break-words tracking-wide cursor-pointer hover:text-amber-300 transition-colors bg-transparent border-none w-full"
                   onClick={() => {
                     setEditedName(showing.name);
                     setIsEditingName(true);
                   }}
-                  title="Click to edit"
+                  title="Edit Showing Name"
                 >
                   {showing.name}
-                </button>
+                </button></h1>
               ) : (
-                <h1 className="text-3xl sm:text-4xl font-bold text-amber-50 text-center uppercase tracking-wide">
+                <h1 className="text-3xl sm:text-4xl font-bold text-amber-50 text-center break-words tracking-wide">
                   {showing.name}
                 </h1>
               )}
               <button
                 onClick={copyLink}
-                className="absolute -right-8 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-foreground-muted hover:text-foreground-primary hover:bg-white/5 transition-colors"
-                title={copied ? "Copied!" : "Share link"}
+                className={buttonStyles({ variant: "ghost", size: "sm", className: "absolute right-0 top-1/2 -translate-y-1/2" })}
+                title={copied ? "Copied!" : "Share Link"}
               >
                 {copied ? (
                   <svg
@@ -458,6 +476,8 @@ export default function ShowingDetail() {
         )}
       </div>
 
+      {(shareError || movieFetcher.data?.error || renameFetcher.data?.error || statusFetcher.data?.error) && <p role="alert" className="text-sm text-red-300">{shareError || movieFetcher.data?.error || renameFetcher.data?.error || statusFetcher.data?.error}</p>}
+
       {/* Movie Grid — Unwatched */}
       <section>
         <div className="flex items-center justify-between mb-4">
@@ -485,8 +505,8 @@ export default function ShowingDetail() {
             {user && (isOwner || currentUserPicks < MAX_PICKS_PER_USER) && (
               <button
                 onClick={() => setShowMovieSelector(true)}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-amber-500/40 text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 transition-colors"
-                title="Add movie"
+                className={buttonStyles({ variant: "secondary", size: "sm" })}
+                title="Add Movie"
               >
                 <svg
                   className="h-4 w-4"
@@ -513,6 +533,7 @@ export default function ShowingDetail() {
                 movie={movie}
                 rank={scoreMap.get(movie.ratingKey)?.rank}
                 canManage={canManage}
+                pending={movieFetcher.state !== "idle"}
                 onToggleWatched={handleToggleWatched}
                 onRemove={handleRemoveMovie}
               />
@@ -546,13 +567,14 @@ export default function ShowingDetail() {
                   });
                 }, 50);
               }}
-              className={`pb-3 text-sm font-medium capitalize transition-colors ${
+              aria-pressed={activeTab === t}
+              className={`min-h-11 pb-3 text-sm font-medium transition-colors ${
                 activeTab === t
                   ? "text-accent-primary border-b-2 border-accent-primary"
                   : "text-foreground-muted hover:text-foreground-primary"
               }`}
             >
-              {t}
+              {{ vote: "Vote", results: "Results", history: "History" }[t]}
             </button>
           ))}
         </div>
@@ -561,12 +583,9 @@ export default function ShowingDetail() {
       {/* Vote Tab */}
       {activeTab === "vote" && (
         <section
-          className={`transition-all duration-300 ${
-            voteJustSubmitted
-              ? "opacity-0 translate-y-4"
-              : "opacity-100 translate-y-0"
-          }`}
+          className="space-y-4"
         >
+          {voteFetcher.data?.error && <p role="alert" className="text-sm text-red-300">{voteFetcher.data.error}</p>}
           {!user && !guestName && (
             <div className="mb-6">
               <GuestIdentity
@@ -587,7 +606,7 @@ export default function ShowingDetail() {
               }))}
               existingRankings={existingVote?.rankings ?? []}
               onSubmit={handleVoteSubmit}
-              isSubmitting={voteFetcher.state === "submitting"}
+              isSubmitting={voteFetcher.state !== "idle"}
             />
           ) : (
             <p className="text-sm text-foreground-muted py-4">
@@ -733,7 +752,7 @@ export default function ShowingDetail() {
                                   {result.score} pts
                                 </span>
                               </div>
-                              <div className="group relative h-2 rounded-full bg-white/10 overflow-hidden flex">
+                              <div className="group relative h-2 rounded-full bg-white/10 flex">
                                 {sorted.map((seg) => (
                                   <div
                                     key={seg.voterKey}
@@ -776,6 +795,7 @@ export default function ShowingDetail() {
                                   </div>
                                 )}
                               </div>
+                              {sorted.length > 0 && <details className="mt-1 text-xs text-foreground-secondary"><summary className="min-h-11 cursor-pointer py-3">Score Breakdown</summary><ul>{sorted.map((seg) => <li key={seg.voterKey}>{seg.voterName}: ranked #{seg.rank} · {seg.points} pts</li>)}</ul></details>}
                             </div>
                           </div>
                         );
@@ -790,16 +810,16 @@ export default function ShowingDetail() {
                           return (
                             <span
                               key={key}
-                              className="flex items-center gap-1.5 text-xs text-foreground-muted"
+                              className="flex min-w-0 max-w-full items-center gap-1.5 text-xs text-foreground-muted"
                             >
                               <span
-                                className="inline-block h-2 w-2 rounded-full"
+                                className="inline-block h-2 w-2 shrink-0 rounded-full"
                                 style={{
                                   backgroundColor:
                                     voterColorMap.get(key) ?? "#888",
                                 }}
                               />
-                              {v.name}
+                              <span className="min-w-0 break-words">{v.name}</span>
                             </span>
                           );
                         })}
@@ -830,6 +850,7 @@ export default function ShowingDetail() {
                     key={movie.ratingKey}
                     movie={movie}
                     canManage={canManage}
+                    pending={movieFetcher.state !== "idle"}
                     onToggleWatched={handleToggleWatched}
                     onRemove={handleRemoveMovie}
                   />
@@ -893,7 +914,7 @@ export default function ShowingDetail() {
             setShowMovieSelector(false);
             revalidator.revalidate();
           }}
-          onMovieAdded={() => {}}
+          onMovieAdded={() => revalidator.revalidate()}
         />
       )}
 
@@ -907,31 +928,34 @@ export default function ShowingDetail() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-xl border border-white/10 bg-background-primary p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-foreground-primary">
+        <dialog ref={deleteDialogRef} aria-labelledby="delete-showing-title" onCancel={(event) => { if (deleteFetcher.state !== "idle") event.preventDefault(); else setShowDeleteConfirm(false); }} className="fixed inset-0 z-50 m-0 hidden h-dvh max-h-none w-screen max-w-none items-start justify-center overflow-y-auto border-0 bg-black/70 p-4 text-foreground-primary open:flex">
+          <div className="my-auto w-full max-w-sm rounded-xl border border-white/10 bg-background-primary p-6 shadow-2xl">
+            <h3 id="delete-showing-title" className="text-lg font-semibold text-foreground-primary">
               Delete Showing
             </h3>
             <p className="mt-2 text-sm text-foreground-muted">
               Are you sure you want to delete &ldquo;{showing.name}&rdquo;? All
               movies, votes, and history will be permanently removed.
             </p>
-            <div className="mt-6 flex justify-end gap-3">
+            {deleteFetcher.data?.error && <p role="alert" className="mt-3 text-sm text-red-300">{deleteFetcher.data.error}</p>}
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="rounded-md px-4 py-2 text-sm text-foreground-secondary hover:text-foreground-primary transition-colors"
+                disabled={deleteFetcher.state !== "idle"}
+                className={buttonStyles({ variant: "ghost", size: "sm" })}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 transition-colors"
+                disabled={deleteFetcher.state !== "idle"}
+                className={buttonStyles({ size: "sm", className: "!bg-red-600 !text-white hover:!bg-red-700" })}
               >
-                Delete
+                {deleteFetcher.state !== "idle" ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );
@@ -945,19 +969,21 @@ function MovieCard({
   movie,
   rank,
   canManage,
+  pending,
   onToggleWatched,
   onRemove,
 }: {
   movie: Showing["movies"][0];
   rank?: number;
   canManage: boolean;
+  pending: boolean;
   onToggleWatched: (ratingKey: string) => void;
   onRemove: (ratingKey: string) => void;
 }) {
   return (
     <div className="group relative">
       <div
-        className={`aspect-[2/3] overflow-hidden rounded-md bg-white/5 ${
+        className={`relative aspect-[2/3] overflow-hidden rounded-md bg-white/5 ${
           movie.watched ? "opacity-60" : ""
         }`}
       >
@@ -995,15 +1021,16 @@ function MovieCard({
 
         {/* Hover actions — icon-only, confined to poster */}
         {canManage && (
-          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+          <div className="absolute inset-0 bg-black/50 opacity-100 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex flex-wrap items-center justify-center gap-1">
             <button
+              disabled={pending}
               onClick={() => onToggleWatched(movie.ratingKey)}
-              className={`rounded-full bg-white/20 p-2 transition-colors ${
+              className={`flex h-11 w-11 items-center justify-center rounded-full bg-white/20 transition-colors disabled:opacity-50 ${
                 movie.watched
                   ? "text-yellow-400 hover:bg-yellow-500/30 hover:text-yellow-300"
                   : "text-green-400 hover:bg-green-500/30 hover:text-green-300"
               }`}
-              title={movie.watched ? "Mark unwatched" : "Mark watched"}
+              title={movie.watched ? "Mark Unwatched" : "Mark Watched"}
             >
               {movie.watched ? (
                 <svg
@@ -1036,8 +1063,9 @@ function MovieCard({
               )}
             </button>
             <button
+              disabled={pending}
               onClick={() => onRemove(movie.ratingKey)}
-              className="rounded-full bg-white/20 p-2 text-red-400 hover:bg-red-500/30 hover:text-red-300 transition-colors"
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 transition-colors"
               title="Remove"
             >
               <svg
@@ -1217,14 +1245,17 @@ function HistoryIcon({ action }: { action: string }) {
 function ShowingStatusHeader({
   status,
   canManage,
+  pending,
   onStatusChange,
 }: {
   status: ShowingStatus;
   canManage: boolean;
+  pending: boolean;
   onStatusChange: (status: ShowingStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const colors = SHOWING_STATUS_COLORS[status];
   const label = SHOWING_STATUS_LABELS[status];
 
@@ -1235,22 +1266,29 @@ function ShowingStatusHeader({
         setOpen(false);
       }
     };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); } };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onEscape);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("keydown", onEscape); };
   }, [open]);
 
   return (
     <div
       className="relative flex items-center justify-center gap-3 mb-3"
       ref={ref}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
+
     >
       <div
         className={`h-px flex-1 max-w-16 bg-gradient-to-r from-transparent ${colors.line}`}
       />
       {canManage ? (
         <button
+          ref={triggerRef}
+          aria-expanded={open}
+          disabled={pending}
           onClick={() => setOpen(!open)}
-          className={`${colors.text} text-xs tracking-[0.25em] uppercase font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity`}
+          className={`${colors.text} min-h-11 text-xs tracking-[0.25em] font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity`}
         >
           {label}
           <svg
@@ -1271,7 +1309,7 @@ function ShowingStatusHeader({
         </button>
       ) : (
         <span
-          className={`${colors.text} text-xs tracking-[0.25em] uppercase font-medium`}
+          className={`${colors.text} text-xs tracking-[0.25em] font-medium`}
         >
           {label}
         </span>
@@ -1288,11 +1326,13 @@ function ShowingStatusHeader({
             return (
               <button
                 key={s}
+                aria-pressed={isActive}
+                disabled={pending}
                 onClick={() => {
                   onStatusChange(s);
                   setOpen(false);
                 }}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-sm transition-colors ${
                   isActive ? "bg-white/5 font-medium" : "hover:bg-white/5"
                 } ${sc.text}`}
               >

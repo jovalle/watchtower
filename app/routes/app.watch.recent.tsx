@@ -22,10 +22,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function RecentLibrary() {
   const { items, error } = useLoaderData<typeof loader>();
   const ranked = [...items].filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
-  return <><WatchNavigation /><Container size="wide" className="py-8">
+  return <><WatchNavigation /><Container size="wide" className="pb-16 pt-6">
     {error && <p role="alert">{error}</p>}
     {!error && !items.length && <p>No recently added titles yet.</p>}
-    {[{ title: "Recently added", entries: items }, { title: "Highest rated recent additions", entries: ranked }].map(({title, entries}) => (
+    {[{ title: "Recently Added", entries: items }, { title: "Highest Rated Recent Additions", entries: ranked }].map(({title, entries}) => (
       <MediaRow key={title} title={title} items={entries} getKey={(item) => item.ratingKey} renderItem={(item) => <Link to={`/app/media/${item.type}/${item.ratingKey}`} className="block w-36 sm:w-44"><img src={item.poster} alt="" className="aspect-[2/3] w-full rounded-md object-cover" loading="lazy" /><p className="mt-2 truncate">{item.title}</p></Link>} />
     ))}
   </Container></>;

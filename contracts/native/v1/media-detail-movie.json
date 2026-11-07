@@ -1,0 +1,202 @@
+{
+  "ratingKey": "5001",
+  "type": "movie",
+  "title": "Test Movie",
+  "year": 2021,
+  "posterUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fthumb%2F1700000000&w=400&h=600",
+  "backdropUrl": "/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2Fart%2F1700000000&w=1280&h=720",
+  "thumbUrl": null,
+  "durationMs": 7260000,
+  "viewOffsetMs": 600000,
+  "viewCount": 0,
+  "leafCount": null,
+  "viewedLeafCount": null,
+  "contentRating": "PG-13",
+  "showTitle": null,
+  "seasonNumber": null,
+  "episodeNumber": null,
+  "parentRatingKey": null,
+  "grandparentRatingKey": null,
+  "external": null,
+  "clearLogoUrl": null,
+  "artworkColors": null,
+  "summary": "A synthetic fixture title.",
+  "tagline": null,
+  "studio": "Fixture Studio",
+  "genres": [
+    "Drama"
+  ],
+  "directors": [
+    "A. Director"
+  ],
+  "cast": [
+    {
+      "name": "An Actor",
+      "role": "Lead",
+      "thumbUrl": null,
+      "id": null
+    }
+  ],
+  "audienceRating": 7.8,
+  "criticRating": null,
+  "userRating": null,
+  "originallyAvailableAt": "2021-05-01",
+  "editionTitle": "Director's Cut",
+  "editions": [
+    {
+      "ratingKey": "5002",
+      "editionTitle": null
+    }
+  ],
+  "guids": {
+    "imdb": "tt0000001",
+    "tmdb": "100",
+    "tvdb": null,
+    "plex": "plex://movie/000000000000000000000001"
+  },
+  "versions": [
+    {
+      "mediaId": "9001",
+      "label": "4K Dolby Vision \u00b7 HEVC \u00b7 TrueHD 7.1",
+      "container": "mkv",
+      "videoCodec": "hevc",
+      "videoProfile": "main 10",
+      "videoResolution": "4k",
+      "width": 3840,
+      "height": 2160,
+      "frameRate": 23.976,
+      "bitDepth": 10,
+      "hdr": "dolby-vision",
+      "bitrateKbps": 62000,
+      "audioCodec": "truehd",
+      "audioChannels": 8,
+      "durationMs": 7260000,
+      "parts": [
+        {
+          "partId": "9101",
+          "index": 0,
+          "durationMs": 3600000,
+          "container": "mkv",
+          "sizeBytes": 27900000000
+        },
+        {
+          "partId": "9102",
+          "index": 1,
+          "durationMs": 3660000,
+          "container": "mkv",
+          "sizeBytes": 28300000000
+        }
+      ],
+      "audioTracks": [
+        {
+          "streamId": "11",
+          "title": "English (TrueHD 7.1)",
+          "language": "English",
+          "languageCode": "eng",
+          "codec": "truehd",
+          "channels": 8,
+          "default": true,
+          "selected": true,
+          "audioDescription": false,
+          "description": null
+        },
+        {
+          "streamId": "12",
+          "title": "English (AC3 2.0 Descriptive)",
+          "language": "English",
+          "languageCode": "eng",
+          "codec": "ac3",
+          "channels": 2,
+          "default": false,
+          "selected": false,
+          "audioDescription": true,
+          "description": null
+        }
+      ],
+      "subtitleTracks": [
+        {
+          "streamId": "21",
+          "title": "English (SRT External)",
+          "language": "English",
+          "languageCode": "eng",
+          "codec": "srt",
+          "format": "text",
+          "external": true,
+          "forced": false,
+          "hearingImpaired": true,
+          "default": false,
+          "selected": false
+        },
+        {
+          "streamId": "22",
+          "title": "English Forced (PGS)",
+          "language": "English",
+          "languageCode": "eng",
+          "codec": "pgs",
+          "format": "image",
+          "external": false,
+          "forced": true,
+          "hearingImpaired": false,
+          "default": true,
+          "selected": false
+        }
+      ],
+      "aspectRatio": 2.35,
+      "dolbyVisionProfile": 8
+    },
+    {
+      "mediaId": "9002",
+      "label": "1080p \u00b7 H.264 \u00b7 AAC 2.0",
+      "container": "mp4",
+      "videoCodec": "h264",
+      "videoProfile": "high",
+      "videoResolution": "1080",
+      "width": 1920,
+      "height": 1080,
+      "frameRate": 23.976,
+      "bitDepth": 8,
+      "hdr": null,
+      "bitrateKbps": 8000,
+      "audioCodec": "aac",
+      "audioChannels": 2,
+      "durationMs": 7260000,
+      "parts": [
+        {
+          "partId": "9201",
+          "index": 0,
+          "durationMs": 7260000,
+          "container": "mp4",
+          "sizeBytes": 7260000000
+        }
+      ],
+      "audioTracks": [
+        {
+          "streamId": "31",
+          "title": "English (AAC Stereo)",
+          "language": "English",
+          "languageCode": "eng",
+          "codec": "aac",
+          "channels": 2,
+          "default": true,
+          "selected": true,
+          "audioDescription": false,
+          "description": null
+        }
+      ],
+      "subtitleTracks": [],
+      "aspectRatio": 1.78,
+      "dolbyVisionProfile": null
+    }
+  ],
+  "markers": [
+    {
+      "type": "credits",
+      "startMs": 7000000,
+      "endMs": 7260000,
+      "final": true
+    }
+  ],
+  "onWatchlist": false,
+  "playable": true,
+  "ratings": []
+}

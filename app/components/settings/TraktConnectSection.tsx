@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { Typography, toast } from "~/components/ui";
+import { buttonStyles } from "~/components/ui/Button";
 import type { TraktConnectionStatus } from "~/lib/trakt/types";
 
 interface DeviceCode {
@@ -18,8 +19,7 @@ async function post(body: Record<string, unknown>) {
   return res.json();
 }
 
-const buttonClass =
-  "flex items-center gap-2 rounded-md border border-border-subtle bg-background-primary px-3 py-1.5 text-sm font-medium text-foreground-primary transition-colors hover:bg-background-elevated disabled:cursor-not-allowed disabled:opacity-50";
+const buttonClass = buttonStyles({ variant: "secondary", size: "sm", className: "gap-2" });
 
 export function TraktConnectSection({
   initial,
@@ -78,8 +78,13 @@ export function TraktConnectSection({
 
   const disconnect = async () => {
     setBusy(true);
-    await post({ intent: "disconnect" }).catch(() => null);
+    setError("");
+    const data = await post({ intent: "disconnect" }).catch(() => ({ error: "Request failed" }));
     setBusy(false);
+    if (!data.ok) {
+      setError(data.error || "Couldn't disconnect Trakt");
+      return;
+    }
     setStatus((s) => ({
       ...s,
       connected: false,
@@ -108,13 +113,13 @@ export function TraktConnectSection({
   return (
     <section className="mt-6 rounded-lg border border-border-subtle bg-background-elevated p-6">
       <Typography variant="subtitle" as="h2" className="mb-2">
-        Trakt account
+        Trakt Account
       </Typography>
 
       {status.connected ? (
         <div className="space-y-4">
           <Typography variant="body" className="text-foreground-secondary">
-            Connected{status.username ? ` as ${status.username}` : ""}.
+            <span className="break-words">Connected{status.username ? ` as ${status.username}` : ""}.</span>
           </Typography>
           <div className="flex items-start justify-between gap-4">
             <label htmlFor="trakt-scrobble" className="cursor-pointer">
@@ -154,14 +159,14 @@ export function TraktConnectSection({
             href={device.verificationUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={`${buttonClass} w-fit`}
+            className={`${buttonClass} max-w-full break-all`}
           >
-            <ExternalLink className="h-4 w-4" />
-            {device.verificationUrl}
+            <ExternalLink className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 break-all">{device.verificationUrl}</span>
           </a>
-          <p className="flex items-center gap-2 text-sm text-foreground-muted">
+          <p role="status" className="flex items-center gap-2 text-sm text-foreground-muted">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Waiting for approval…
+            Waiting for Approval…
           </p>
         </div>
       ) : (
@@ -180,7 +185,7 @@ export function TraktConnectSection({
           </button>
         </div>
       )}
-      {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+      {error && <p role="alert" className="mt-3 break-words text-sm text-red-400">{error}</p>}
     </section>
   );
 }

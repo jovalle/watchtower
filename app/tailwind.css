@@ -14,11 +14,13 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+  html, body {
     scroll-behavior: auto !important;
   }
+  .animate-fadeIn, .animate-slideUp, .animate-scaleIn, .animate-popUp,
+  .animate-bounce, .animate-pulse { animation: none !important; }
+  .animate-spin { animation-duration: 2s !important; }
+  [class*="transition-"] { transition-duration: 0s !important; }
 }
 
 /* Hover-zoom extensions (Imagus, Hover Zoom) key off hovered <img> targets. */
@@ -74,6 +76,8 @@
 
 /* CSS Custom Properties for Design Tokens */
 :root {
+  --app-header-height: 4rem;
+  --app-header-offset: calc(var(--app-header-height) + env(safe-area-inset-top, 0px));
   /* Background tokens */
   --color-background-primary: #0a0a0a;
   --color-background-secondary: #1a1a1a;
@@ -82,11 +86,12 @@
   /* Foreground tokens */
   --color-foreground-primary: #ffffff;
   --color-foreground-secondary: #d1d5db;
-  --color-foreground-muted: #6b7280;
+  --color-foreground-muted: #9ca3af;
 
   /* Accent tokens */
-  --color-accent-primary: #cc7000;
-  --color-accent-hover: #e07c00;
+  --color-accent-primary: #FDBE02;
+  --color-accent-hover: #FFD151;
+  --color-accent-foreground: #1C1C1C;
 
   /* Border tokens */
   --color-border-subtle: #262626;
@@ -102,6 +107,8 @@
   }
 
   html {
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -124,10 +131,15 @@
     /* Prevent pull-to-refresh and overscroll on mobile */
     overscroll-behavior: none;
     /* Safe area padding for notched devices */
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
     padding-bottom: env(safe-area-inset-bottom);
   }
+
+  ::selection {
+    background-color: var(--color-accent-primary);
+    color: var(--color-accent-foreground);
+  }
+  input, textarea { caret-color: var(--color-accent-primary); }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent-primary); }
 
   /* Hide scrollbar for cleaner look */
   ::-webkit-scrollbar {
@@ -147,4 +159,24 @@
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.3);
   }
+}
+
+@layer components {
+  .page-gutter {
+    --page-gutter: 1rem;
+    padding-left: calc(var(--page-gutter) + env(safe-area-inset-left, 0px));
+    padding-right: calc(var(--page-gutter) + env(safe-area-inset-right, 0px));
+  }
+  @media (min-width: 640px) {
+    .page-gutter { --page-gutter: 1.5rem; }
+  }
+  @media (min-width: 1024px) {
+    .page-gutter { --page-gutter: 2rem; }
+  }
+}
+
+/* Full-screen playback owns the viewport rather than the browse scrollbar gutter. */
+html:has([data-player-page]) {
+  overflow: hidden;
+  scrollbar-gutter: auto;
 }

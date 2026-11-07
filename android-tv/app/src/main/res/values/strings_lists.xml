@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lists_no_playlists">No playlists yet.</string>
+    <string name="lists_watchlist_empty">This watchlist is empty.</string>
+    <string name="lists_details_unavailable">Details unavailable</string>
+</resources>

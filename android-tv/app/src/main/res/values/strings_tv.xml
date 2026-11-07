@@ -1,0 +1,10 @@
+<resources>
+    <string name="tv_requests">Requests</string>
+    <string name="tv_issues">Issues</string>
+    <string name="tv_more">More</string>
+    <string name="tv_more_actions">More Actions</string>
+    <string name="tv_exit_playback">Exit Playback</string>
+    <string name="tv_brand">WATCHTOWER</string>
+    <string name="tv_libraries">Libraries</string>
+    <string name="tv_brand_settings">Watchtower settings</string>
+</resources>

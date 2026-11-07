@@ -16,6 +16,7 @@ import { mediaTitles, positiveId } from "~/lib/integrations/seerr-pages.server";
 import {
   actionClass,
   controlClass,
+  inputClass,
   SeerrError,
   SeerrPage,
 } from "~/components/seerr/SeerrPage";
@@ -84,8 +85,8 @@ export default function IssuePage() {
           : "Issue details"
       }
     >
-      <Link to="/app/issues" className="text-accent-primary">
-        ← All issues
+      <Link to="/app/issues" className={controlClass}>
+        All Issues
       </Link>
       {error && <SeerrError error={error} />}
       {item && (
@@ -98,7 +99,7 @@ export default function IssuePage() {
                 disabled={navigation.state !== "idle"}
                 className={controlClass}
               >
-                {item.status === 2 ? "Reopen issue" : "Mark resolved"}
+                {item.status === 2 ? "Reopen Issue" : "Mark Resolved"}
               </button>
             </Form>
           )}
@@ -108,7 +109,7 @@ export default function IssuePage() {
                 key={comment.id}
                 className="rounded-lg border border-border-subtle bg-background-secondary p-5"
               >
-                <p className="mb-2 text-sm text-foreground-secondary">
+                <p className="mb-2 break-words text-sm text-foreground-secondary">
                   {comment.user?.displayName ||
                     comment.user?.username ||
                     "Member"}{" "}
@@ -127,13 +128,13 @@ export default function IssuePage() {
               className="mt-6 space-y-3"
             >
               <label className="flex flex-col gap-2 text-sm">
-                Add a comment
+                Add a Comment
                 <textarea
                   name="message"
                   rows={4}
                   required
                   maxLength={5000}
-                  className={controlClass}
+                  className={inputClass}
                 />
               </label>
               <button
@@ -142,7 +143,7 @@ export default function IssuePage() {
                 disabled={navigation.state !== "idle"}
                 className={actionClass}
               >
-                {navigation.state === "submitting" ? "Saving…" : "Post comment"}
+                {navigation.state === "submitting" ? "Saving…" : "Post Comment"}
               </button>
             </Form>
           )}

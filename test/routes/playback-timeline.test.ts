@@ -64,3 +64,19 @@ it("serializes progress and ignores late reports after seeking backwards or repl
   expect(await (await report({ ...body, state: "stopped", sequence: 4 })).json()).toEqual({ success: true, ignored: true });
   expect(upstream.mock.calls.map(([url]) => new URL(url).searchParams.get("time"))).toEqual(["90000", "10000", "11000"]);
 });
+
+it("keeps same-account devices independent while ordering replacements within a device", async () => {
+  const [tv, browser, browserReplacement] = ["00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012", "00000000-0000-4000-8000-000000000013"];
+  registerPlaybackSession(tv, "77", "http://plex.test:32400", "session-token", "tv-client", "device-tv");
+  registerPlaybackSession(browser, "77", "http://plex.test:32400", "session-token", "browser-client", "device-browser");
+  const upstream = vi.fn().mockImplementation(async () => new Response(null, { status: 200 }));
+  vi.stubGlobal("fetch", upstream);
+  const body = { ratingKey: "77", state: "playing", time: 5000, duration: 200000, sequence: 1 };
+  expect(await (await report({ ...body, session: browser })).json()).toEqual({ success: true });
+  // The newer browser registration must not silence the other device's own progress.
+  expect(await (await report({ ...body, session: tv, time: 7000 })).json()).toEqual({ success: true });
+  registerPlaybackSession(browserReplacement, "77", "http://plex.test:32400", "session-token", "browser-client-2", "device-browser");
+  expect(await (await report({ ...body, session: browserReplacement, time: 9000 })).json()).toEqual({ success: true });
+  expect(await (await report({ ...body, session: browser, state: "stopped", sequence: 2 })).json()).toEqual({ success: true, ignored: true });
+  expect(upstream.mock.calls.map(([url]) => new URL(url).searchParams.get("time"))).toEqual(["5000", "7000", "9000"]);
+});

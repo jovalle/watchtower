@@ -6,7 +6,9 @@
  * All tabs support infinite scroll.
  */
 
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { buttonStyles } from "~/components/ui";
 import { useFetcher } from "@remix-run/react";
 
 interface SearchResult {
@@ -37,12 +39,25 @@ export function MovieSelector({
   maxPicks,
   existingKeys,
   onClose,
+  onMovieAdded,
 }: MovieSelectorProps) {
   const [tab, setTab] = useState<Tab>("recent");
   const [query, setQuery] = useState("");
-  const searchFetcher = useFetcher<{ results: SearchResult[] }>();
+  const searchFetcher = useFetcher<{ results?: SearchResult[]; error?: string }>();
   const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
   const [hideAdded, setHideAdded] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
+  const addingRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    closeButtonRef.current?.focus();
+    return () => dialog?.close();
+  }, []);
 
   // Infinite scroll state
   const [allResults, setAllResults] = useState<SearchResult[]>([]);
@@ -55,13 +70,7 @@ export function MovieSelector({
   // Track which tab+query the fetcher data belongs to
   const currentFetchKey = useRef("");
 
-  // Lock body scroll while modal is open
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, []);
+  usePageScrollLock(true);
 
   // Compute effective picks
   const newLocalAdds = [...justAdded].filter(
@@ -89,7 +98,7 @@ export function MovieSelector({
     const key = `${tab}:${query}`;
     currentFetchKey.current = key;
     setAllResults([]);
-    setHasMore(true);
+    setHasMore(query.length !== 1);
     setLoadingMore(false);
 
     if (query.length >= 2 || query.length === 0) {
@@ -101,7 +110,11 @@ export function MovieSelector({
 
   // Debounced search when query changes
   useEffect(() => {
-    if (query.length >= 2) {
+    if (query.length === 1) {
+      setAllResults([]);
+      setHasMore(false);
+      setLoadingMore(false);
+    } else if (query.length >= 2) {
       const timer = setTimeout(() => {
         const key = `${tab}:${query}`;
         currentFetchKey.current = key;
@@ -128,7 +141,7 @@ export function MovieSelector({
   // Process fetcher results — use fetchCount to detect new responses
   const lastProcessedCount = useRef(0);
   useEffect(() => {
-    if (searchFetcher.state !== "idle" || !searchFetcher.data) return;
+    if (searchFetcher.state !== "idle" || !searchFetcher.data || query.length === 1 || currentFetchKey.current !== `${tab}:${query}`) return;
     // Only process if this is a new response
     if (lastProcessedCount.current === fetchCount.current && !loadingMore)
       return;
@@ -160,6 +173,8 @@ export function MovieSelector({
       (entries) => {
         if (
           entries[0].isIntersecting &&
+          query.length !== 1 &&
+          currentFetchKey.current === `${tab}:${query}` &&
           hasMore &&
           !loadingMore &&
           searchFetcher.state === "idle"
@@ -185,24 +200,36 @@ export function MovieSelector({
   ]);
 
   const isLoading =
-    searchFetcher.state === "loading" && allResults.length === 0;
+    query.length !== 1 && searchFetcher.state === "loading" && allResults.length === 0;
 
-  const handleAdd = (movie: SearchResult) => {
-    fetch("/api/vote/movies", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        showingId,
-        ratingKey: movie.ratingKey,
-        title: movie.title,
-        year: movie.year,
-        posterUrl: movie.posterUrl,
-        summary: movie.summary,
-      }),
-    }).catch(() => {
-      /* best effort */
-    });
-    setJustAdded((prev) => new Set(prev).add(movie.ratingKey));
+  const handleAdd = async (movie: SearchResult) => {
+    if (atLimit || addingRef.current || existingKeys.has(movie.ratingKey) || justAdded.has(movie.ratingKey)) return;
+    addingRef.current = true;
+    setAdding(movie.ratingKey);
+    setError(null);
+    try {
+      const response = await fetch("/api/vote/movies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          showingId,
+          ratingKey: movie.ratingKey,
+          title: movie.title,
+          year: movie.year,
+          posterUrl: movie.posterUrl,
+          summary: movie.summary,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not add this movie. Try again.");
+      setJustAdded((prev) => new Set(prev).add(movie.ratingKey));
+      onMovieAdded();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not add this movie. Try again.");
+    } finally {
+      addingRef.current = false;
+      setAdding(null);
+    }
   };
 
   const displayResults = hideAdded
@@ -218,22 +245,18 @@ export function MovieSelector({
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-start sm:justify-center sm:pt-[8vh] bg-black/80"
-      onClick={onClose}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
-      role="presentation"
+    <dialog
+      ref={dialogRef}
+      className="fixed inset-0 z-50 m-0 hidden h-dvh max-h-none w-screen max-w-none items-end justify-center border-0 bg-black/80 p-0 text-foreground-primary open:flex sm:items-start sm:pt-[8vh] [@media(max-height:480px)]:!pt-0"
+      onCancel={onClose}
+      aria-label="Add Movie"
     >
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <button type="button" tabIndex={-1} aria-label="Dismiss Add Movie" className="absolute inset-0 cursor-default" onClick={onClose} />
       <div
-        className="w-full sm:max-w-2xl h-[85vh] sm:h-auto sm:max-h-[80vh] overflow-hidden rounded-t-xl sm:rounded-xl border border-white/10 bg-background-primary shadow-2xl flex flex-col animate-slideUp"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Add Movie"
+        className="relative w-full sm:max-w-2xl h-[85dvh] sm:h-auto sm:max-h-[80dvh] overflow-hidden rounded-t-xl sm:rounded-xl border border-white/10 bg-background-primary shadow-2xl flex flex-col animate-slideUp [@media(max-height:480px)]:!h-dvh [@media(max-height:480px)]:!max-h-dvh"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 [@media(max-height:480px)]:py-1">
           <div>
             <h2 className="text-lg font-semibold text-foreground-primary">
               Add Movie
@@ -245,18 +268,20 @@ export function MovieSelector({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <label className="flex min-h-11 items-center gap-1.5 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={hideAdded}
                 onChange={(e) => setHideAdded(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-white/30 bg-white/5 text-accent-primary focus:ring-accent-primary focus:ring-offset-0"
               />
-              <span className="text-xs text-foreground-muted">Hide added</span>
+              <span className="text-xs text-foreground-muted">Hide Added</span>
             </label>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
-              className="rounded-md p-1 text-foreground-muted hover:text-foreground-primary transition-colors"
+              aria-label="Close Add Movie"
+              className={buttonStyles({ variant: "ghost", size: "sm" })}
             >
               <svg
                 className="h-5 w-5"
@@ -276,12 +301,13 @@ export function MovieSelector({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-white/10">
+        <div className="flex shrink-0 border-b border-white/10">
           {tabs.map((t) => (
             <button
               key={t.key}
+              aria-pressed={tab === t.key}
               onClick={() => setTab(t.key)}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+              className={`min-h-11 flex-1 py-2.5 text-sm font-medium transition-colors ${
                 tab === t.key
                   ? "text-accent-primary border-b-2 border-accent-primary"
                   : "text-foreground-muted hover:text-foreground-primary"
@@ -293,9 +319,10 @@ export function MovieSelector({
         </div>
 
         {/* Results grid with infinite scroll */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-5 [@media(max-height:480px)]:py-2">
+          {(error || searchFetcher.data?.error) && <p role="alert" className="mb-4 text-sm text-red-300">{error || searchFetcher.data?.error}</p>}
           {isLoading ? (
-            <div className="flex justify-center py-12">
+            <div role="status" aria-label="Loading Movies" className="flex justify-center py-12">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
             </div>
           ) : displayResults.length > 0 ? (
@@ -330,16 +357,10 @@ export function MovieSelector({
                     )}
                     <button
                       onClick={() => handleAdd(movie)}
-                      disabled={atLimit || alreadyAdded}
-                      className={`mt-1 w-full rounded text-xs py-1 font-medium transition-colors ${
-                        alreadyAdded
-                          ? "bg-white/10 text-foreground-muted cursor-not-allowed"
-                          : atLimit
-                          ? "bg-white/10 text-foreground-muted cursor-not-allowed"
-                          : "bg-accent-primary text-accent-foreground hover:bg-accent-hover"
-                      }`}
+                      disabled={atLimit || alreadyAdded || adding !== null}
+                      className={buttonStyles({ size: "sm", variant: alreadyAdded || atLimit ? "ghost" : "primary", className: "mt-1 w-full !px-1" })}
                     >
-                      {alreadyAdded ? "Added" : atLimit ? "Limit" : "Add"}
+                      {adding === movie.ratingKey ? "Adding..." : alreadyAdded ? "Added" : atLimit ? "Limit" : "Add"}
                     </button>
                   </div>
                 );
@@ -349,7 +370,7 @@ export function MovieSelector({
             <p className="py-12 text-center text-sm text-foreground-muted">
               {query.length >= 1 && query.length < 2
                 ? "Type at least 2 characters to search"
-                : "No movies found"}
+                : "No Movies Found"}
             </p>
           )}
           {/* Infinite scroll sentinel */}
@@ -363,7 +384,7 @@ export function MovieSelector({
         </div>
 
         {/* Persistent search bar at bottom */}
-        <div className="border-t border-white/10 px-5 py-3">
+        <div className="shrink-0 border-t border-white/10 px-5 py-3 [@media(max-height:480px)]:py-1">
           <div className="relative">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-foreground-muted"
@@ -379,16 +400,18 @@ export function MovieSelector({
               />
             </svg>
             <input
+              aria-label="Search Movies"
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search movies..."
-              className="w-full rounded-lg border border-white/20 bg-white/5 pl-9 pr-3 py-2.5 text-sm text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+              className="w-full rounded-lg border border-white/20 bg-white/5 pl-9 pr-14 py-3 text-sm text-foreground-primary placeholder:text-foreground-muted focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary"
             />
             {query && (
               <button
                 onClick={() => setQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground-muted hover:text-foreground-primary"
+                aria-label="Clear Search"
+                className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-foreground-secondary hover:text-foreground-primary"
               >
                 <svg
                   className="h-4 w-4"
@@ -408,6 +431,6 @@ export function MovieSelector({
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

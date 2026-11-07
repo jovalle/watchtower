@@ -32,15 +32,15 @@ export function Toaster() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col items-center gap-2"
+      className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 flex-col items-center gap-2"
     >
       {items.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-2 rounded-md border border-border-subtle bg-background-elevated px-4 py-2 text-sm text-foreground-primary shadow-lg"
+          className="flex max-w-full items-center gap-2 rounded-md border border-border-subtle bg-background-elevated px-4 py-2 text-sm text-foreground-primary shadow-lg"
         >
-          <CheckCircle className="h-4 w-4 text-green-500" />
-          {item.message}
+          <CheckCircle aria-hidden className="h-4 w-4 shrink-0 text-green-500" />
+          <span className="min-w-0 break-words">{item.message}</span>
         </div>
       ))}
     </div>

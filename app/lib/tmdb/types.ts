@@ -125,3 +125,30 @@ export interface TMDBFindResult {
   /** TMDB rating (0-10 scale) */
   rating?: number;
 }
+
+export interface TMDBCastMember {
+  id: number;
+  name: string;
+  character?: string;
+}
+
+export interface TMDBPerson {
+  id: number;
+  name: string;
+  biography: string;
+  birthday: string | null;
+  deathday: string | null;
+  place_of_birth: string | null;
+  known_for_department: string | null;
+  profile_path: string | null;
+}
+
+export type TMDBPersonCredit =
+  | (TMDBMovie & { media_type: "movie"; character?: string })
+  | (TMDBShow & { media_type: "tv"; character?: string; adult?: boolean });
+
+export interface TMDBPersonSearchResult {
+  id: number;
+  adult?: boolean;
+  known_for: TMDBPersonCredit[];
+}

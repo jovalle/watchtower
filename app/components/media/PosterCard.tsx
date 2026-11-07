@@ -1,3 +1,4 @@
+import { usePopupBounds } from "~/hooks/usePopupBounds";
 import { useState, useRef, useEffect } from "react";
 import { Play, Plus, Check, Star, List, ExternalLink } from "lucide-react";
 import type { WatchlistSource } from "~/lib/watchlist/types";
@@ -69,6 +70,7 @@ interface PosterCardProps {
   onAddToWatchlist?: () => void;
   /** Whether item is already in watchlist */
   isInWatchlist?: boolean;
+  watchlistPending?: boolean;
   /** Number of times watched (viewCount > 0 = watched for movies) */
   viewCount?: number;
   /** Total episodes (TV shows only - used for watched calculation) */
@@ -99,7 +101,6 @@ interface PosterCardProps {
   ratingKey?: string;
 }
 
-type TooltipPosition = "center" | "left" | "right";
 
 /**
  * Vertical poster card with Netflix-style hover effects.
@@ -121,6 +122,7 @@ export function PosterCard({
   hideHoverPlay = false,
   onAddToWatchlist,
   isInWatchlist = false,
+  watchlistPending = false,
   viewCount = 0,
   leafCount,
   viewedLeafCount,
@@ -142,30 +144,12 @@ export function PosterCard({
     ? (leafCount > 0 && viewedLeafCount >= leafCount)
     : viewCount > 0;
   const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition>("center");
+  const tooltip = usePopupBounds(showTooltip);
   const [listSelectorPosition, setListSelectorPosition] = useState<{ x: number; y: number } | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Calculate tooltip position based on card position in viewport
-  useEffect(() => {
-    if (showTooltip && cardRef.current) {
-      const rect = cardRef.current.getBoundingClientRect();
-      const tooltipWidth = 320; // w-80 = 20rem = 320px
-      const padding = 16;
-
-      // Check if tooltip would overflow left edge
-      if (rect.left < tooltipWidth / 2 + padding) {
-        setTooltipPosition("left");
-      }
-      // Check if tooltip would overflow right edge
-      else if (rect.right + tooltipWidth / 2 + padding > window.innerWidth) {
-        setTooltipPosition("right");
-      } else {
-        setTooltipPosition("center");
-      }
-    }
-  }, [showTooltip]);
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
 
   const handleMouseEnter = () => {
     timeoutRef.current = setTimeout(() => {
@@ -180,14 +164,6 @@ export function PosterCard({
     if (!cardRef.current?.contains(document.activeElement)) setShowTooltip(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick?.();
-    }
-  };
-
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onPlay?.();
@@ -200,42 +176,38 @@ export function PosterCard({
     }
   };
 
+  const listButton = useRef<HTMLButtonElement>(null);
   const handleOpenListSelector = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (ratingKey) {
-      setListSelectorPosition({ x: e.clientX, y: e.clientY });
+      const bounds = e.currentTarget.getBoundingClientRect();
+      setListSelectorPosition({ x: e.detail ? e.clientX : bounds.left, y: e.detail ? e.clientY : bounds.bottom });
     }
   };
 
   const handleCloseListSelector = () => {
+    setShowTooltip(true);
     setListSelectorPosition(null);
-  };
-
-  // Tooltip positioning classes
-  const tooltipPositionClasses = {
-    center: "left-1/2 -translate-x-1/2",
-    left: "left-0",
-    right: "right-0",
+    listButton.current?.focus();
   };
 
   return (
+    <>
     <div
       ref={cardRef}
-      role="button"
-      tabIndex={0}
-      aria-label={`${title}${year ? `, ${year}` : ""}${isWatched ? " (watched)" : ""}`}
-      onClick={onClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       onFocus={() => setShowTooltip(true)}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowTooltip(false); }}
-      onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       className="group relative w-full cursor-pointer"
     >
-      {/* Card container with poster aspect ratio - tooltip only triggers on poster hover */}
+      <button type="button" onClick={onClick}
+        aria-label={`${title}${year ? `, ${year}` : ""}${isWatched ? " (watched)" : ""}`}
+        className="absolute inset-0 z-10 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary" />
+      {/* Poster and quick actions */}
       <div
-        className="relative aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated shadow-lg transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:scale-[1.02] group-hover:shadow-xl group-hover:ring-2 group-hover:ring-white/30"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        className="pointer-events-none relative z-20 aspect-[2/3] overflow-hidden rounded-lg bg-background-elevated shadow-lg transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:scale-[1.02] group-hover:shadow-xl group-hover:ring-2 group-hover:ring-white/30"
       >
         {/* Poster image */}
         <ProxiedImage
@@ -338,7 +310,7 @@ export function PosterCard({
                 </span>
               )}
               {/* User's rating - always show when they've rated the movie (mango star) */}
-              {!showRating && rating !== undefined && rating > 0 && (
+              {(!showRating || !onRatingChange) && rating !== undefined && rating > 0 && (
                 <span className="flex items-center gap-0.5 text-mango">
                   <Star className="h-3 w-3 fill-mango" />
                   {rating.toFixed(1)}
@@ -350,7 +322,7 @@ export function PosterCard({
             )}
           </div>
           {showRating && onRatingChange && (
-            <select aria-label={`Rate ${title}`} value={rating ?? 0} onClick={(event) => event.stopPropagation()} onChange={(event) => onRatingChange(Number(event.target.value))} className="mt-2 min-h-11 w-full rounded border border-border-subtle bg-background-elevated px-2 text-sm">
+            <select aria-label={`Rate ${title}`} value={rating ?? 0} onClick={(event) => event.stopPropagation()} onChange={(event) => onRatingChange(Number(event.target.value))} className="relative z-20 mt-2 min-h-11 w-full rounded border border-border-subtle bg-background-elevated px-2 text-sm">
               <option value={0}>Unrated</option>
               {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value / 2} stars</option>)}
             </select>
@@ -359,13 +331,15 @@ export function PosterCard({
       )}
 
       {/* Hover Tooltip */}
-      {showTooltip && details && (
+      {(showTooltip || listSelectorPosition) && details && (
         <div
-          className={`absolute top-0 z-50 w-80 -translate-y-2 animate-fadeIn ${tooltipPositionClasses[tooltipPosition]}`}
+          ref={tooltip}
+          className="absolute left-1/2 top-0 z-50 w-80 max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-2"
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="overflow-hidden rounded-xl bg-background-elevated shadow-2xl ring-1 ring-white/20">
+          <button type="button" tabIndex={-1} aria-hidden="true" onClick={onClick} className="absolute inset-0 rounded-xl" />
+          <div className="pointer-events-none relative overflow-hidden rounded-xl bg-background-elevated shadow-2xl ring-1 ring-white/20">
             {/* Backdrop image */}
             {details.backdropUrl && (
               <div className="relative h-40 overflow-hidden">
@@ -399,7 +373,7 @@ export function PosterCard({
               )}
 
               {/* Action buttons */}
-              <div className="mb-3 flex items-center gap-2">
+              <div className="mb-3 flex items-center gap-2 [&_button]:pointer-events-auto">
                 {onPlay && <button
                   onClick={handlePlayClick}
                   className="flex min-h-11 items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-white/90"
@@ -412,6 +386,8 @@ export function PosterCard({
                   {/* Add to Playlist button */}
                   {ratingKey && (
                     <button
+                      ref={listButton}
+                      aria-haspopup="dialog"
                       onClick={handleOpenListSelector}
                       className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white transition-colors hover:bg-white/30"
                       aria-label="Add to Playlist"
@@ -433,6 +409,8 @@ export function PosterCard({
                           : "bg-mango text-black hover:bg-mango-hover"
                       }`}
                       aria-label={isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
+                      disabled={watchlistPending}
+                aria-pressed={isInWatchlist}
                       title={isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
                     >
                       {isInWatchlist ? (
@@ -518,7 +496,7 @@ export function PosterCard({
 
               {/* Summary - show full text unless excessively long */}
               {details.summary && (
-                <p className="max-h-32 overflow-y-auto text-xs text-foreground-secondary">
+                <p className="pointer-events-auto max-h-32 overflow-y-auto text-xs text-foreground-secondary">
                   {details.summary}
                 </p>
               )}
@@ -527,6 +505,7 @@ export function PosterCard({
         </div>
       )}
 
+    </div>
       {/* List Selector Modal */}
       {listSelectorPosition && ratingKey && (
         <ListSelectorModal
@@ -536,6 +515,6 @@ export function PosterCard({
           onClose={handleCloseListSelector}
         />
       )}
-    </div>
+    </>
   );
 }

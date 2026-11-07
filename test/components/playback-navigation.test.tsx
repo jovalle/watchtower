@@ -7,6 +7,7 @@ import AppLayout from "~/routes/app";
 vi.mock("@remix-run/react", async () => ({
   ...(await import("react-router-dom")),
   useLoaderData: () => ({ user: {} }),
+  useMatches: () => [],
 }));
 vi.mock("~/components/layout", () => ({ Header: () => null }));
 vi.mock("~/lib/auth/session.server", () => ({}));

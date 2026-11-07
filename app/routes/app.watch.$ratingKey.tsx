@@ -136,6 +136,11 @@ function isMobileDevice(userAgent: string): boolean {
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = await requireServerToken(request);
+  const url = new URL(request.url);
+  if (url.searchParams.has("room") || url.searchParams.has("together")) {
+    throw new Response("Watch Together is unavailable on this server.", { status: 404 });
+  }
+
   const { ratingKey } = params;
 
   if (!ratingKey) {
@@ -166,7 +171,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const isMobile = isMobileDevice(userAgent);
 
   // Parse URL parameters
-  const url = new URL(request.url);
   const queryTime = url.searchParams.get("t");
   const queryTimeMs = queryTime !== null && /^\d+$/.test(queryTime)
     ? Number(queryTime)
@@ -415,7 +419,7 @@ export default function WatchPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black">
+    <div data-player-page className="fixed inset-0 z-50 bg-black">
       <VideoPlayer
         key={streamUrl}
         backTo={playbackBackTo}

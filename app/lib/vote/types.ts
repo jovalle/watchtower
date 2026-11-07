@@ -38,7 +38,7 @@ export const SHOWING_STATUS_COLORS: Record<
   work_in_progress: { text: "text-zinc-400", line: "to-zinc-500/40" },
   now_playing: { text: "text-amber-400", line: "to-amber-500/40" },
   coming_soon: { text: "text-white/80", line: "to-white/30" },
-  completed: { text: "text-amber-600/60", line: "to-amber-700/30" },
+  completed: { text: "text-amber-300/80", line: "to-amber-700/30" },
 };
 
 /** Sort priority — lower number sorts first. */
