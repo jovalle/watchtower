@@ -17,8 +17,30 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
+  android-validation:
+    name: Validate Android TV
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Test and build Android TV
+        working-directory: android-tv
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease --console=plain
+
   release:
     name: Semantic Release
+    needs: android-validation
     runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion == 'success'
     outputs:
@@ -51,10 +73,10 @@ jobs:
         run: |
           bunx semantic-release
           if [ -f .release-version ]; then
-            echo "new_release_published=true" >> $GITHUB_OUTPUT
-            echo "new_release_version=$(cat .release-version)" >> $GITHUB_OUTPUT
+            echo "new_release_published=true" >> "$GITHUB_OUTPUT"
+            echo "new_release_version=$(cat .release-version)" >> "$GITHUB_OUTPUT"
           else
-            echo "new_release_published=false" >> $GITHUB_OUTPUT
+            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
           fi
 
   docker-publish:
@@ -84,10 +106,11 @@ jobs:
 
       - name: Extract version
         id: version
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
         run: |
-          VERSION=${{ needs.release.outputs.new_release_version }}
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "major=${VERSION%%.*}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -104,3 +127,58 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  android-release:
+    name: Publish Signed Android TV APK
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.new_release_version }}
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Fetch Android signing identity
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_ANDROID_TV_IDENTITY_ID }}
+          project-id: 1c2b6cea-09af-462b-8355-91222596c699
+          env-slug: prod
+          secret-path: /android-tv
+          include-imports: false
+      - name: Build signed APK
+        working-directory: android-tv
+        env:
+          RELEASE_VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: |
+          set -eu
+          [[ "$RELEASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+          major=${BASH_REMATCH[1]}; minor=${BASH_REMATCH[2]}; patch=${BASH_REMATCH[3]}
+          (( major < 2100 && minor < 1000 && patch < 1000 ))
+          code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
+          (( code > 3 && code <= 2100000000 ))
+          umask 077
+          export WATCHTOWER_TV_KEYSTORE="$RUNNER_TEMP/watchtower-tv.p12"
+          trap 'rm -f "$WATCHTOWER_TV_KEYSTORE"' EXIT
+          printf '%s' "$WATCHTOWER_TV_KEYSTORE_BASE64" | base64 --decode > "$WATCHTOWER_TV_KEYSTORE"
+          ./gradlew :app:assembleRelease "-Pwatchtower.tv.versionCode=$code" "-Pwatchtower.tv.versionName=$RELEASE_VERSION" --console=plain
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk > "$RUNNER_TEMP/signature.txt"
+          grep -Fqi '23fbc60de55dd8acfe8423a2c163282ef80f7fcd51ebd02a11c52fac75082c4d' "$RUNNER_TEMP/signature.txt"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/watchtower-tv.apk"
+          sha256sum "$RUNNER_TEMP/watchtower-tv.apk" > "$RUNNER_TEMP/watchtower-tv.apk.sha256"
+      - name: Attach APK to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: gh release upload "v$RELEASE_VERSION" "$RUNNER_TEMP/watchtower-tv.apk" "$RUNNER_TEMP/watchtower-tv.apk.sha256"
