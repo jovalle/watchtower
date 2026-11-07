@@ -1,12 +1,13 @@
+import { useWatchlistActions } from "~/hooks/useWatchlistActions";
 /**
  * Authenticated home page - the main landing page for logged-in users.
  * Features a cinematic Billboard component for the hero section with real Plex data.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useRevalidator } from "@remix-run/react";
+import { defer } from "@remix-run/node";
+import { Await, useLoaderData, useNavigate, useRevalidator } from "@remix-run/react";
 import { Plus, ListX, X } from "lucide-react";
 import { Billboard, MediaCard, MediaRow } from "~/components/media";
 import { Container } from "~/components/layout";
@@ -22,8 +23,11 @@ import {
   getUserSettings,
   DEFAULT_PREFERENCES,
 } from "~/lib/settings/storage.server";
-import { createSeerrClient } from "~/lib/integrations/seerr.server";
-import { personalRecommendations } from "~/lib/home.server";
+import {
+  personalRecommendations,
+  resolveTrendingLibraryMatches,
+  splitContinueWatching,
+} from "~/lib/home.server";
 
 
 export const meta: MetaFunction = () => {
@@ -73,8 +77,9 @@ interface LoaderData {
   billboardCandidates: BillboardData[];
   continueWatching: MediaItemView[];
   recentlyAdded: MediaItemView[];
-  extraRows: ExtraRow[];
-  seerrEnabled: boolean;
+  nextRows: ExtraRow[];
+  extraRows: Promise<ExtraRow[]>;
+  logos: Promise<Record<string, string>>;
   feedErrors: string[];
 }
 
@@ -177,10 +182,12 @@ async function getTrendingRow(
   const trending = tmdb ? await tmdb.getTrending() : null;
   if (!trending?.success) return [];
 
-  const items = await Promise.all(
-    trending.data.slice(0, 20).map(async (rec): Promise<RowItem> => {
-      const matches = await client.findByTmdbId(rec.type, rec.id);
-      const match = matches.success ? matches.data[0] : undefined;
+  const resolved = await resolveTrendingLibraryMatches(
+    client,
+    trending.data.slice(0, 20),
+  );
+  const items = resolved.map(
+    ({ recommendation: rec, match }): RowItem => {
       if (match) return libraryRowItem(match);
       return {
         key: `tmdb-${rec.type}-${rec.id}`,
@@ -190,7 +197,7 @@ async function getTrendingRow(
         href: `/app/media/${rec.type}/tmdb-${rec.id}`,
         tmdb: { id: rec.id, type: rec.type, posterUrl: rec.posterUrl },
       };
-    })
+    },
   );
   if (items.length > 0) await setCache(cacheKey, items);
   return items;
@@ -226,40 +233,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
     clientId: env.PLEX_CLIENT_ID,
   });
 
-  const respond = async (data: CachedHomeData) => {
-    const [trending, collections, seerr, recommendations] = await Promise.all([
-      prefs.showTrending && !prefs.discoveryDisabled
-        ? getTrendingRow(extrasClient, token)
-        : [],
-      prefs.showCollections ? getCollectionRows(extrasClient, token) : [],
-      createSeerrClient(),
-      personalRecommendations(extrasClient).catch(() => null),
-    ]);
-    const nextEpisodes = prefs.showContinueWatching ? data.continueWatching.filter((item) => item.type === "episode" && !item.viewOffset && !item.viewCount) : [];
-    const continueItems = prefs.showContinueWatching ? data.continueWatching.filter((item) => !!item.viewOffset) : [];
-    const used = new Set(continueItems.map((item) => item.ratingKey));
-    const extraRows: ExtraRow[] = [
-      ...(nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : []),
-      ...(recommendations ? [{ title: recommendations.title, items: recommendations.items.filter((item) => !used.has(item.ratingKey)).map(libraryRowItem) }] : []),
-      ...(trending.length > 0
-        ? [{ title: "Trending Now", items: trending }]
-        : []),
-      ...collections,
-    ];
-    const uniqueRows = extraRows.map((row) => ({ ...row, items: row.items.filter((item) => {
-      const key = item.ratingKey || item.href;
-      if (used.has(key)) return false;
-      used.add(key);
-      return true;
-    }) })).filter((row) => row.items.length > 0);
-    return json<LoaderData>({
-      billboardCandidates: data.billboardCandidates,
-      continueWatching: continueItems,
-      recentlyAdded: prefs.showRecentlyAdded ? data.recentlyAdded.filter((item) => !used.has(item.ratingKey)) : [],
-      extraRows: uniqueRows,
-      seerrEnabled: seerr !== null,
-      feedErrors: data.feedErrors ?? [],
-    });
+  const respond = (data: CachedHomeData) => {
+    const { nextEpisodes, continuing: continueItems } = splitContinueWatching(
+      prefs.showContinueWatching ? data.continueWatching : [],
+    );
+    const inProgress = new Set(continueItems.map((item) => item.ratingKey));
+    const nextKeys = new Set(nextEpisodes.map((item) => item.ratingKey));
+    const recentlyAdded = prefs.showRecentlyAdded ? data.recentlyAdded.filter((item) => !inProgress.has(item.ratingKey) && !nextKeys.has(item.ratingKey)) : [];
+    const used = new Set([...continueItems, ...nextEpisodes, ...recentlyAdded].map((item) => item.ratingKey));
+    const nextRows: ExtraRow[] = nextEpisodes.length ? [{ title: "Next episodes for you", items: nextEpisodes.map((item) => ({ key: item.ratingKey, title: item.showTitle || item.title, year: item.seasonEpisode, imageUrl: item.backdropUrl, href: `/app/media/episode/${item.ratingKey}`, ratingKey: item.ratingKey })) }] : [];
+    const extraRows = (async () => {
+      const [trending, collections, recommendations] = await Promise.all([
+        prefs.showTrending && !prefs.discoveryDisabled ? getTrendingRow(extrasClient, token).catch(() => []) : [],
+        prefs.showCollections ? getCollectionRows(extrasClient, token).catch(() => []) : [],
+        personalRecommendations(extrasClient).catch(() => null),
+      ]);
+      const rows: ExtraRow[] = [
+        ...(recommendations ? [{ title: recommendations.title, items: recommendations.items.map(libraryRowItem) }] : []),
+        ...(trending.length ? [{ title: "Trending Now", items: trending }] : []),
+        ...collections,
+      ];
+      return rows.map((row) => ({ ...row, items: row.items.filter((item) => {
+        const key = item.ratingKey || item.href;
+        if (used.has(key)) return false;
+        used.add(key);
+        return true;
+      }) })).filter((row) => row.items.length > 0);
+    })();
+    const logos = (async () => {
+      const tmdb = prefs.discoveryDisabled ? null : createTMDBClient();
+      if (!tmdb) return {};
+      const items = [...data.continueWatching, ...data.recentlyAdded.slice(0, 10)];
+      const pairs = await Promise.all(items.map(async (item) => {
+        try {
+          const year = item.year ? parseInt(item.year) : undefined;
+          const logo = item.type === "show" || item.type === "episode"
+            ? await tmdb.getCachedTVLogoUrl(item.showTitle || item.title, year)
+            : await tmdb.getCachedMovieLogoUrl(item.title, year);
+          return [item.ratingKey, logo] as const;
+        } catch { return [item.ratingKey, null] as const; }
+      }));
+      return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => !!pair[1]));
+    })().catch(() => ({}));
+    return defer({ billboardCandidates: data.billboardCandidates, continueWatching: continueItems, recentlyAdded, nextRows, extraRows, logos, feedErrors: data.feedErrors ?? [] } satisfies LoaderData);
   };
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "true";
@@ -314,49 +330,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .filter((item) => item.type === "movie" || item.type === "show")
         .map((item) => transformToView(item, watchlistGuids, false))
     : [];
-
-  // Fetch logos for all items (continue watching + recently added)
-  // Uses local caching to reduce TMDB API calls and bandwidth
-  const tmdbClient = prefs.discoveryDisabled ? null : createTMDBClient();
-  if (!tmdbClient) {
-    console.log(
-      "[Logo] TMDB not configured - skipping logo fetch. Set TMDB_API_KEY in .env"
-    );
-  }
-  if (tmdbClient) {
-    // Helper to fetch logo for an item (uses cache)
-    const fetchLogo = async (item: MediaItemView) => {
-      try {
-        // For episodes, use the show title; for movies/shows, use the item title
-        const titleForLookup = item.showTitle || item.title;
-        const isShow = item.type === "show" || item.type === "episode";
-
-        // Use cached methods - downloads and stores logos locally
-        const logoUrl = isShow
-          ? await tmdbClient.getCachedTVLogoUrl(
-              titleForLookup,
-              item.year ? parseInt(item.year) : undefined
-            )
-          : await tmdbClient.getCachedMovieLogoUrl(
-              item.title,
-              item.year ? parseInt(item.year) : undefined
-            );
-
-        if (logoUrl) {
-          item.logoUrl = logoUrl;
-        }
-      } catch (error) {
-        // Silently fail - logos are optional
-        console.error(`[Logo] Failed to fetch logo for ${item.title}:`, error);
-      }
-    };
-
-    // Fetch logos in parallel for both sections
-    await Promise.all([
-      ...continueWatching.map(fetchLogo),
-      ...recentlyAdded.slice(0, 10).map(fetchLogo),
-    ]);
-  }
 
   // Build billboard candidates from watchlist items (in library) + recently added
   // This allows the hero to cycle through both
@@ -444,28 +417,38 @@ export default function AppIndex() {
     billboardCandidates,
     continueWatching,
     recentlyAdded,
+    nextRows,
     extraRows,
+    logos,
     feedErrors,
-  } = useLoaderData<typeof loader>();
+  } = useLoaderData<LoaderData>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
+  const [logoUrls, setLogoUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    setLogoUrls({});
+    Promise.resolve(logos).then((result) => { if (active) setLogoUrls(result); }).catch(() => {});
+    return () => { active = false; };
+  }, [logos]);
 
   // Billboard cycling state
   const [billboardIndex, setBillboardIndex] = useState(0);
   const [isBillboardHovered, setIsBillboardHovered] = useState(false);
+  const [billboardFocused, setBillboardFocused] = useState(false);
   const billboard = billboardCandidates[billboardIndex] || null;
 
   // Cycle through billboard candidates every 10 seconds (pauses when hovered)
   useEffect(() => {
     if (billboardCandidates.length <= 1) return;
-    if (isBillboardHovered) return; // Don't cycle when hovered
+    if (isBillboardHovered || billboardFocused) return;
 
     const interval = setInterval(() => {
       setBillboardIndex((prev) => (prev + 1) % billboardCandidates.length);
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [billboardCandidates.length, isBillboardHovered]);
+  }, [billboardCandidates.length, isBillboardHovered, billboardFocused]);
 
   // Revalidate when page becomes visible (returning from video player)
   // This ensures Continue Watching updates after watching something
@@ -480,10 +463,8 @@ export default function AppIndex() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [revalidator]);
 
-  // Local state for optimistic updates
-  const [localWatchlistState, setLocalWatchlistState] = useState<
-    Record<string, boolean>
-  >({});
+  const watchlist = useWatchlistActions();
+  const [actionError, setActionError] = useState("");
   const [removedFromContinueWatching, setRemovedFromContinueWatching] =
     useState<Set<string>>(new Set());
 
@@ -507,13 +488,7 @@ export default function AppIndex() {
   };
 
   const handleCardClick = (item: MediaItemView) => {
-    const mediaType = item.type === "episode" ? "show" : item.type;
-    // For episodes, navigate to the show's detail page
-    const ratingKey =
-      item.type === "episode" && item.showTitle
-        ? item.ratingKey // Would need grandparentRatingKey for show page
-        : item.ratingKey;
-    navigate(`/app/media/${mediaType}/${ratingKey}`);
+    navigate(`/app/media/${item.type}/${item.ratingKey}`);
   };
 
   const handleContextMenu = useCallback(
@@ -531,53 +506,9 @@ export default function AppIndex() {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  const handleAddToWatchlist = useCallback(async (item: MediaItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({
-          ...prev,
-          [item.ratingKey]: false,
-        }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-    }
-  }, []);
-
-  const handleRemoveFromWatchlist = useCallback(async (item: MediaItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-    }
-  }, []);
-
   const handleRemoveFromContinueWatching = useCallback(
     async (item: MediaItemView) => {
+      setActionError("");
       // Optimistic update - hide from UI immediately
       setRemovedFromContinueWatching((prev) =>
         new Set(prev).add(item.ratingKey)
@@ -594,7 +525,7 @@ export default function AppIndex() {
           // Revalidate data after successful removal
           revalidator.revalidate();
         } else {
-          // Revert on failure
+          setActionError("Could not remove the title from Continue Watching. Try again.");
           setRemovedFromContinueWatching((prev) => {
             const newSet = new Set(prev);
             newSet.delete(item.ratingKey);
@@ -602,7 +533,7 @@ export default function AppIndex() {
           });
         }
       } catch {
-        // Revert on error
+        setActionError("Could not remove the title from Continue Watching. Try again.");
         setRemovedFromContinueWatching((prev) => {
           const newSet = new Set(prev);
           newSet.delete(item.ratingKey);
@@ -613,31 +544,26 @@ export default function AppIndex() {
     [revalidator]
   );
 
-  // Get the effective watchlist state for an item
-  const getIsInWatchlist = (item: MediaItemView): boolean => {
-    if (item.ratingKey in localWatchlistState) {
-      return localWatchlistState[item.ratingKey];
-    }
-    return item.isInWatchlist;
-  };
 
   // Build context menu items for the current item
   const getContextMenuItems = (item: MediaItemView): ContextMenuItem[] => {
-    const isInWatchlist = getIsInWatchlist(item);
+    const isInWatchlist = watchlist.isSaved(item);
     const menuItems: ContextMenuItem[] = [];
 
     if (isInWatchlist) {
       menuItems.push({
         label: "Remove from Watchlist",
         icon: <ListX className="h-4 w-4" />,
-        onClick: () => handleRemoveFromWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
         destructive: true,
       });
     } else {
       menuItems.push({
         label: "Add to Watchlist",
         icon: <Plus className="h-4 w-4" />,
-        onClick: () => handleAddToWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
       });
     }
 
@@ -670,9 +596,10 @@ export default function AppIndex() {
           year={billboard.year}
           rating={billboard.rating}
           duration={billboard.duration}
-          logoUrl={billboard.logoUrl}
+          logoUrl={logoUrls[billboard.ratingKey] || billboard.logoUrl}
           onPlay={() => handlePlay(billboard.ratingKey)}
           onMoreInfo={() => handleMoreInfo(billboard.type, billboard.ratingKey)}
+          onFocusChange={setBillboardFocused}
           onMouseEnter={() => setIsBillboardHovered(true)}
           onMouseLeave={() => setIsBillboardHovered(false)}
         />
@@ -689,6 +616,7 @@ export default function AppIndex() {
 
       {/* Media rows below the billboard */}
       <Container size="wide" className="relative z-10 -mt-16 space-y-8">
+        {(watchlist.error || actionError) && <p role="alert" className="my-4 text-red-400">{watchlist.error || actionError}</p>}
         {feedErrors.map((message) => <p key={message} role="alert" className="text-red-400">{message}</p>)}
         {/* Continue Watching row */}
         {filteredContinueWatching.length > 0 && (
@@ -702,7 +630,7 @@ export default function AppIndex() {
                 badge={item.seasonEpisode}
                 progress={item.progress}
                 viewCount={item.viewCount}
-                logoUrl={item.logoUrl}
+                logoUrl={logoUrls[item.ratingKey] || item.logoUrl}
                 showProgressBar
                 onClick={() => handleCardClick(item)}
                 onPlay={() => handlePlay(item.ratingKey, item.viewOffset)}
@@ -713,21 +641,20 @@ export default function AppIndex() {
           </MediaRow>
         )}
 
-        {extraRows.map((row, index) => (
-          <MediaRow key={`${index}:${row.title}`} title={row.title}>
-            {row.items.map(({ ratingKey, ...item }) => (
-              <MediaCard
-                key={item.key}
-                imageUrl={item.imageUrl}
-                title={item.title}
-                year={item.year}
-                badge={ratingKey ? undefined : "Not in library"}
-                onClick={() => navigate(item.href)}
-                onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined}
-              />
+        {nextRows.map((row) => <MediaRow key={row.title} title={row.title}>
+          {row.items.map((item) => <MediaCard key={item.key} imageUrl={item.imageUrl} title={item.title} year={item.year} onClick={() => navigate(item.href)} onPlay={item.ratingKey ? () => handlePlay(item.ratingKey!) : undefined} />)}
+        </MediaRow>)}
+        <Suspense fallback={<p role="status">Loading Recommendations…</p>}>
+          <Await resolve={extraRows} errorElement={<p role="alert">Could not load recommendations.</p>}>
+            {(rows) => rows.map((row, index) => (
+              <MediaRow key={`${index}:${row.title}`} title={row.title}>
+                {row.items.map(({ ratingKey, ...item }) => (
+                  <MediaCard key={item.key} imageUrl={item.imageUrl} title={item.title} year={item.year} badge={ratingKey ? undefined : "Not in library"} onClick={() => navigate(item.href)} onPlay={ratingKey ? () => handlePlay(ratingKey) : undefined} />
+                ))}
+              </MediaRow>
             ))}
-          </MediaRow>
-        ))}
+          </Await>
+        </Suspense>
         {/* Recently Added row */}
         {recentlyAdded.length > 0 && (
           <MediaRow title="Recently Added">
@@ -740,18 +667,12 @@ export default function AppIndex() {
                 viewCount={item.viewCount}
                 leafCount={item.leafCount}
                 viewedLeafCount={item.viewedLeafCount}
-                isInWatchlist={getIsInWatchlist(item)}
-                logoUrl={item.logoUrl}
+                isInWatchlist={watchlist.isSaved(item)}
+                logoUrl={logoUrls[item.ratingKey] || item.logoUrl}
                 onClick={() => handleCardClick(item)}
                 onPlay={() => handlePlay(item.ratingKey)}
-                onAddToWatchlist={() => {
-                  const isInWatchlist = getIsInWatchlist(item);
-                  if (isInWatchlist) {
-                    handleRemoveFromWatchlist(item);
-                  } else {
-                    handleAddToWatchlist(item);
-                  }
-                }}
+                watchlistPending={watchlist.isPending(item.ratingKey)}
+                    onAddToWatchlist={() => watchlist.toggle(item)}
                 onContextMenu={(position) => handleContextMenu(item, position)}
               />
             ))}

@@ -1,26 +1,31 @@
+import { useWatchlistActions } from "~/hooks/useWatchlistActions";
 import WatchNavigation from "~/components/library/WatchNavigation";
 /**
  * Movies library page - displays all movies with filtering and sorting.
  * GET /app/movies
  */
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useSearchParams,
   useNavigation,
+  useRevalidator,
   useNavigate,
 } from "@remix-run/react";
 import { Film, Plus, ListX } from "lucide-react";
 import { Container } from "~/components/layout";
 import { PosterCard } from "~/components/media";
 import { LibraryHeader, AlphabetSidebar } from "~/components/library";
-import { ContextMenu, type ContextMenuItem } from "~/components/ui";
+import { Button, ContextMenu, type ContextMenuItem } from "~/components/ui";
 import { requireServerToken, requirePlexToken } from "~/lib/auth/session.server";
 import { PlexClient } from "~/lib/plex/client.server";
 import { env } from "~/lib/env.server";
+import { libraryPage } from "~/lib/library-page";
+import { loadUpstreamLibrary } from "~/lib/upstream-library.server";
+import type { PlexMediaItem } from "~/lib/plex/types";
 
 export const meta: MetaFunction = () => {
   return [
@@ -38,6 +43,7 @@ interface MovieItemView {
   viewCount: number;
   isInWatchlist: boolean;
   // Sort-relevant fields (accessible at top level for sort indicator)
+  criticRating?: number;
   audienceRating?: number;
   userRating?: number;
   releaseDate?: string; // Full date for sorting by date
@@ -59,6 +65,11 @@ interface MovieItemView {
 interface LoaderData {
   items: MovieItemView[];
   libraryKey: string | null;
+  page: number;
+  pages: number;
+  total: number;
+  letters: Record<string, { page: number; ratingKey: string }>;
+  keys: string[];
   currentFilters: {
     sort: string;
     sortDirection: "asc" | "desc";
@@ -110,6 +121,36 @@ function formatReleaseDate(dateStr?: string): string | undefined {
   }
 }
 
+function toView(item: PlexMediaItem, watchlistGuids: Set<string>): MovieItemView {
+  return {
+    ratingKey: item.ratingKey,
+    guid: item.guid,
+    title: item.title,
+    year: item.year?.toString(),
+    posterUrl: buildPosterUrl(item.thumb),
+    viewCount: item.viewCount ?? 0,
+    isInWatchlist: watchlistGuids.has(item.guid),
+    // Sort-relevant fields
+    criticRating: item.rating,
+    audienceRating: item.audienceRating,
+    userRating: item.userRating,
+    releaseDate: item.originallyAvailableAt,
+    addedAt: item.addedAt,
+    details: {
+      backdropUrl: buildBackdropUrl(item.art),
+      releaseDate: formatReleaseDate(item.originallyAvailableAt),
+      runtime: formatRuntime(item.duration),
+      rating: item.contentRating,
+      audienceRating: item.audienceRating?.toFixed(1),
+      userRating: item.userRating?.toFixed(1),
+      genres: item.Genre?.map((g) => g.tag),
+      directors: item.Director?.map((d) => d.tag),
+      cast: item.Role?.map((r) => r.tag),
+      summary: item.summary,
+    },
+  };
+}
+
 export async function loader({
   request,
 }: LoaderFunctionArgs): Promise<Response> {
@@ -117,10 +158,9 @@ export async function loader({
   const plexToken = await requirePlexToken(request);
   const url = new URL(request.url);
 
-  const sort = url.searchParams.get("sort") || "titleSort";
-  const sortDirection = (url.searchParams.get("dir") || "asc") as
-    | "asc"
-    | "desc";
+  const requestedSort = url.searchParams.get("sort") || "titleSort";
+  const sort = SORT_OPTIONS.some((option) => option.value === requestedSort) ? requestedSort : "titleSort";
+  const sortDirection = url.searchParams.get("dir") === "desc" ? "desc" : "asc";
   const filter = url.searchParams.get("filter") || "all";
   const genreFilter = url.searchParams.get("genre") || undefined;
   const yearFilter = url.searchParams.get("year")
@@ -145,7 +185,7 @@ export async function loader({
   const movieLibrary = sections[0];
   if (!movieLibrary) {
     return json<LoaderData>({
-      items: [],
+      ...libraryPage([], null),
       libraryKey: null,
       currentFilters: {
         sort,
@@ -167,114 +207,30 @@ export async function loader({
   }
   const plexFilter = filterParts.length > 0 ? filterParts.join("&") : undefined;
 
-  // Fetch items and watchlist in parallel
-  // Note: Genre filtering is done client-side because Plex API requires genre IDs, not names
-  const [itemsResult, watchlistResult] = await Promise.all([
-    client.getLibraryItemsForSections(sections.map((section) => section.key), {
-      sort: plexSort,
-      filter: plexFilter,
-      // genre: genreFilter, // Disabled - using client-side filtering instead
-      year: yearFilter,
-    }),
+  const requestedPage = Number(url.searchParams.get("page") || 1);
+  const [paged, watchlist] = await Promise.all([
+    loadUpstreamLibrary(client, sections.map((section) => section.key), { sort: plexSort, filter: plexFilter, year: yearFilter, genre: genreFilter }, requestedPage),
     new PlexClient({ serverUrl: env.PLEX_SERVER_URL, token: plexToken, clientId: env.PLEX_CLIENT_ID }).getWatchlist({ type: "movie" }),
   ]);
-
-  if (!itemsResult.success) throw new Response("Could not finish loading your library. Refresh to try again.", { status: 503 });
-
-  // Build a set of GUIDs that are in watchlist for fast lookup
-  const watchlistGuids = new Set(
-    watchlistResult.success ? watchlistResult.data.map((item) => item.guid) : []
-  );
-
-  // Build items list (before genre filtering to extract available filters)
-  const allItems: MovieItemView[] = itemsResult.success
-    ? itemsResult.data.map((item) => ({
-        ratingKey: item.ratingKey,
-        guid: item.guid,
-        title: item.title,
-        year: item.year?.toString(),
-        posterUrl: buildPosterUrl(item.thumb),
-        viewCount: item.viewCount ?? 0,
-        isInWatchlist: watchlistGuids.has(item.guid),
-        // Sort-relevant fields
-        audienceRating: item.audienceRating,
-        userRating: item.userRating,
-        releaseDate: item.originallyAvailableAt,
-        addedAt: item.addedAt,
-        details: {
-          backdropUrl: buildBackdropUrl(item.art),
-          releaseDate: formatReleaseDate(item.originallyAvailableAt),
-          runtime: formatRuntime(item.duration),
-          rating: item.contentRating,
-          audienceRating: item.audienceRating?.toFixed(1),
-          userRating: item.userRating?.toFixed(1),
-          genres: item.Genre?.map((g) => g.tag),
-          directors: item.Director?.map((d) => d.tag),
-          cast: item.Role?.map((r) => r.tag),
-          summary: item.summary,
-        },
-      }))
-    : [];
-
-  // Apply client-side genre filtering (Plex API requires genre IDs, not names)
-  let items = genreFilter
-    ? allItems.filter((item) => item.details.genres?.includes(genreFilter))
-    : allItems;
-
-  // Apply client-side sorting for rating fields (Plex API doesn't handle nulls consistently)
-  if (sort === "audienceRating" || sort === "userRating" || sort === "rating") {
-    const getRatingValue = (item: MovieItemView): number | null => {
-      if (sort === "userRating") return item.userRating ?? null;
-      if (sort === "audienceRating") return item.audienceRating ?? null;
-      // For critic rating, we'd need to add it to the view model if needed
-      return item.audienceRating ?? null;
-    };
-
-    items = [...items].sort((a, b) => {
-      const aVal = getRatingValue(a);
-      const bVal = getRatingValue(b);
-      // Items without ratings go to the end
-      if (aVal === null && bVal === null) return 0;
-      if (aVal === null) return 1;
-      if (bVal === null) return -1;
-      // Sort by rating value
-      return sortDirection === "desc" ? bVal - aVal : aVal - bVal;
-    });
-  }
-
-  // Extract available filter values from raw items (before filtering)
-  // For filtered views, we'd need a separate call to get all genres/years
-  // For now, extract from the current result set
-  const genreSet = new Set<string>();
-  const yearSet = new Set<number>();
-  if (itemsResult.success) {
-    for (const item of itemsResult.data) {
-      if (item.Genre) {
-        for (const g of item.Genre) {
-          genreSet.add(g.tag);
-        }
-      }
-      if (item.year) {
-        yearSet.add(item.year);
-      }
+  if (url.searchParams.has("shuffle") && paged.total) {
+    let choice = Math.floor(Math.random() * paged.total);
+    const part = paged.sections.find((section) => { if (choice < section.total) return true; choice -= section.total; return false; });
+    if (part) {
+      const random = await client.getLibraryPage(part.section, { ...part.query, offset: choice, limit: 1 });
+      if (!random.success || !random.data.items[0]) throw new Response("Could not shuffle your library. Refresh to try again.", { status: 503 });
+      return redirect(`/app/watch/${random.data.items[0].ratingKey}`);
     }
   }
-
+  const watchlistGuids = new Set(watchlist.success ? watchlist.data.map((item) => item.guid) : []);
   return json<LoaderData>({
-    items,
+    items: paged.items.map((item) => toView(item, watchlistGuids)),
+    page: paged.page, pages: paged.pages, total: paged.total, letters: paged.letters,
+    keys: paged.firstKey ? [paged.firstKey] : [],
     libraryKey: movieLibrary.key,
-    currentFilters: {
-      sort,
-      sortDirection,
-      filter,
-      genre: genreFilter,
-      year: yearFilter,
-    },
-    availableFilters: {
-      genres: Array.from(genreSet).sort(),
-      years: Array.from(yearSet).sort((a, b) => b - a), // Descending (newest first)
-    },
+    currentFilters: { sort, sortDirection, filter, genre: genreFilter, year: yearFilter },
+    availableFilters: paged.availableFilters,
   });
+
 }
 
 // Context menu state type
@@ -319,17 +275,16 @@ function getSortIndicator(
 }
 
 export default function MoviesPage() {
-  const { items, libraryKey, currentFilters, availableFilters } =
+  const { items, libraryKey, currentFilters, availableFilters, page, pages, total, letters, keys } =
     useLoaderData<LoaderData>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const navigate = useNavigate();
-  const isLoading = navigation.state === "loading";
+  const isLoading = navigation.state === "loading" && navigation.location?.pathname === "/app/watch/movies";
 
-  // Local state for optimistic updates
-  const [localWatchlistState, setLocalWatchlistState] = useState<
-    Record<string, boolean>
-  >({});
+  const revalidator = useRevalidator();
+  const watchlist = useWatchlistActions();
+  const [actionError, setActionError] = useState("");
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -353,90 +308,41 @@ export default function MoviesPage() {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  const handleAddToWatchlist = useCallback(async (item: MovieItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({
-          ...prev,
-          [item.ratingKey]: false,
-        }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-    }
-  }, []);
-
-  const handleRemoveFromWatchlist = useCallback(async (item: MovieItemView) => {
-    // Optimistic update
-    setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: false }));
-
-    try {
-      const response = await fetch("/api/plex/list", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratingKey: item.ratingKey }),
-      });
-
-      if (!response.ok) {
-        // Revert on failure
-        setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-      }
-    } catch {
-      // Revert on error
-      setLocalWatchlistState((prev) => ({ ...prev, [item.ratingKey]: true }));
-    }
-  }, []);
-
   const handleMarkAsUnwatched = useCallback(async (item: MovieItemView) => {
     try {
-      await fetch("/api/plex/scrobble", {
+      setActionError("");
+      const response = await fetch("/api/plex/scrobble", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ratingKey: item.ratingKey }),
       });
-      // Would need a full reload to show updated state
-      // For now, we just close the menu
+      if (!response.ok) throw new Error();
+      revalidator.revalidate();
     } catch {
-      // Silent fail
+      setActionError("Could not update the watched status. Try again.");
     }
-  }, []);
+  }, [revalidator]);
 
-  // Get the effective watchlist state for an item
-  const getIsInWatchlist = (item: MovieItemView): boolean => {
-    if (item.ratingKey in localWatchlistState) {
-      return localWatchlistState[item.ratingKey];
-    }
-    return item.isInWatchlist;
-  };
 
   // Build context menu items for the current item
   const getContextMenuItems = (item: MovieItemView): ContextMenuItem[] => {
-    const isInWatchlist = getIsInWatchlist(item);
+    const isInWatchlist = watchlist.isSaved(item);
     const menuItems: ContextMenuItem[] = [];
 
     if (isInWatchlist) {
       menuItems.push({
         label: "Remove from Watchlist",
         icon: <ListX className="h-4 w-4" />,
-        onClick: () => handleRemoveFromWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
         destructive: true,
       });
     } else {
       menuItems.push({
         label: "Add to Watchlist",
         icon: <Plus className="h-4 w-4" />,
-        onClick: () => handleAddToWatchlist(item),
+        disabled: watchlist.isPending(item.ratingKey),
+        onClick: () => watchlist.toggle(item),
       });
     }
 
@@ -451,57 +357,42 @@ export default function MoviesPage() {
     return menuItems;
   };
 
-  // Compute available letters for alphabet sidebar
-  const availableLetters = useMemo(() => {
-    const letters = new Set<string>();
-    items.forEach((item) => {
-      const firstChar = item.title.charAt(0).toUpperCase();
-      if (/[A-Z]/.test(firstChar)) {
-        letters.add(firstChar);
-      } else if (/[0-9]/.test(firstChar)) {
-        letters.add("#");
-      }
-    });
-    return Array.from(letters).sort();
-  }, [items]);
-
-  // Refs for letter scrolling
   const gridRef = useRef<HTMLDivElement>(null);
-
-  // Handle letter click for alphabet sidebar
-  const handleLetterClick = useCallback(
-    (letter: string) => {
-      // Find first item that starts with this letter
-      const targetItem = items.find((item) => {
-        const firstChar = item.title.charAt(0).toUpperCase();
-        if (letter === "#") {
-          return /[0-9]/.test(firstChar);
-        }
-        return firstChar === letter;
-      });
-
-      if (targetItem && gridRef.current) {
-        // Find the element and scroll to it with offset for header
-        const element = gridRef.current.querySelector(
-          `[data-rating-key="${targetItem.ratingKey}"]`
-        );
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          const headerOffset = 120; // Account for fixed header and some padding
-          const targetPosition = window.scrollY + rect.top - headerOffset;
-          window.scrollTo({ top: targetPosition, behavior: "smooth" });
-        }
-      }
-    },
-    [items]
-  );
+  const scrollToLetter = useCallback((letter: string) => {
+    const target = letters[letter];
+    const element = [...(gridRef.current?.querySelectorAll<HTMLElement>("[data-rating-key]") ?? [])].find((node) => node.dataset.ratingKey === target?.ratingKey);
+    if (element) window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().top - 120, behavior: "smooth" });
+  }, [letters]);
+  useEffect(() => {
+    const letter = searchParams.get("letter");
+    if (!isLoading && letter && letters[letter]?.page === page) scrollToLetter(letter);
+  }, [isLoading, letters, page, scrollToLetter, searchParams]);
+  const handleLetterClick = useCallback((letter: string) => {
+    const target = letters[letter];
+    if (!target) return;
+    if (target.page === page && searchParams.get("letter") === letter) { scrollToLetter(letter); return; }
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(target.page));
+    params.set("letter", letter);
+    setSearchParams(params);
+  }, [letters, page, scrollToLetter, searchParams, setSearchParams]);
+  const changePage = (next: number) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(next));
+    params.delete("letter");
+    setSearchParams(params);
+  };
 
   // Handle filter change
   const handleFilterChange = useCallback(
     (filter: string) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (filter === "all") {
         newParams.delete("filter");
+        newParams.delete("genre");
+        newParams.delete("year");
       } else {
         newParams.set("filter", filter);
       }
@@ -512,18 +403,16 @@ export default function MoviesPage() {
 
   // Handle play all
   const handlePlayAll = useCallback(() => {
-    if (items.length > 0) {
-      navigate(`/app/watch/${items[0].ratingKey}`);
-    }
-  }, [items, navigate]);
+    if (keys.length > 0) navigate(`/app/watch/${keys[0]}`);
+  }, [keys, navigate]);
 
-  // Handle shuffle
+  // Request a fresh random item from the complete filtered library.
   const handleShuffle = useCallback(() => {
-    if (items.length > 0) {
-      const randomItem = items[Math.floor(Math.random() * items.length)];
-      navigate(`/app/watch/${randomItem.ratingKey}`);
-    }
-  }, [items, navigate]);
+    if (!total) return;
+    const params = new URLSearchParams(searchParams);
+    params.set("shuffle", String(Date.now()));
+    setSearchParams(params);
+  }, [searchParams, setSearchParams, total]);
 
   // Handle clear all filters
   const handleClearFilters = useCallback(() => {
@@ -538,6 +427,8 @@ export default function MoviesPage() {
   const handleGenreFilter = useCallback(
     (genre: string | undefined) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (genre) {
         newParams.set("genre", genre);
         newParams.delete("year"); // Only one advanced filter at a time
@@ -553,6 +444,8 @@ export default function MoviesPage() {
   const handleYearFilter = useCallback(
     (year: number | undefined) => {
       const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
       if (year) {
         newParams.set("year", year.toString());
         newParams.delete("genre"); // Only one advanced filter at a time
@@ -577,7 +470,7 @@ export default function MoviesPage() {
           {/* Plex-style Library Header */}
           <LibraryHeader
             title="Movies"
-            itemCount={items.length}
+            itemCount={total}
             currentFilter={currentFilters.filter}
             onFilterChange={handleFilterChange}
             currentSort={currentFilters.sort}
@@ -585,6 +478,8 @@ export default function MoviesPage() {
             sortOptions={SORT_OPTIONS}
             onSortChange={(sort, direction) => {
               const newParams = new URLSearchParams(searchParams);
+      newParams.delete("page");
+      newParams.delete("letter");
               newParams.set("sort", sort);
               // Default to descending for rating and date sorts
               const defaultDesc = [
@@ -603,8 +498,8 @@ export default function MoviesPage() {
               newParams.set("dir", newDirection);
               setSearchParams(newParams);
             }}
-            onPlayAll={handlePlayAll}
-            onShuffle={handleShuffle}
+            onPlayAll={keys.length ? handlePlayAll : undefined}
+            onShuffle={total ? handleShuffle : undefined}
             onClearFilters={handleClearFilters}
             genres={availableFilters.genres}
             currentGenre={currentFilters.genre}
@@ -614,32 +509,31 @@ export default function MoviesPage() {
             onYearFilter={handleYearFilter}
           />
 
-          {/* Loading State */}
-          {isLoading && (
-            <div className="mt-8 flex items-center justify-center py-16">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
-            </div>
-          )}
+          {isLoading && <p role="status" className="sr-only">Loading Movies</p>}
 
+          {(watchlist.error || actionError) && <p role="alert" className="my-4 text-red-400">{watchlist.error || actionError}</p>}
           {/* Empty State */}
-          {!isLoading && items.length === 0 && (
+          {items.length === 0 && (
             <div className="mt-8 flex flex-col items-center justify-center py-16 text-center">
               <Film className="mb-4 h-16 w-16 text-foreground-muted" />
               <p className="mb-2 text-lg font-medium text-foreground-primary">
-                No movies found
+                No Movies Found
               </p>
               <p className="text-foreground-secondary">
-                {libraryKey
-                  ? "Your movie library appears to be empty."
-                  : "No movie library found on your Plex server."}
+                {!libraryKey
+                  ? "No movie library found on your Plex server."
+                  : currentFilters.filter !== "all" || currentFilters.genre || currentFilters.year
+                    ? "No titles match your filters. Try clearing them."
+                    : "Your movie library is empty."}
               </p>
             </div>
           )}
 
           {/* Movies Grid - Vertical Posters */}
-          {!isLoading && items.length > 0 && (
+          {items.length > 0 && (
             <div
               ref={gridRef}
+              aria-busy={isLoading}
               className="mt-6 grid grid-cols-3 gap-4 pr-12 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
             >
               {items.map((item) => (
@@ -653,8 +547,8 @@ export default function MoviesPage() {
                     hideHoverPlay
                     viewCount={item.viewCount}
                     rating={item.userRating}
-                    score={item.audienceRating}
-                    isInWatchlist={getIsInWatchlist(item)}
+                    score={isSortingByCriticScore ? item.criticRating : item.audienceRating}
+                    isInWatchlist={watchlist.isSaved(item)}
                     sortIndicator={
                       !isSortingByAudienceScore &&
                       !isSortingByCriticScore &&
@@ -673,14 +567,8 @@ export default function MoviesPage() {
                       navigate(`/app/media/movie/${item.ratingKey}`)
                     }
                     onPlay={() => navigate(`/app/watch/${item.ratingKey}`)}
-                    onAddToWatchlist={() => {
-                      const isInWatchlist = getIsInWatchlist(item);
-                      if (isInWatchlist) {
-                        handleRemoveFromWatchlist(item);
-                      } else {
-                        handleAddToWatchlist(item);
-                      }
-                    }}
+                    watchlistPending={watchlist.isPending(item.ratingKey)}
+                    onAddToWatchlist={() => watchlist.toggle(item)}
                     onContextMenu={(position) =>
                       handleContextMenu(item, position)
                     }
@@ -689,6 +577,12 @@ export default function MoviesPage() {
               ))}
             </div>
           )}
+
+          {pages > 1 && <nav aria-label="Library pages" className="mt-8 flex items-center justify-center gap-4">
+            <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</Button>
+            <span aria-live="polite">Page {page} of {pages}</span>
+            <Button variant="secondary" size="sm" disabled={page === pages} onClick={() => changePage(page + 1)}>Next</Button>
+          </nav>}
 
           {/* Context Menu */}
           {contextMenu.isOpen && contextMenu.item && (
@@ -701,11 +595,10 @@ export default function MoviesPage() {
         </Container>
 
         {/* Alphabet Sidebar */}
-        {!isLoading &&
-          items.length > 0 &&
+        {items.length > 0 &&
           currentFilters.sort.startsWith("titleSort") && (
             <AlphabetSidebar
-              availableLetters={availableLetters}
+              availableLetters={Object.keys(letters)}
               onLetterClick={handleLetterClick}
             />
           )}

@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RequestModal } from "~/components/media/RequestModal";
 const originalShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal");
 const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close");
+beforeEach(() => { vi.spyOn(window, "scrollTo").mockImplementation(() => {}); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const [name, descriptor] of [["showModal", originalShow], ["close", originalClose]] as const) { if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor); else Reflect.deleteProperty(HTMLDialogElement.prototype, name); } });
 it("shows partial and 4K season state, requests the remainder, and refreshes the result", async () => {
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute("open", ""); } });
@@ -15,8 +16,17 @@ it("shows partial and 4K season state, requests the remainder, and refreshes the
   expect(screen.getByText("Season 1: Available")).toBeInTheDocument();
   expect(screen.getByText("Season 2: Not requested")).toBeInTheDocument();
   expect(screen.getByText("4K: Not requested")).toBeInTheDocument();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Request missing seasons" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Request Missing Seasons" })); });
   expect(JSON.parse(upstream.mock.calls[1][1].body)).toEqual({ type: "tv", tmdbId: 42 });
   expect(screen.getByText("Season 2: Requested")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Request missing seasons" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Request Missing Seasons" })).not.toBeInTheDocument();
+});
+
+it("announces a failed request lookup and exposes a single visible close action", async () => {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable:true, value:function (this:HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable:true, value:() => {} });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({error:"Request service unavailable"},{status:503})));
+  render(<RequestModal item={{tmdbId:42,type:"movie",title:"Long".repeat(24),posterUrl:"/poster.svg",tmdbUrl:"/tmdb/42"}} onClose={() => {}} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Request service unavailable");
+  expect(screen.getAllByRole("button",{name:"Close"})).toHaveLength(1);
 });

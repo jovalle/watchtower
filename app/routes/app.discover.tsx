@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link, useLoaderData, useNavigate } from "@remix-run/react";
-import { Container } from "~/components/layout";
+import { Container, PageHeader } from "~/components/layout";
 import { MediaRow } from "~/components/media/MediaRow";
 import { SeerrError } from "~/components/seerr/SeerrPage";
 import { getUserSettings } from "~/lib/settings/storage.server";
@@ -62,19 +62,13 @@ export default function DiscoverPage() {
   const { rows, error } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   return (
-    <Container size="wide" className="space-y-10 pb-16 pt-8">
-      <h1 className="text-3xl font-bold">Discover</h1>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-foreground-secondary">
-          Find your next watch. Request something new.
-        </p>
-        <Link to="/app/search" className="text-accent-primary">
-          Search movies and series →
-        </Link>
-      </div>
+    <Container size="wide" className="pb-16 pt-8">
+      <PageHeader title="Discover" description="Find your next watch. Request something new." actions={<Link to="/app/search" className="inline-flex min-h-11 items-center text-accent-primary">Search Movies and Series →</Link>} />
+      <div className="space-y-10">
       {error && <SeerrError error={error} />}
       {rows.map((row) => (
         <section key={row.title}>
+          {(row.error || !row.items.length) && <h2 className="mb-4 text-2xl font-semibold">{row.title}</h2>}
           {row.error ? (
             <SeerrError error={row.error} />
           ) : row.items.length ? (
@@ -134,6 +128,7 @@ export default function DiscoverPage() {
         </section>
       ))}
 
+      </div>
     </Container>
   );
 }

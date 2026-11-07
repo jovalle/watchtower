@@ -88,7 +88,7 @@ export function CastRow({ title, people, buildPhotoUrl }: CastRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(true);
-  const [isHovered, setIsHovered] = useState(false);
+
 
   const updateArrows = () => {
     const container = scrollRef.current;
@@ -131,8 +131,7 @@ export function CastRow({ title, people, buildPhotoUrl }: CastRowProps) {
   return (
     <div
       className="relative py-4"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+
     >
       {/* Section title */}
       <Typography variant="title" className="mb-4">
@@ -144,12 +143,13 @@ export function CastRow({ title, people, buildPhotoUrl }: CastRowProps) {
         {/* Left navigation arrow */}
         <button
           onClick={() => scroll("left")}
-          className={`absolute left-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white transition-opacity duration-200 hover:bg-black/80 ${
-            isHovered && showLeftArrow
+          className={`absolute left-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white transition-opacity duration-200 hover:bg-black/80 ${
+            showLeftArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"
           }`}
-          aria-label="Scroll left"
+          disabled={!showLeftArrow}
+          aria-label="Scroll Left"
         >
           <ChevronLeft className="h-6 w-6" />
         </button>
@@ -177,12 +177,13 @@ export function CastRow({ title, people, buildPhotoUrl }: CastRowProps) {
         {/* Right navigation arrow */}
         <button
           onClick={() => scroll("right")}
-          className={`absolute right-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white transition-opacity duration-200 hover:bg-black/80 ${
-            isHovered && showRightArrow
+          className={`absolute right-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white transition-opacity duration-200 hover:bg-black/80 ${
+            showRightArrow
               ? "opacity-100"
               : "pointer-events-none opacity-0"
           }`}
-          aria-label="Scroll right"
+          disabled={!showRightArrow}
+          aria-label="Scroll Right"
         >
           <ChevronRight className="h-6 w-6" />
         </button>

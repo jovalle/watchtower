@@ -1,0 +1,173 @@
+package io.github.jovalle.watchtower.tv.playback
+
+import io.github.jovalle.watchtower.tv.api.Marker
+import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
+
+sealed interface PlaybackIntent {
+    data object Play : PlaybackIntent
+    data object Pause : PlaybackIntent
+    data object Toggle : PlaybackIntent
+    data class SeekTo(val positionMs: Long) : PlaybackIntent
+    data class SeekBy(val deltaMs: Long) : PlaybackIntent
+    data object Next : PlaybackIntent
+    data object Previous : PlaybackIntent
+    data object Stop : PlaybackIntent
+    data object StartOver : PlaybackIntent
+}
+
+sealed interface AuthorityDecision {
+    data object Allow : AuthorityDecision
+    data class Deny(val reason: String) : AuthorityDecision
+    data class Redirect(val intent: PlaybackIntent) : AuthorityDecision
+}
+
+fun interface TransportAuthority {
+    fun authorize(intent: PlaybackIntent): AuthorityDecision
+
+    /** Automatic actions (auto-skip, autoplay next) share the transport authorization gate. */
+    fun authorizeAutomatic(intent: PlaybackIntent): AuthorityDecision = authorize(intent)
+}
+
+object SoloAuthority : TransportAuthority {
+    override fun authorize(intent: PlaybackIntent) = AuthorityDecision.Allow
+}
+
+class PlaybackIntentGate(
+    private val authority: TransportAuthority,
+    private val execute: (PlaybackIntent) -> Unit,
+) {
+    fun submitUserIntent(intent: PlaybackIntent): AuthorityDecision = dispatch(intent, authority.authorize(intent))
+
+    fun submitAutomaticIntent(intent: PlaybackIntent): AuthorityDecision = dispatch(intent, authority.authorizeAutomatic(intent))
+
+    private fun dispatch(intent: PlaybackIntent, decision: AuthorityDecision): AuthorityDecision {
+        when (decision) {
+            AuthorityDecision.Allow -> execute(intent)
+            is AuthorityDecision.Redirect -> execute(decision.intent)
+            is AuthorityDecision.Deny -> Unit
+        }
+        return decision
+    }
+
+    fun applyState(block: () -> Unit) = block()
+}
+
+class ScrubController(
+    private val baseStepMs: Long = 10_000,
+) {
+    private var originMs = 0L
+    private var previewMs: Long? = null
+    private var repeatCount = 0
+
+    fun begin(positionMs: Long) {
+        originMs = positionMs
+        previewMs = positionMs
+        repeatCount = 0
+    }
+
+    fun repeat(direction: Int, durationMs: Long): Long {
+        require(direction == -1 || direction == 1)
+        repeatCount += 1
+        val multiplier = when {
+            repeatCount >= 12 -> 6
+            repeatCount >= 5 -> 3
+            else -> 1
+        }
+        val next = (requireNotNull(previewMs) + direction * baseStepMs * multiplier).coerceIn(0, durationMs)
+        previewMs = next
+        return next
+    }
+
+    fun commit(): Long? = previewMs?.also { previewMs = null }
+    fun cancel() { previewMs = null }
+    fun preview(): Long? = previewMs
+}
+
+data class NextCountdown(val startedAtMs: Long, val deadlineMs: Long)
+
+class BingePolicy(private val countdownDurationMs: Long = 10_000) {
+    private val skippedMarkers = mutableSetOf<Pair<Long, Long>>()
+
+    fun skipTarget(positionMs: Long, markers: List<Marker>, autoSkipIntro: Boolean): Long? {
+        if (!autoSkipIntro) return null
+        val marker = markers.firstOrNull { it.type == "intro" && positionMs in it.startMs until it.endMs } ?: return null
+        return marker.endMs.takeIf { skippedMarkers.add(marker.startMs to marker.endMs) }
+    }
+
+    fun nextCountdown(
+        positionMs: Long,
+        durationMs: Long,
+        markers: List<Marker>,
+        hasNext: Boolean,
+        autoPlayNext: Boolean,
+        nowMs: Long,
+    ): NextCountdown? {
+        if (!hasNext || !autoPlayNext) return null
+        val creditsStart = markers.filter { it.type == "credits" }.minOfOrNull(Marker::startMs)
+            ?: (durationMs - 30_000).coerceAtLeast(0)
+        return if (positionMs >= creditsStart) NextCountdown(nowMs, nowMs + countdownDurationMs) else null
+    }
+}
+
+enum class RecoveryAction { DECODER_FALLBACK, RETRY_HLS, SHOW_ERROR }
+
+class RecoveryPolicy {
+    private var decoderFallbackUsed = false
+    private var hlsRetryUsed = false
+
+    fun onFailure(method: String): RecoveryAction = when {
+        method == "direct_play" && !decoderFallbackUsed -> {
+            decoderFallbackUsed = true
+            RecoveryAction.DECODER_FALLBACK
+        }
+        method != "direct_play" && !hlsRetryUsed -> {
+            hlsRetryUsed = true
+            RecoveryAction.RETRY_HLS
+        }
+        else -> RecoveryAction.SHOW_ERROR
+    }
+}
+
+internal fun PlaybackUiState.togglePlayerMenu(target: PlayerMenu): PlaybackUiState =
+    copy(
+        menu = target.takeUnless { menu == it },
+        menuBackStack = if (menu != null && menu != target) menuBackStack + menu else emptyList(),
+        menuReturnFocus = null,
+        controlsVisible = true,
+    )
+
+internal fun PlaybackUiState.backFromPlayerMenu(): PlaybackUiState = copy(
+    menu = menuParent,
+    menuBackStack = menuBackStack.dropLast(1),
+    menuReturnFocus = menu.takeIf { menuParent != null },
+    controlsVisible = true,
+)
+
+internal fun playbackBufferTargetBytes(maxHeapBytes: Long): Int =
+    (maxHeapBytes / 6).coerceIn(16L * 1024 * 1024, 64L * 1024 * 1024).toInt()
+
+internal val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+
+internal fun validatedPlaybackSpeed(value: Float): Float = value.takeIf { it in PLAYBACK_SPEEDS } ?: 1f
+
+enum class SleepTimerOption(val minutes: Int? = null) {
+    OFF, FIFTEEN_MINUTES(15), THIRTY_MINUTES(30), ONE_HOUR(60), TWO_HOURS(120), AFTER_THIS_ITEM,
+}
+
+data class SleepTimerState(val option: SleepTimerOption = SleepTimerOption.OFF, val deadlineElapsedMs: Long? = null) {
+    fun select(value: SleepTimerOption, nowElapsedMs: Long): SleepTimerState =
+        SleepTimerState(value, value.minutes?.let { nowElapsedMs + it * 60_000L })
+
+    fun automaticIntent(nowElapsedMs: Long, itemEnded: Boolean = false): PlaybackIntent? =
+        PlaybackIntent.Stop.takeIf { deadlineElapsedMs?.let { nowElapsedMs >= it } == true || (suppressAutoNext && itemEnded) }
+
+    val suppressAutoNext: Boolean get() = option == SleepTimerOption.AFTER_THIS_ITEM
+
+    fun nextRoute(ratingKey: String): PlayerRoute = PlayerRoute(ratingKey,
+        sleepDeadlineElapsedMs = deadlineElapsedMs, sleepTimerMinutes = option.minutes)
+}
+
+internal fun PlayerRoute.restoredSleepTimer(): SleepTimerState {
+    val option = SleepTimerOption.entries.firstOrNull { it.minutes != null && it.minutes == sleepTimerMinutes }
+    return if (option != null && sleepDeadlineElapsedMs != null && sleepDeadlineElapsedMs >= 0) SleepTimerState(option, sleepDeadlineElapsedMs) else SleepTimerState()
+}

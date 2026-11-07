@@ -1,3 +1,4 @@
+import { usePageScrollLock } from "~/hooks/usePageScrollLock";
 import { useState, useRef, useEffect } from "react";
 import {
   Activity,
@@ -22,6 +23,7 @@ import { useStreamingSessions } from "~/hooks/useStreamingSessions";
 import { useSessionHistory } from "~/hooks/useSessionHistory";
 import { buildPlexImageUrl } from "~/lib/plex/images";
 import type { PlexActiveSession, PlexMediaItem } from "~/lib/plex/types";
+import { buttonStyles } from "~/components/ui/Button";
 
 /**
  * Format duration from milliseconds to human-readable string.
@@ -470,7 +472,7 @@ function SessionCard({ session }: { session: PlexActiveSession }) {
                 <Monitor className="h-3 w-3" />
                 Client
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 break-words text-xs [&>div]:min-w-0">
                 {/* Device */}
                 <div className="text-foreground-muted">
                   Device:{" "}
@@ -530,8 +532,25 @@ type TabType = "active" | "recent";
  * real-time view of what's currently streaming on the Plex server,
  * plus a tab for recent watch history.
  */
-export function StreamingDashboard() {
-  const [isOpen, setIsOpen] = useState(false);
+export function StreamingDashboard({ isOpen, onOpenChange: setIsOpen, triggerClassName }: {
+  isOpen: boolean;
+  onOpenChange(open: boolean): void;
+  triggerClassName: string;
+}) {
+  usePageScrollLock(isOpen && typeof window !== "undefined" && !window.matchMedia("(min-width: 768px)").matches);
+  const panelRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    const trigger = triggerRef.current;
+    if (!isOpen || !panel) return;
+    if (window.matchMedia("(min-width: 768px)").matches) panel.show();
+    else panel.showModal();
+    return () => {
+      panel.close();
+      if (window.matchMedia("(min-width: 768px)").matches) trigger?.focus();
+    };
+  }, [isOpen, setIsOpen]);
   const [activeTab, setActiveTab] = useState<TabType>("active");
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -555,15 +574,15 @@ export function StreamingDashboard() {
 
   // Fetch history when switching to Recent tab (lazy loading)
   useEffect(() => {
-    if (activeTab === "recent" && !historyFetched && !historyLoading) {
+    if (activeTab === "recent" && !historyFetched && !historyLoading && !historyError) {
       refreshHistory();
     }
-  }, [activeTab, historyFetched, historyLoading, refreshHistory]);
+  }, [activeTab, historyFetched, historyLoading, historyError, refreshHistory]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (e.target === panelRef.current || (menuRef.current && !menuRef.current.contains(e.target as Node))) {
         setIsOpen(false);
       }
     };
@@ -575,7 +594,7 @@ export function StreamingDashboard() {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [isOpen]);
+  }, [isOpen, setIsOpen]);
 
   // Close on escape key
   useEffect(() => {
@@ -592,7 +611,7 @@ export function StreamingDashboard() {
     return () => {
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [isOpen]);
+  }, [isOpen, setIsOpen]);
 
   const sessionCount = sessions.length;
   const hasActiveSessions = sessionCount > 0;
@@ -610,14 +629,15 @@ export function StreamingDashboard() {
   };
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="contents md:relative md:block" ref={menuRef}>
       {/* Trigger button */}
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className="relative rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary"
+        className={`relative min-h-11 min-w-11 items-center justify-center rounded-md p-2 text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary ${triggerClassName}`}
         aria-expanded={isOpen}
-        aria-haspopup="true"
-        aria-label={`Streaming activity: ${sessionCount} active ${sessionCount === 1 ? "stream" : "streams"}`}
+        aria-haspopup="dialog"
+        aria-label={`Streaming Activity: ${sessionCount} active ${sessionCount === 1 ? "stream" : "streams"}`}
       >
         <Activity className="h-5 w-5" />
         {/* Active session badge */}
@@ -628,31 +648,24 @@ export function StreamingDashboard() {
         )}
       </button>
 
-      {/* Mobile backdrop */}
-      <div
-        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-200 sm:hidden ${
-          isOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setIsOpen(false)}
-        aria-hidden="true"
-      />
-
       {/* Panel - bottom sheet on mobile, dropdown on desktop */}
-      <div
-        className={`fixed inset-x-0 bottom-0 z-50 flex max-h-[80vh] origin-bottom flex-col rounded-t-2xl bg-background-elevated pb-safe shadow-xl ring-1 ring-border-subtle transition-all duration-300 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:z-auto sm:mt-2 sm:max-h-none sm:w-80 sm:origin-top-right sm:rounded-lg sm:pb-0 ${
+      <dialog
+        ref={panelRef}
+        onCancel={() => setIsOpen(false)}
+        className={`fixed bottom-0 left-0 right-0 top-auto z-50 m-0 w-auto max-w-none border-0 p-0 text-foreground-primary backdrop:bg-black/60 ${isOpen ? "flex" : "hidden"} max-h-[80vh] origin-bottom flex-col rounded-t-2xl bg-background-elevated pb-safe shadow-xl ring-1 ring-border-subtle transition-all duration-300 md:absolute md:inset-auto md:right-0 md:top-full md:z-auto md:mt-2 md:max-h-[calc(100dvh_-_var(--app-header-offset)_-_1rem)] md:w-80 md:origin-top-right md:rounded-lg md:pb-0 ${
           isOpen
-            ? "translate-y-0 scale-100 opacity-100 sm:translate-y-0"
-            : "pointer-events-none translate-y-full scale-100 opacity-0 sm:translate-y-0 sm:scale-95"
+            ? "translate-y-0 scale-100 opacity-100 md:translate-y-0"
+            : "pointer-events-none translate-y-full scale-100 opacity-0 md:translate-y-0 md:scale-95"
         }`}
-        role="menu"
+        aria-label="Streaming Activity"
       >
         {/* Mobile drag handle indicator */}
-        <div className="flex justify-center py-2 sm:hidden">
+        <div className="flex shrink-0 justify-center py-2 md:hidden">
           <div className="h-1 w-10 rounded-full bg-foreground-muted/30" />
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3 sm:pt-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-border-subtle px-4 py-3 md:pt-3">
           <div>
             <h3 className="text-sm font-medium text-foreground-primary">
               Streaming Activity
@@ -669,15 +682,15 @@ export function StreamingDashboard() {
                 e.stopPropagation();
                 handleRefresh();
               }}
-              className="rounded p-1.5 text-foreground-muted transition-colors hover:bg-background-primary hover:text-foreground-secondary"
-              aria-label={activeTab === "active" ? "Refresh sessions" : "Refresh history"}
+              className={buttonStyles({ variant: "ghost", size: "sm" })}
+              aria-label={activeTab === "active" ? "Refresh Sessions" : "Refresh History"}
             >
               <RefreshCw className="h-4 w-4" />
             </button>
             {/* Mobile close button */}
             <button
               onClick={() => setIsOpen(false)}
-              className="rounded p-1.5 text-foreground-muted transition-colors hover:bg-background-primary hover:text-foreground-secondary sm:hidden"
+              className={buttonStyles({ variant: "ghost", size: "sm", className: "md:hidden" })}
               aria-label="Close"
             >
               <X className="h-4 w-4" />
@@ -686,14 +699,15 @@ export function StreamingDashboard() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex border-b border-border-subtle">
+        <div className="flex shrink-0 border-b border-border-subtle">
           <button
             onClick={() => setActiveTab("active")}
-            className={`flex flex-1 items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
+            aria-pressed={activeTab === "active"}
+            className={buttonStyles({ variant: "ghost", size: "sm", className: `flex-1 gap-1.5 rounded-none ${
               activeTab === "active"
-                ? "border-b-2 border-accent-primary text-foreground-primary"
-                : "text-foreground-muted hover:text-foreground-secondary"
-            }`}
+                ? "border-b-2 border-accent-primary !text-foreground-primary"
+                : "!text-foreground-muted hover:!text-foreground-secondary"
+            }` })}
           >
             <Activity className="h-4 w-4" />
             Active
@@ -705,11 +719,12 @@ export function StreamingDashboard() {
           </button>
           <button
             onClick={() => setActiveTab("recent")}
-            className={`flex flex-1 items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
+            aria-pressed={activeTab === "recent"}
+            className={buttonStyles({ variant: "ghost", size: "sm", className: `flex-1 gap-1.5 rounded-none ${
               activeTab === "recent"
-                ? "border-b-2 border-accent-primary text-foreground-primary"
-                : "text-foreground-muted hover:text-foreground-secondary"
-            }`}
+                ? "border-b-2 border-accent-primary !text-foreground-primary"
+                : "!text-foreground-muted hover:!text-foreground-secondary"
+            }` })}
           >
             <History className="h-4 w-4" />
             Recent
@@ -717,21 +732,22 @@ export function StreamingDashboard() {
         </div>
 
         {/* Content - flexible height on mobile, fixed on desktop */}
-        <div className="flex-1 overflow-y-auto sm:max-h-96">
+        <div className="min-h-0 flex-1 overflow-y-auto md:max-h-96">
           {activeTab === "active" ? (
             // Active sessions tab
             isLoading ? (
-              <div className="flex items-center justify-center py-8">
+              <div role="status" className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-foreground-muted" />
+                <span className="sr-only">Loading Sessions…</span>
               </div>
             ) : error ? (
               <div className="px-4 py-8 text-center">
-                <p className="text-sm text-red-400">{error}</p>
+                <p role="alert" className="break-words text-sm text-red-400">{error}</p>
                 <button
                   onClick={refresh}
-                  className="mt-2 text-xs text-foreground-secondary underline hover:text-foreground-primary"
+                  className={buttonStyles({ variant: "secondary", size: "sm", className: "mt-3" })}
                 >
-                  Try again
+                  Try Again
                 </button>
               </div>
             ) : hasActiveSessions ? (
@@ -747,7 +763,7 @@ export function StreamingDashboard() {
               <div className="px-4 py-8 text-center">
                 <Activity className="mx-auto h-8 w-8 text-foreground-muted" />
                 <p className="mt-2 text-sm text-foreground-secondary">
-                  No active streams
+                  No Active Streams
                 </p>
                 <p className="mt-1 text-xs text-foreground-muted">
                   Start watching something on Plex to see it here
@@ -757,17 +773,18 @@ export function StreamingDashboard() {
           ) : (
             // Recent history tab
             historyLoading ? (
-              <div className="flex items-center justify-center py-8">
+              <div role="status" className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-foreground-muted" />
+                <span className="sr-only">Loading History…</span>
               </div>
             ) : historyError ? (
               <div className="px-4 py-8 text-center">
-                <p className="text-sm text-red-400">{historyError}</p>
+                <p role="alert" className="break-words text-sm text-red-400">{historyError}</p>
                 <button
                   onClick={refreshHistory}
-                  className="mt-2 text-xs text-foreground-secondary underline hover:text-foreground-primary"
+                  className={buttonStyles({ variant: "secondary", size: "sm", className: "mt-3" })}
                 >
-                  Try again
+                  Try Again
                 </button>
               </div>
             ) : filteredHistory.length > 0 ? (
@@ -786,7 +803,7 @@ export function StreamingDashboard() {
                     <button
                       onClick={loadMoreHistory}
                       disabled={historyLoadingMore}
-                      className="flex w-full items-center justify-center gap-2 rounded-md bg-background-primary py-2 text-sm text-foreground-secondary transition-colors hover:bg-background-elevated hover:text-foreground-primary disabled:opacity-50"
+                      className={buttonStyles({ variant: "secondary", size: "sm", className: "w-full gap-2" })}
                     >
                       {historyLoadingMore ? (
                         <>
@@ -794,7 +811,7 @@ export function StreamingDashboard() {
                           Loading...
                         </>
                       ) : (
-                        "Load more"
+                        "Load More"
                       )}
                     </button>
                   </div>
@@ -804,7 +821,7 @@ export function StreamingDashboard() {
               <div className="px-4 py-8 text-center">
                 <History className="mx-auto h-8 w-8 text-foreground-muted" />
                 <p className="mt-2 text-sm text-foreground-secondary">
-                  No recent activity
+                  No Recent Activity
                 </p>
                 <p className="mt-1 text-xs text-foreground-muted">
                   Watch history will appear here
@@ -813,7 +830,7 @@ export function StreamingDashboard() {
             )
           )}
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

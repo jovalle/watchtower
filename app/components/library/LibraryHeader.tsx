@@ -1,3 +1,4 @@
+import { usePopupBounds } from "~/hooks/usePopupBounds";
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Play, Shuffle, X, Check, Search } from "lucide-react";
 
@@ -37,7 +38,7 @@ interface LibraryHeaderProps {
   sortOptions?: FilterOption[];
   /** Sort change handler - receives sort value and direction */
   onSortChange?: (sort: string, direction: "asc" | "desc") => void;
-  /** Play all handler */
+  /** Play All handler */
   onPlayAll?: () => void;
   /** Shuffle handler */
   onShuffle?: () => void;
@@ -70,6 +71,7 @@ interface SortDropdownProps {
 function SortDropdown({ value, options, onChange, direction, onDirectionToggle }: SortDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const panel = usePopupBounds(isOpen, "menu");
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -77,43 +79,38 @@ function SortDropdown({ value, options, onChange, direction, onDirectionToggle }
         setIsOpen(false);
       }
     }
+    if (!isOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        dropdownRef.current?.querySelector("button")?.focus();
+      }
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
 
   const currentLabel = options.find((o) => o.value === value)?.label || "Sort";
   const DirectionIcon = direction === "desc" ? ChevronDown : ChevronUp;
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 rounded px-2 py-1 text-sm text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
-      >
+    <div className="relative flex items-center" ref={dropdownRef}>
+      <button onClick={() => setIsOpen(!isOpen)} aria-expanded={isOpen}
+        className="flex min-h-11 items-center gap-1 rounded px-2 text-sm text-foreground-secondary hover:bg-white/10">
         {currentLabel}
-        {onDirectionToggle && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDirectionToggle();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                onDirectionToggle();
-              }
-            }}
-            className="ml-0.5 cursor-pointer"
-          >
-            <DirectionIcon className="h-3.5 w-3.5" />
-          </span>
-        )}
       </button>
+      {onDirectionToggle && <button onClick={onDirectionToggle}
+        aria-label={direction === "desc" ? "Sort Ascending" : "Sort Descending"}
+        className="flex h-11 w-11 items-center justify-center rounded text-foreground-secondary hover:bg-white/10">
+        <DirectionIcon className="h-4 w-4" />
+      </button>}
 
       {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-lg bg-background-elevated py-2 shadow-xl ring-1 ring-white/10">
+        <div ref={panel} className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-y-auto overscroll-contain [&_button]:min-h-11 rounded-lg bg-background-elevated py-2 shadow-xl ring-1 ring-white/10">
           {options.map((option) => (
             <button
               key={option.value}
@@ -158,6 +155,7 @@ function FilterDropdown({
   const [submenu, setSubmenu] = useState<"genre" | "year" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const panel = usePopupBounds(isOpen, "menu");
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -167,9 +165,20 @@ function FilterDropdown({
         setSearchQuery("");
       }
     }
+    if (!isOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        dropdownRef.current?.querySelector("button")?.focus();
+      }
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
 
   // Get current label based on active filters
   const getFilterLabel = () => {
@@ -194,17 +203,18 @@ function FilterDropdown({
   );
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative min-w-0" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 rounded px-2 py-1 text-sm text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
+        aria-expanded={isOpen}
+        className="flex min-h-11 max-w-full items-center gap-1 rounded px-2 py-1 text-sm text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
       >
-        {getFilterLabel()}
+        <span className="truncate">{getFilterLabel()}</span>
         <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[220px] max-h-[400px] overflow-hidden rounded-lg bg-background-elevated shadow-xl ring-1 ring-white/10">
+        <div ref={panel} className="absolute left-0 top-full z-50 mt-1 min-w-[220px] overflow-y-auto overscroll-contain [&_button]:min-h-11 rounded-lg bg-background-elevated shadow-xl ring-1 ring-white/10">
           {submenu ? (
             <div className="flex flex-col">
               {/* Back button */}
@@ -226,6 +236,7 @@ function FilterDropdown({
                   <Search className="h-4 w-4 text-foreground-muted" />
                   <input
                     type="text"
+                    aria-label={submenu === "genre" ? "Search Genres" : "Search Years"}
                     placeholder="Search..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -260,7 +271,7 @@ function FilterDropdown({
               <div className="border-t border-white/10" />
 
               {/* Submenu items */}
-              <div className="max-h-[250px] overflow-y-auto py-1">
+              <div className="py-1">
                 {submenu === "genre" ? (
                   filteredGenres.length > 0 ? (
                     filteredGenres.map((genre) => (
@@ -310,8 +321,6 @@ function FilterDropdown({
               <button
                 onClick={() => {
                   onFilterChange("all");
-                  onGenreFilter?.(undefined);
-                  onYearFilter?.(undefined);
                   setIsOpen(false);
                 }}
                 className="flex w-full items-center justify-between px-3 py-2 text-sm text-foreground-secondary transition-colors hover:bg-white/10"
@@ -411,19 +420,19 @@ export function LibraryHeader({
     <div className="space-y-4">
       {/* Title row */}
       <div className="flex items-center">
-        <h1 className="text-xl font-semibold text-foreground-primary">{title}</h1>
+        <h2 className="flex min-h-11 items-center text-xl font-semibold text-foreground-primary">{title}</h2>
       </div>
 
       {/* Filter breadcrumbs row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {/* Clear filters button (X) - only show when filters active */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {/* Clear Filters button (X) - only show when filters active */}
           {hasActiveFilters && onClearFilters && (
             <button
               onClick={onClearFilters}
-              className="mr-1 flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-foreground-secondary transition-colors hover:bg-white/20 hover:text-foreground-primary"
-              aria-label="Clear filters"
-              title="Clear filters"
+              className="mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-foreground-secondary transition-colors hover:bg-white/20 hover:text-foreground-primary"
+              aria-label="Clear Filters"
+              title="Clear Filters"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -465,9 +474,9 @@ export function LibraryHeader({
           {onPlayAll && (
             <button
               onClick={onPlayAll}
-              className="rounded-full p-2 text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
-              aria-label="Play all"
-              title="Play all"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
+              aria-label="Play All"
+              title="Play All"
             >
               <Play className="h-5 w-5 fill-current" />
             </button>
@@ -475,7 +484,7 @@ export function LibraryHeader({
           {onShuffle && (
             <button
               onClick={onShuffle}
-              className="rounded-full p-2 text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-foreground-secondary transition-colors hover:bg-white/10 hover:text-foreground-primary"
               aria-label="Shuffle"
               title="Shuffle"
             >

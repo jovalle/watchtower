@@ -1,3 +1,4 @@
+import { usePopupBounds } from "~/hooks/usePopupBounds";
 /**
  * Media detail page - displays full metadata for movies, TV shows, seasons, and episodes.
  * GET /app/media/:type/:ratingKey
@@ -31,7 +32,7 @@ import {
 import { Container } from "~/components/layout";
 import { CastRow, MediaCard, MediaRow } from "~/components/media";
 import { TrailerModal } from "~/components/media/TrailerModal";
-import { Typography, Button } from "~/components/ui";
+import { Typography, Button, buttonStyles } from "~/components/ui";
 import {
   requireServerToken,
   requirePlexToken,
@@ -343,7 +344,7 @@ function RatingBadge({
 }: RatingBadgeProps) {
   const [isOpen, setIsOpen] = useState(false);
   const badgeRef = useRef<HTMLButtonElement>(null);
-  const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = usePopupBounds(isOpen);
 
   const config = RATING_CONFIG[type];
 
@@ -369,7 +370,7 @@ function RatingBadge({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
     };
-  }, [isOpen]);
+  }, [isOpen, tooltipRef]);
 
   // Format the lastRatedAt timestamp
   const formatRatedDate = (timestamp: number): string => {
@@ -510,10 +511,13 @@ function RatingBadge({
   return (
     <span className="relative inline-flex">
       <button
+        aria-label={`${config.title}: ${value}`}
+        aria-expanded={isOpen}
+        onKeyDown={(event) => { if (event.key === "Escape") setIsOpen(false); }}
         ref={badgeRef}
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/10"
+        className="flex min-h-11 min-w-11 items-center justify-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/10"
       >
         <Star className={`h-4 w-4 ${config.color}`} />
         <span className="text-foreground-primary">{value}</span>
@@ -521,7 +525,7 @@ function RatingBadge({
       {isOpen && (
         <div
           ref={tooltipRef}
-          className="absolute left-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-subtle bg-background-elevated p-3 shadow-xl"
+          className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-subtle bg-background-elevated p-3 shadow-xl"
         >
           <div className="mb-2 flex items-center gap-2">
             <Star className={`h-4 w-4 ${config.color}`} />
@@ -1119,7 +1123,7 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export default function MediaDetailPage() {
   const data = useLoaderData<typeof loader>();
-  return "external" in data ? <ExternalTitle data={data.external} /> : <LibraryDetail data={data} />;
+  return "external" in data ? <ExternalTitle data={data.external} /> : <LibraryDetail key={`${data.type}:${data.metadata.ratingKey}`} data={data} />;
 }
 
 function LibraryDetail({ data }: { data: LoaderData }) {
@@ -1326,6 +1330,26 @@ function LibraryDetail({ data }: { data: LoaderData }) {
     }
   }, [isInList, isAddingToList, metadata.ratingKey]);
 
+  const watchlistButton = type === "movie" || type === "show" ? (
+    <Button
+      variant="secondary"
+      size="lg"
+      onClick={handleAddToList}
+      disabled={isAddingToList}
+      aria-pressed={isInList}
+      className="w-full sm:w-auto"
+    >
+      {isInList ? <Check className="mr-2 h-5 w-5" aria-hidden="true" /> : <Plus className="mr-2 h-5 w-5" aria-hidden="true" />}
+      {isInList ? "In Watchlist" : "Add to Watchlist"}
+    </Button>
+  ) : null;
+
+  const requestButton = tmdbId && (type === "movie" || type === "show") ? (
+    <Button variant="secondary" size="lg" onClick={() => setRequesting(true)} className="w-full sm:w-auto">
+      Requests & Availability
+    </Button>
+  ) : null;
+
   // Determine display title for episodes
   const displayTitle =
     type === "episode" &&
@@ -1408,7 +1432,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                 </div>
 
                 {/* Info section - centered on mobile, left-aligned on desktop */}
-                <div className="w-full text-center sm:flex-1 sm:pt-2 sm:text-left">
+                <div className="min-w-0 w-full break-words text-center sm:flex-1 sm:pt-2 sm:text-left">
                   {/* Title */}
                   <h1 className="mb-1 text-2xl font-bold text-foreground-primary sm:text-3xl md:text-4xl lg:text-5xl">
                     {type === "season" && showTitle
@@ -1416,7 +1440,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                       : metadata.title}
                   </h1>
 
-                  {type === "show" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
+
                   {/* Season subtitle */}
                   {type === "season" && (
                     <Typography
@@ -1466,7 +1490,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                   </div>
 
                   {/* Action buttons - full width on mobile, inline on desktop */}
-                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                  <div role="group" aria-label="Media Actions" className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                     <Button
                       variant="primary"
                       size="lg"
@@ -1476,31 +1500,11 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                       <Play className="mr-2 h-5 w-5 fill-current" />
                       {playButtonLabel()}
                     </Button>
-                    {/* Watchlist button - only for shows */}
-                    {type === "show" && (
-                      <Button
-                        variant="secondary"
-                        size="lg"
-                        onClick={handleAddToList}
-                        disabled={isAddingToList}
-                        className="w-full sm:w-auto"
-                      >
-                        {isInList ? (
-                          <>
-                            <Check className="mr-2 h-5 w-5 sm:mr-0" />
-                            <span className="sm:hidden">In Watchlist</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="mr-2 h-5 w-5 sm:mr-0" />
-                            <span className="sm:hidden">Add to Watchlist</span>
-                          </>
-                        )}
-                      </Button>
-                    )}
+                    {watchlistButton}
                     {trailerButton}
-                    {/* External Links - hidden on very small screens */}
-                    <div className="hidden gap-2 sm:flex">
+                    {requestButton}
+                    {/* External links use the same secondary action style. */}
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       {tmdbId && (
                         <a
                           href={
@@ -1510,7 +1514,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           }
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex h-11 items-center gap-1.5 rounded-lg bg-[#01b4e4]/20 px-4 text-sm font-medium text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
+                          className={buttonStyles({ variant: "secondary", size: "lg", className: "gap-2" })}
                         >
                           TMDB
                           <ExternalLink className="h-4 w-4" />
@@ -1521,7 +1525,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           href={`https://www.imdb.com/title/${imdbId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex h-11 items-center gap-1.5 rounded-lg bg-[#f5c518]/20 px-4 text-sm font-medium text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
+                          className={buttonStyles({ variant: "secondary", size: "lg", className: "gap-2" })}
                         >
                           IMDb
                           <ExternalLink className="h-4 w-4" />
@@ -1803,7 +1807,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                   )}
 
                   {/* Title and metadata - centered on mobile, left-aligned on desktop */}
-                  <div className="w-full text-center sm:flex-1 sm:pb-2 sm:text-left">
+                  <div className="min-w-0 w-full break-words text-center sm:flex-1 sm:pb-2 sm:text-left">
                     {/* Breadcrumbs for episodes - hidden on mobile */}
                     {breadcrumbs.length > 0 && (
                       <div className="mb-2 hidden sm:block">
@@ -1826,7 +1830,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                       {displayTitle}
                     </h1>
 
-                    {type === "movie" && tmdbId && <button className="my-3 min-h-11 rounded-md border border-border-subtle px-4" onClick={() => setRequesting(true)}>Requests & availability</button>}
+
                     {/* Metadata row - wrapped and centered on mobile */}
                     <div className="mb-4 flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start sm:gap-3 sm:text-base">
                       {type === "episode" && originallyAired && (
@@ -1894,7 +1898,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                     )}
 
                     {/* Action buttons - full width on mobile, inline on desktop */}
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+                    <div role="group" aria-label="Media Actions" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
                       <Button
                         variant="primary"
                         size="lg"
@@ -1919,28 +1923,9 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           From Start
                         </Button>
                       )}
-                      {type === "movie" && (
-                        <Button
-                          variant="secondary"
-                          size="lg"
-                          onClick={handleAddToList}
-                          disabled={isAddingToList}
-                          className="w-full sm:w-auto"
-                        >
-                          {isInList ? (
-                            <>
-                              <Check className="mr-2 h-5 w-5" />
-                              In Watchlist
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="mr-2 h-5 w-5" />
-                              Watchlist
-                            </>
-                          )}
-                        </Button>
-                      )}
+                      {watchlistButton}
                       {trailerButton}
+                    {requestButton}
                     </div>
                   </div>
                 </div>
@@ -2223,7 +2208,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           }
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 rounded-full bg-[#01b4e4]/20 px-3 py-1.5 text-sm text-[#01b4e4] transition-colors hover:bg-[#01b4e4]/30"
+                          className={buttonStyles({ variant: "secondary", size: "md", className: "gap-2" })}
                         >
                           TMDB
                           <ExternalLink className="h-3 w-3" />
@@ -2234,7 +2219,7 @@ function LibraryDetail({ data }: { data: LoaderData }) {
                           href={`https://www.imdb.com/title/${imdbId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 rounded-full bg-[#f5c518]/20 px-3 py-1.5 text-sm text-[#f5c518] transition-colors hover:bg-[#f5c518]/30"
+                          className={buttonStyles({ variant: "secondary", size: "md", className: "gap-2" })}
                         >
                           IMDb
                           <ExternalLink className="h-3 w-3" />

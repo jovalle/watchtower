@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useRevalidator } from "@remix-run/react";
 import { Container } from "~/components/layout";
+import { Button, buttonStyles } from "~/components/ui";
 import { RequestModal } from "./RequestModal";
 
 export interface ExternalTitleData {
@@ -27,7 +28,7 @@ export function ExternalTitle({ data }: { data: ExternalTitleData }) {
     <Container size="wide" className="py-10">
       <div className="flex flex-col gap-8 sm:flex-row">
         {posterUrl && <img src={posterUrl} alt="" className="aspect-[2/3] w-40 self-start rounded-lg object-cover sm:w-64" />}
-        <div className="max-w-2xl space-y-5">
+        <div className="min-w-0 max-w-2xl space-y-5 break-words">
           <p className="text-foreground-secondary">{data.year} · {data.type === "show" ? "Series" : "Movie"}</p>
           <h1 className="text-3xl font-bold sm:text-5xl">{data.title}</h1>
           {data.overview && <p className="text-lg text-foreground-secondary">{data.overview}</p>}
@@ -35,10 +36,10 @@ export function ExternalTitle({ data }: { data: ExternalTitleData }) {
           {(data.status === 4 || data.status === 5) && <p className="text-foreground-secondary">No matching title is accessible in your Plex library yet. Refresh after it has been imported, or check library access with your administrator.</p>}
           {data.requests?.map((request) => <p key={request.id}>Your {request.is4k ? "4K " : ""}request: {request.state}</p>)}
           {data.error && <p role="alert" className="text-red-400">{data.error}</p>}
-          <div className="flex flex-wrap gap-3">
-            {data.requestEnabled && <button onClick={() => setRequesting(true)} className="min-h-11 rounded-md bg-accent-primary px-5 text-background-primary">{data.status === 1 || data.status === 7 ? "Request" : "Requests & availability"}</button>}
-            <button disabled={revalidator.state !== "idle"} onClick={() => revalidator.revalidate()} className="min-h-11 rounded-md border border-border-subtle px-5">Refresh availability</button>
-            <Link to="/app/requests" className="flex min-h-11 items-center rounded-md border border-border-subtle px-5">Your requests</Link>
+          <div role="group" aria-label="Media Actions" className="flex flex-col flex-wrap gap-3 sm:flex-row">
+            {data.requestEnabled && <Button size="lg" onClick={() => setRequesting(true)}>{data.status === 1 || data.status === 7 ? "Request" : "Requests & Availability"}</Button>}
+            <Button variant="secondary" size="lg" disabled={revalidator.state !== "idle"} onClick={() => revalidator.revalidate()}>Refresh Availability</Button>
+            <Link to="/app/requests" className={buttonStyles({ variant: "secondary", size: "lg" })}>Your Requests</Link>
           </div>
         </div>
       </div>

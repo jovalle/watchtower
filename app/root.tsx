@@ -12,6 +12,7 @@ import { json } from "@remix-run/node";
 
 import "./tailwind.css";
 import { Shell } from "~/components/layout";
+import { buttonStyles } from "~/components/ui/Button";
 import { InstallPrompt } from "~/components/pwa";
 import { runStartupChecks } from "~/lib/startup.server";
 
@@ -89,7 +90,7 @@ export default function App() {
 export function ErrorBoundary() {
   const error = useRouteError();
 
-  let title = "Something went wrong";
+  let title = "Something Went Wrong";
   let message = "An unexpected error occurred.";
 
   if (isRouteErrorResponse(error)) {
@@ -102,15 +103,15 @@ export function ErrorBoundary() {
 
   return (
     <Shell>
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
+      <div className="page-gutter flex min-h-screen items-center justify-center py-8">
+        <div className="min-w-0 max-w-xl break-words text-center">
           <h1 className="text-4xl font-bold text-foreground-primary">
             {title}
           </h1>
           <p className="mt-4 text-foreground-muted">{message}</p>
           <a
             href="/"
-            className="mt-8 inline-block rounded-md bg-accent-primary px-6 py-3 text-white transition-colors hover:bg-accent-hover"
+            className={buttonStyles({ className: "mt-8" })}
           >
             Go Home
           </a>

@@ -1,0 +1,40 @@
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { defer } from "@remix-run/node";
+import { afterEach, expect, it, vi } from "vitest";
+import MyStuff from "~/routes/app.stuff";
+import WatchlistPage from "~/routes/app.watchlist";
+import SearchPage from "~/routes/app.search";
+import WatchNavigation from "~/components/library/WatchNavigation";
+import { LibraryHeader } from "~/components/library/LibraryHeader";
+vi.mock("@remix-run/react", async () => await import("react-router-dom"));
+afterEach(cleanup);
+it("keeps one primary heading in a Watch section", () => {
+  const router = createMemoryRouter([{ path: "/app/watch/movies", element: <><WatchNavigation /><LibraryHeader title="Movies" /></> }], {initialEntries:["/app/watch/movies"]});
+  render(<RouterProvider router={router}/>);
+  expect(screen.getAllByRole("heading", {level:1})).toHaveLength(1);
+  expect(screen.getByRole("heading", {level:2,name:"Movies"})).toBeVisible();
+  expect(screen.getByRole("link", {name:"Movies"})).toHaveAttribute("aria-current", "page");
+});
+it.each(["resolve", "reject"] as const)("keeps the Watchlist heading mounted when deferred data %ss", async (outcome) => {
+  let resolve!: (value: unknown) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  const router = createMemoryRouter([{path:"/app/stuff", element:<MyStuff/>, children:[{path:"watchlist", element:<WatchlistPage/>, loader:()=>defer({traktEnabled:false,imdbEnabled:false,watchlistData:promise})}]}], {initialEntries:["/app/stuff/watchlist"]});
+  render(<RouterProvider router={router}/>);
+  const heading = await screen.findByRole("heading", {level:2,name:"Watchlist"});
+  expect(screen.getByRole("button", {name:/Source/})).toBeDisabled();
+  expect(screen.getByRole("combobox", {name:"Sort Watchlist"})).toBeDisabled();
+  const tab = screen.getByRole("link", {name:"Watchlist"});
+  tab.focus();
+  await act(async () => { if(outcome === "reject") reject(new Error("offline")); else resolve({items:[],counts:{plex:0,trakt:0,imdb:0,total:0},isStale:false,cachedAt:0}); });
+  expect(screen.getByRole("heading", {level:2,name:"Watchlist"})).toBe(heading);
+  expect(screen.getAllByRole("heading", {level:1})).toHaveLength(1);
+  expect(tab).toHaveFocus();
+  if(outcome === "reject") expect(screen.getByRole("alert")).toHaveTextContent("Could not refresh");
+});
+it("names the Search page even with empty results", async () => {
+  const router = createMemoryRouter([{path:"/app/search",element:<SearchPage/>,loader:()=>({q:"",library:[],discover:[]})}], {initialEntries:["/app/search"]});
+  render(<RouterProvider router={router}/>);
+  expect(await screen.findByRole("heading", {level:1,name:"Search"})).toBeVisible();
+});

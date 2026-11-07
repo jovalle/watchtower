@@ -263,7 +263,7 @@ async function getPlexWatchlistWithRatings(
   plexClient: PlexClient,
   plexToken: string,
   tmdbClient: TMDBClient | null,
-  buildPlexImageUrl: (thumb: string | undefined, token: string) => string,
+  buildPlexImageUrl: (thumb: string | undefined, token: string, origin: "local" | "discover") => string,
   localItemsByGuid: Map<string, LocalItemData>
 ): Promise<UnifiedWatchlistItem[]> {
   const result = await plexClient.getWatchlist({ sort: "watchlistedAt", sortDir: "desc" });
@@ -275,8 +275,8 @@ async function getPlexWatchlistWithRatings(
   const items = result.data.map((item) => {
     const localItem = localItemsByGuid.get(`${item.type}:${item.guid}`);
     const thumbUrl = localItem?.thumb
-      ? buildPlexImageUrl(localItem.thumb, plexToken)
-      : buildPlexImageUrl(item.thumb, plexToken);
+      ? buildPlexImageUrl(localItem.thumb, plexToken, "local")
+      : buildPlexImageUrl(item.thumb, plexToken, "discover");
     const unified = plexToUnified(item, thumbUrl, localItem?.ratingKey);
     // Use local audienceRating as initial rating (will be overwritten by TMDB if available)
     if (localItem?.audienceRating && !unified.rating) {
@@ -331,7 +331,7 @@ export async function getUnifiedWatchlist(
   traktClient: TraktClient | null,
   tmdbClient: TMDBClient | null,
   filter: WatchlistFilter = "all",
-  buildPlexImageUrl: (thumb: string | undefined, token: string) => string,
+  buildPlexImageUrl: (thumb: string | undefined, token: string, origin: "local" | "discover") => string,
   localItemsByGuid: Map<string, LocalItemData>,
   userSettings?: WatchlistUserSettings
 ): Promise<UnifiedWatchlistResult> {
@@ -420,7 +420,7 @@ export async function getUnifiedWatchlist(
         item.isLocal = true;
         // Update thumb to use local library thumbnail
         if (localItem.thumb) {
-          item.thumb = buildPlexImageUrl(localItem.thumb, plexToken);
+          item.thumb = buildPlexImageUrl(localItem.thumb, plexToken, "local");
         }
         // Use local audienceRating as fallback if no rating from TMDB
         if (localItem.audienceRating && !item.rating) {
