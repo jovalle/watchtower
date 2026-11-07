@@ -153,9 +153,9 @@ jobs:
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_ANDROID_TV_IDENTITY_ID }}
-          project-id: 1c2b6cea-09af-462b-8355-91222596c699
+          project-id: 6f5c13de-bc5c-4ea6-98e8-31c8720e1574
           env-slug: prod
-          secret-path: /android-tv
+          secret-path: /
           include-imports: false
       - name: Build signed APK
         working-directory: android-tv
