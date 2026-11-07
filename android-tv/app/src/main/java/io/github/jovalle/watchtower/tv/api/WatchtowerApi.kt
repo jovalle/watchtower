@@ -1,6 +1,8 @@
 package io.github.jovalle.watchtower.tv.api
 
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
@@ -77,6 +79,24 @@ class WatchtowerApi(private val http: HttpClients, val json: Json = WatchtowerJs
         return decode(authed(s, Request.Builder().url(url).get().build()))
     }
 
+    suspend fun libraryLetters(
+        s: SessionSnapshot,
+        sectionId: String,
+        sort: String = "titleSort:asc",
+        filter: String = "all",
+        genre: String? = null,
+        limit: Int = 100,
+    ): LibraryLettersResponse {
+        val target = url(s.baseUrl, "libraries", sectionId, "letters").newBuilder()
+            .addQueryParameter("sort", sort).addQueryParameter("filter", filter)
+            .addQueryParameter("limit", limit.toString())
+            .apply { genre?.let { addQueryParameter("genre", it) } }.build()
+        return decode(authed(s, Request.Builder().url(target).get().build()))
+    }
+
+    suspend fun libraryRecommendations(s: SessionSnapshot, sectionId: String): LibraryRecommendationsResponse =
+        decode(authed(s, Request.Builder().url(url(s.baseUrl, "libraries", sectionId, "recommendations")).get().build()))
+
     suspend fun libraryFilters(s: SessionSnapshot, sectionId: String): LibraryFiltersResponse =
         decode(authed(s, Request.Builder().url(url(s.baseUrl, "libraries", sectionId, "filters")).get().build()))
 
@@ -89,11 +109,24 @@ class WatchtowerApi(private val http: HttpClients, val json: Json = WatchtowerJs
     suspend fun media(s: SessionSnapshot, ratingKey: String): MediaDetail =
         decode(authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey)).get().build()))
 
+    suspend fun watchlistStatus(s: SessionSnapshot, ratingKey: String): WatchlistStatusResponse =
+        decode(authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey, "watchlist")).get().build()))
+
+    suspend fun mediaRatings(s: SessionSnapshot, ratingKey: String): MediaRatingsResponse =
+        decode(authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey, "ratings")).get().build()))
+
+    suspend fun person(s: SessionSnapshot, ratingKey: String, personId: String): PersonProfile =
+        decode(authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey, "cast", personId)).get().build()))
+
     suspend fun children(s: SessionSnapshot, ratingKey: String, limit: Int = 100, cursor: String? = null): Page<MediaSummary> =
         decode(authed(s, Request.Builder().url(paged(url(s.baseUrl, "media", ratingKey, "children"), limit, cursor)).get().build()))
 
     suspend fun adjacent(s: SessionSnapshot, ratingKey: String): AdjacentResponse =
         decode(authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey, "adjacent")).get().build()))
+
+    suspend fun dismissContinueWatching(s: SessionSnapshot, ratingKey: String) {
+        authed(s, Request.Builder().url(url(s.baseUrl, "media", ratingKey, "continue-watching")).delete().build())
+    }
 
     suspend fun setWatched(s: SessionSnapshot, ratingKey: String, watched: Boolean) {
         val builder = Request.Builder().url(url(s.baseUrl, "media", ratingKey, "watched"))
@@ -141,6 +174,21 @@ class WatchtowerApi(private val http: HttpClients, val json: Json = WatchtowerJs
     suspend fun updatePreferences(s: SessionSnapshot, changes: JsonObject): Preferences =
         decode(authed(s, Request.Builder().url(url(s.baseUrl, "preferences")).patch(changes.toString().toRequestBody(JSON)).build()))
 
+    suspend fun requestInbox(s: SessionSnapshot, page: Int = 1, filter: String = "all"): ServicePage<RequestSummary> {
+        val target = url(s.baseUrl, "requests").newBuilder()
+            .addQueryParameter("page", page.toString()).addQueryParameter("filter", filter).build()
+        return decode(authed(s, Request.Builder().url(target).get().build()))
+    }
+
+    suspend fun issues(s: SessionSnapshot, page: Int = 1, filter: String = "all"): ServicePage<IssueSummary> {
+        val target = url(s.baseUrl, "issues").newBuilder()
+            .addQueryParameter("page", page.toString()).addQueryParameter("filter", filter).build()
+        return decode(authed(s, Request.Builder().url(target).get().build()))
+    }
+
+    suspend fun issueDetail(s: SessionSnapshot, id: Int): IssueDetail =
+        decode(authed(s, Request.Builder().url(url(s.baseUrl, "issues", id.toString())).get().build()))
+
     suspend fun requestAvailability(s: SessionSnapshot, type: String, tmdbId: Int): RequestAvailability {
         val url = url(s.baseUrl, "requests", "availability").newBuilder()
             .addQueryParameter("type", type).addQueryParameter("tmdbId", tmdbId.toString()).build()
@@ -177,10 +225,10 @@ class WatchtowerApi(private val http: HttpClients, val json: Json = WatchtowerJs
     suspend fun authed(s: SessionSnapshot, request: Request, sendIdentity: Boolean = true): String? =
         send(http.forSession(s, sendIdentity), request, s)
 
-    private suspend fun send(client: OkHttpClient, request: Request, snapshot: SessionSnapshot?): String? {
+    private suspend fun send(client: OkHttpClient, request: Request, snapshot: SessionSnapshot?): String? = withContext(Dispatchers.IO) {
         client.newCall(request).await().use { response ->
             val body = response.body.string()
-            if (response.isSuccessful) return body.ifEmpty { null }
+            if (response.isSuccessful) return@withContext body.ifEmpty { null }
             val error = toApiException(response.code, response.header("Content-Type"), body, response.header("Retry-After"), response.header("X-Request-Id"))
             if (snapshot != null && (error.isAuthFailure || error.isIdentityMismatch)) {
                 events?.onAuthenticatedFailure(snapshot, error)

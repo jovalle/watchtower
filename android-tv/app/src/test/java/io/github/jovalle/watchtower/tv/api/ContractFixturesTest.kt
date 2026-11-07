@@ -58,17 +58,62 @@ class ContractFixturesTest {
         fixture<Items<LibrarySection>>("libraries.json")
         assertEquals(212, fixture<Page<MediaSummary>>("library-items-page.json").totalCount)
         fixture<LibraryFiltersResponse>("library-filters.json")
+        assertEquals(listOf("#", "A", "Z"), fixture<LibraryLettersResponse>("library-letters.json").letters.map { it.letter })
+        val recommended = fixture<LibraryRecommendationsResponse>("library-recommendations.json").rows.single().items.single()
+        assertEquals("A fixture film synopsis.", recommended.summary)
+        assertEquals("/api/v1/images?src=%2Flibrary%2Fmetadata%2F5001%2FclearLogo%2F1700000000&w=800&h=310", recommended.clearLogoUrl)
         val detail = fixture<MediaDetail>("media-detail-movie.json")
+        assertEquals(detail.summary, detail.toSummary().summary)
+        assertEquals(detail.clearLogoUrl, detail.toSummary().clearLogoUrl)
+        val colors = ArtworkColors("44181b", "55140b", "9a3936", "31313a")
+        assertEquals(colors, detail.copy(artworkColors = colors).toSummary().artworkColors)
         assertEquals(listOf(0L, 3600000L), detail.versions.first().parts.map { it.durationMs!! }.runningFold(0L) { a, b -> a + b }.dropLast(1))
         fixture<Page<MediaSummary>>("children-page.json")
         fixture<AdjacentResponse>("adjacent.json")
         fixture<SearchResponse>("search.json")
         fixture<WatchlistResponse>("watchlist.json")
+        assertEquals(true, fixture<WatchlistStatusResponse>("watchlist-status.json").onWatchlist)
         fixture<Items<PlaylistSummary>>("playlists.json")
         fixture<Page<PlaylistItem>>("playlist-items-page.json")
         fixture<Items<CollectionSummary>>("collections.json")
         fixture<Preferences>("preferences.json")
         fixture<RequestAvailability>("request-availability.json")
+        assertEquals(5, fixture<MediaRatingsResponse>("media-ratings.json").ratings.size)
+        assertEquals("An Actor", fixture<PersonProfile>("person-profile.json").name)
+    }
+
+    @Test fun olderSummaryPayloadsKeepNullablePresentationDefaults() {
+        val item = strict.parseToJsonElement(File(root, "library-items-page.json").readText())
+            .let { (it as JsonObject)["items"] as JsonArray }.first() as JsonObject
+        val older = JsonObject(item.filterKeys { it != "summary" && it != "clearLogoUrl" && it != "artworkColors" && it != "genres" && it != "ratings" })
+        val decoded = strict.decodeFromString<MediaSummary>(older.toString())
+        assertNull(decoded.summary)
+        assertNull(decoded.clearLogoUrl)
+        assertNull(decoded.artworkColors)
+        assertEquals(emptyList<String>(), decoded.genres)
+        assertEquals(emptyList<ProviderRating>(), decoded.ratings)
+    }
+
+    @Test fun olderDetailsKeepDefaultRatingsAndNullableCastIdentity() {
+        val detail = strict.parseToJsonElement(File(root, "media-detail-movie.json").readText()) as JsonObject
+        val older = JsonObject(detail.filterKeys { it != "ratings" }.toMutableMap().apply {
+            put("cast", JsonArray((detail["cast"] as JsonArray).map { item ->
+                JsonObject((item as JsonObject).filterKeys { it != "id" })
+            }))
+        })
+        val decoded = strict.decodeFromString<MediaDetail>(older.toString())
+        assertEquals(emptyList<ProviderRating>(), decoded.ratings)
+        decoded.cast.forEach { assertNull(it.id) }
+    }
+
+    @Test fun audioDescriptionsRoundTripAndOlderTracksDefaultToNull() {
+        val commentary = fixture<PlaybackDescriptor>("playback-descriptor-file.json").tracks.audio.first { it.streamId == "12" }
+        assertEquals("English (FLAC Stereo)", commentary.title)
+        assertEquals("Commentary by Film Historian Tim Lucas", commentary.description)
+        val encoded = WatchtowerJson.encodeToString(AudioTrack.serializer(), commentary)
+        assertEquals(commentary, strict.decodeFromString<AudioTrack>(encoded))
+        val older = JsonObject((strict.parseToJsonElement(encoded) as JsonObject).filterKeys { it != "description" })
+        assertNull(strict.decodeFromString<AudioTrack>(older.toString()).description)
     }
 
     @Test fun playback() {

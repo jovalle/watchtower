@@ -90,4 +90,31 @@ class PlaybackPoliciesTest {
         assertEquals(RecoveryAction.RETRY_HLS, hls.onFailure("transcode"))
         assertEquals(RecoveryAction.SHOW_ERROR, hls.onFailure("transcode"))
     }
+
+    @Test fun `back from settings children returns to their originating row before the player`() {
+        listOf(PlayerMenu.QUALITY, PlayerMenu.AUDIO, PlayerMenu.SUBTITLES, PlayerMenu.DIAGNOSTICS).forEach { child ->
+            val nested = PlaybackUiState(controlsVisible = false).togglePlayerMenu(PlayerMenu.MORE).togglePlayerMenu(child)
+            assertEquals(PlayerMenu.MORE, nested.menuParent)
+
+            val returned = nested.backFromPlayerMenu()
+            assertEquals(PlayerMenu.MORE, returned.menu)
+            assertEquals(child, returned.menuReturnFocus)
+            assertNull(returned.menuParent)
+            assertEquals(true, returned.controlsVisible)
+
+            val closed = returned.backFromPlayerMenu()
+            assertNull(closed.menu)
+            assertNull(closed.menuReturnFocus)
+            assertNull(closed.menuParent)
+        }
+    }
+
+    @Test fun `direct subtitles back returns straight to the player`() {
+        val opened = PlaybackUiState().togglePlayerMenu(PlayerMenu.SUBTITLES)
+        assertNull(opened.menuParent)
+        val closed = opened.backFromPlayerMenu()
+        assertNull(closed.menu)
+        assertNull(closed.menuReturnFocus)
+        assertEquals(true, closed.controlsVisible)
+    }
 }

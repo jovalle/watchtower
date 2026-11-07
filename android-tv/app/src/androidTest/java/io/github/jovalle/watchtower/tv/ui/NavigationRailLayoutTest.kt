@@ -10,6 +10,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -20,6 +22,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.ModalNavigationDrawer
+import io.github.jovalle.watchtower.tv.catalog.LibraryRoute
+import io.github.jovalle.watchtower.tv.catalog.ListsRoute
 import io.github.jovalle.watchtower.tv.api.LibrarySection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -33,11 +38,12 @@ class NavigationRailLayoutTest {
     @Test fun collapsedRailKeepsItsWidthAndLeavesTheScreenToContent() {
         compose.setContent {
             MaterialTheme {
-                Row(Modifier.fillMaxSize()) {
+                ModalNavigationDrawer(drawerContent = {
                     Box(Modifier.fillMaxHeight().testTag("rail")) {
                         NavigationRail(expanded = false, currentRoute = null, libraries = emptyList(), navigate = {})
                     }
-                    Box(Modifier.weight(1f).fillMaxHeight().testTag("content"))
+                }) {
+                    Box(Modifier.fillMaxSize().testTag("content"))
                 }
             }
         }
@@ -45,16 +51,68 @@ class NavigationRailLayoutTest {
         val root = compose.onRoot().getBoundsInRoot()
         val rail = compose.onNodeWithTag("rail").getBoundsInRoot()
         val content = compose.onNodeWithTag("content").getBoundsInRoot()
-        assertEquals(82.dp, rail.right - rail.left)
-        assertTrue("content must fill the rest of the screen", content.right - content.left >= root.right - root.left - 82.dp)
+        assertEquals(56.dp, rail.right - rail.left)
+        assertEquals("Drawer must overlay the page without shifting it", root.left, content.left)
+        assertTrue("content must fill the rest of the screen", content.right - content.left >= root.right - root.left)
     }
 
-    @Test fun dpadFocusScrollsToSettingsAfterManyLibraries() {
+    @Test fun compactRailExposesDirectLibrariesListsAndServices() {
+        var destination: Any? = null
+        compose.setContent { MaterialTheme {
+            NavigationRail(false, "LibraryRoute", listOf(LibrarySection("movies", "movie", "Movies"),
+                LibrarySection("shows", "show", "Shows")), { destination = it }, currentLibraryId = "shows")
+        } }
+        compose.onNodeWithContentDescription("Shows").assertIsSelected().assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnIdle { assertEquals("shows", (destination as LibraryRoute).sectionId) }
+        compose.onNodeWithContentDescription("My Lists").assertIsDisplayed().performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnIdle { assertEquals(ListsRoute, destination) }
+        compose.onNodeWithContentDescription("Requests").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Issues").assertIsDisplayed()
+    }
+
+    @Test fun selectedCustomLibraryStaysReachableInTheCompactRail() {
+        val libraries = List(30) { LibrarySection("$it", "movie", "Library $it") }
+        compose.setContent { MaterialTheme {
+            NavigationRail(false, "LibraryRoute", libraries, {}, currentLibraryId = "29")
+        } }
+        compose.onNodeWithContentDescription("Library 29").assertIsSelected().assertIsDisplayed()
+    }
+
+    @Test fun selectedLibraryAndServiceDestinationsAreExplicit() {
+        compose.setContent {
+            MaterialTheme {
+                NavigationRail(true, "LibraryRoute", listOf(
+                    LibrarySection("movies", "movie", "Movies"), LibrarySection("shows", "show", "Shows"),
+                ), {}, currentLibraryId = "shows")
+            }
+        }
+        compose.onNodeWithContentDescription("Movies").assertIsNotSelected()
+        compose.onNodeWithContentDescription("Shows").assertIsSelected()
+        compose.onNodeWithContentDescription("Requests").assertExists()
+        compose.onNodeWithContentDescription("Issues").assertExists()
+    }
+
+    @Test fun openingTheRailFocusesTheCurrentLibrary() {
+        compose.setContent { MaterialTheme {
+            NavigationRail(true, "LibraryRoute", listOf(LibrarySection("movies", "movie", "Movies"), LibrarySection("shows", "show", "Shows")), {}, currentLibraryId = "shows")
+        } }
+        compose.onNodeWithContentDescription("Shows").assertIsFocused()
+    }
+
+    @Test fun unavailableRestoredLibraryFallsBackToHome() {
+        compose.setContent { MaterialTheme {
+            NavigationRail(true, "LibraryRoute", emptyList(), {}, currentLibraryId = "removed-or-loading")
+        } }
+        compose.onNodeWithContentDescription("Home").assertIsFocused()
+    }
+
+    @Test fun dpadFocusScrollsToTheLastServiceAfterManyLibraries() {
         val libraries = List(30) { index -> LibrarySection("$index", "movie", "Library $index") }
         compose.setContent {
             MaterialTheme {
                 NavigationRail(
-                    expanded = false,
+                    expanded = true,
                     currentRoute = null,
                     libraries = libraries,
                     navigate = {},
@@ -64,8 +122,8 @@ class NavigationRailLayoutTest {
 
         compose.onNodeWithContentDescription("Home")
             .performSemanticsAction(SemanticsActions.RequestFocus)
-            .performKeyInput { repeat(34) { pressKey(Key.DirectionDown) } }
+            .performKeyInput { repeat(36) { pressKey(Key.DirectionDown) } }
 
-        compose.onNodeWithContentDescription("Settings").assertIsFocused().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Issues").assertIsFocused().assertIsDisplayed()
     }
 }

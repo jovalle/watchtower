@@ -40,6 +40,37 @@ class WatchtowerApiTest {
         assertEquals("android-tv/test", request.headers["X-Watchtower-Client"])
     }
 
+    @Test fun libraryLettersBindToTheBrowseQueryAndPageLimit() = runTest {
+        server.enqueue(json(200, """{"letters":[]}"""))
+        assertTrue(api.libraryLetters(snapshot, "4", "titleSort:desc", "unwatched", genre = "Drama", limit = 50).letters.isEmpty())
+        val request = server.takeRequest()
+        assertEquals("/api/v1/libraries/4/letters", request.url.encodedPath)
+        assertEquals("titleSort:desc", request.url.queryParameter("sort"))
+        assertEquals("unwatched", request.url.queryParameter("filter"))
+        assertEquals("Drama", request.url.queryParameter("genre"))
+        assertEquals("50", request.url.queryParameter("limit"))
+        assertEquals("7", request.headers[IDENTITY_VERSION_HEADER])
+    }
+
+    @Test fun libraryRecommendationsUseAuthenticatedSectionEndpoint() = runTest {
+        server.enqueue(json(200, """{"rows":[]}"""))
+        assertTrue(api.libraryRecommendations(snapshot, "4").rows.isEmpty())
+        val request = server.takeRequest()
+        assertEquals("/api/v1/libraries/4/recommendations", request.url.encodedPath)
+        assertEquals("Bearer wtd_test_token", request.headers["Authorization"])
+        assertEquals("7", request.headers[IDENTITY_VERSION_HEADER])
+    }
+
+    @Test fun continueWatchingDismissalUsesAnAuthenticatedDedicatedDelete() = runTest {
+        server.enqueue(MockResponse.Builder().code(204).build())
+        api.dismissContinueWatching(snapshot, "42")
+        val request = server.takeRequest()
+        assertEquals("DELETE", request.method)
+        assertEquals("/api/v1/media/42/continue-watching", request.url.encodedPath)
+        assertEquals("Bearer wtd_test_token", request.headers["Authorization"])
+        assertEquals("7", request.headers[IDENTITY_VERSION_HEADER])
+    }
+
     @Test fun meAndRevocationOmitIdentityVersion() = runTest {
         server.enqueue(json(200, java.io.File(System.getProperty("watchtower.contracts") ?: "../../contracts", "native/v1/me.json").readText()))
         server.enqueue(MockResponse.Builder().code(204).build())

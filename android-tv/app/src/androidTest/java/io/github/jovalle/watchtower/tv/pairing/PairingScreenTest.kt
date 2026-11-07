@@ -1,6 +1,12 @@
 package io.github.jovalle.watchtower.tv.pairing
 
 import android.os.SystemClock
+import androidx.compose.runtime.mutableStateOf
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -45,8 +51,8 @@ class PairingScreenTest {
         compose.setContent {
             MaterialTheme { PairingStateContent(PairingState.Expired, onRetry = {}, onChangeServer = {}) }
         }
-        compose.onNodeWithText("Try again").assertIsDisplayed()
-        compose.onNodeWithText("Change server").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Try Again").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Change Server").assertIsDisplayed()
     }
 
     @Test fun serverAddressFieldReceivesInitialFocus() {
@@ -65,6 +71,30 @@ class PairingScreenTest {
         }
 
         compose.onNode(hasSetTextAction()).assertIsFocused()
+    }
+
+    @Test fun serverAddressAcceptsKeyboardInputWithoutAnExtraClick() {
+        val address = mutableStateOf("")
+        compose.setContent {
+            MaterialTheme {
+                Column {
+                    ServerAddressContent(address.value, null, false, { address.value = it }, {})
+                }
+            }
+        }
+        compose.waitForIdle()
+        InstrumentationRegistry.getInstrumentation().sendStringSync("http://10.0.2.2:9031")
+        compose.onNode(hasSetTextAction()).assertTextEquals("http://10.0.2.2:9031")
+    }
+
+    @Test fun dpadDownLeavesTheAddressEditorForContinue() {
+        compose.setContent {
+            MaterialTheme {
+                Column { ServerAddressContent("http://10.0.2.2:9031", null, false, {}, {}) }
+            }
+        }
+        compose.onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionDown) }
+        compose.onNodeWithContentDescription("Continue").assertIsFocused()
     }
 
     @Test fun firstProfileReceivesInitialFocus() {
