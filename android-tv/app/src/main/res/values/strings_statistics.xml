@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stats_session">Session</string>
+    <string name="stats_delivery">Delivery</string>
+    <string name="stats_reasons">Reasons</string>
+    <string name="stats_memory">Memory</string>
+    <string name="stats_usage">Usage</string>
+    <string name="stats_memory_value">JVM: %1$.1f MB - Native: %2$.1f MB</string>
+    <string name="stats_engine">Engine</string>
+    <string name="stats_state">State</string>
+    <string name="stats_ready">Ready</string>
+    <string name="stats_idle">Idle</string>
+    <string name="stats_ended">Ended</string>
+    <string name="stats_buffer">Buffer</string>
+    <string name="stats_buffer_value">%1$.1fs ahead</string>
+    <string name="stats_position">Position</string>
+    <string name="stats_decoder">Decoder</string>
+    <string name="stats_format">Format</string>
+    <string name="stats_packets">Packets</string>
+    <string name="stats_packets_value">%1$d / %2$d (skipped: %3$d)</string>
+    <string name="stats_video">Video</string>
+    <string name="stats_frames">Frames</string>
+    <string name="stats_frames_value">%1$d / %2$d (dropped: %3$d)</string>
+    <string name="stats_bandwidth">Bandwidth</string>
+    <string name="stats_current">Current</string>
+    <string name="stats_average">Average</string>
+    <string name="stats_bandwidth_average">%1$s (Min: %2$s Max: %3$s)</string>
+    <string name="stats_display">Display</string>
+    <string name="stats_mode">Mode</string>
+    <string name="stats_display_value">%1$dx%2$d @ %3$.2fHz</string>
+    <string name="stats_unavailable">Unavailable</string>
+</resources>

@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
@@ -21,6 +22,7 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.session.MediaSession
 import io.github.jovalle.watchtower.tv.AppGraph
@@ -33,6 +35,7 @@ import io.github.jovalle.watchtower.tv.api.StopPlaybackRequest
 import io.github.jovalle.watchtower.tv.api.SubtitleTrack
 import io.github.jovalle.watchtower.tv.api.TimelineRequest
 import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
+import io.github.jovalle.watchtower.tv.settings.VideoDisplayMode
 import io.github.jovalle.watchtower.tv.settings.ProfilePlaybackPrefs
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -48,7 +51,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class PlayerMenu { AUDIO, SUBTITLES, QUALITY, DIAGNOSTICS }
+enum class PlayerMenu { AUDIO, SUBTITLES, QUALITY, MORE, OPTIONS, SPEED, SLEEP, DISPLAY, DIAGNOSTICS }
 
 data class PlaybackUiState(
     val loading: Boolean = true,
@@ -61,6 +64,8 @@ data class PlaybackUiState(
     val buffering: Boolean = false,
     val controlsVisible: Boolean = true,
     val menu: PlayerMenu? = null,
+    val menuBackStack: List<PlayerMenu> = emptyList(),
+    val menuReturnFocus: PlayerMenu? = null,
     val scrubPositionMs: Long? = null,
     val error: String? = null,
     val cues: List<Cue> = emptyList(),
@@ -68,7 +73,16 @@ data class PlaybackUiState(
     val diagnostics: List<String> = emptyList(),
     val nextDeadlineMs: Long? = null,
     val skipIntroTargetMs: Long? = null,
-)
+    val playbackSpeed: Float = 1f,
+    val videoDisplayMode: VideoDisplayMode = VideoDisplayMode.LETTERBOX,
+    val sleepTimer: SleepTimerState = SleepTimerState(),
+    val showStatistics: Boolean = false,
+    val videoDecoderName: String? = null,
+    val audioDecoderName: String? = null,
+    val bandwidth: PlaybackBandwidth = PlaybackBandwidth(),
+) {
+    val menuParent: PlayerMenu? get() = menuBackStack.lastOrNull()
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackController(
@@ -79,10 +93,14 @@ class PlaybackController(
     private val onOpenItem: (PlayerRoute) -> Unit,
 ) : Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val player = ExoPlayer.Builder(context).build().apply {
-        setAudioAttributes(DeviceCapabilityDetector.MEDIA_AUDIO_ATTRIBUTES, true)
-        setHandleAudioBecomingNoisy(true)
-    }
+    private val player = ExoPlayer.Builder(context)
+        .setLoadControl(DefaultLoadControl.Builder()
+            .setTargetBufferBytes(playbackBufferTargetBytes(Runtime.getRuntime().maxMemory()))
+            .build())
+        .build().apply {
+            setAudioAttributes(DeviceCapabilityDetector.MEDIA_AUDIO_ATTRIBUTES, true)
+            setHandleAudioBecomingNoisy(true)
+        }
     private val gate = PlaybackIntentGate(SoloAuthority, ::executeIntent)
     private val sessionPlayer = GatedPlayer(player, gate) { index, position ->
         mapper?.toAbsolute(index, position) ?: position
@@ -92,7 +110,7 @@ class PlaybackController(
         .build()
     val surfacePlayer: Player get() = player
 
-    private val _state = MutableStateFlow(PlaybackUiState())
+    private val _state = MutableStateFlow(PlaybackUiState(sleepTimer = route.restoredSleepTimer()))
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
     private val capabilityDetector = DeviceCapabilityDetector(context.applicationContext)
     private val scrubController = ScrubController()
@@ -117,7 +135,9 @@ class PlaybackController(
     private var decoderName: String? = null
     private var droppedFrames = 0
     private var ticker: Job? = null
+    private var initializationJob: Job? = null
     private var replacementJob: Job? = null
+    private var sleepTimerJob: Job? = null
 
     private val analyticsListener = object : AnalyticsListener {
         override fun onVideoDecoderInitialized(
@@ -127,7 +147,19 @@ class PlaybackController(
             initializationDurationMs: Long,
         ) {
             this@PlaybackController.decoderName = decoderName
+            _state.value = _state.value.copy(videoDecoderName = decoderName)
             refreshDiagnostics()
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime, decoderName: String,
+            initializedTimestampMs: Long, initializationDurationMs: Long,
+        ) {
+            _state.value = _state.value.copy(audioDecoderName = decoderName)
+        }
+
+        override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+            _state.value = _state.value.copy(bandwidth = _state.value.bandwidth.sample(totalLoadTimeMs, totalBytesLoaded))
         }
 
         override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
@@ -150,7 +182,8 @@ class PlaybackController(
                 if (snapshot != null && change.current != snapshot) exit()
             }
         }
-        scope.launch { initialize() }
+        initializationJob = scope.launch { initialize() }
+        scheduleSleepTimer()
     }
 
     fun submit(intent: PlaybackIntent): AuthorityDecision {
@@ -159,13 +192,17 @@ class PlaybackController(
     }
 
     fun toggleMenu(menu: PlayerMenu) {
-        _state.value = _state.value.copy(menu = menu.takeUnless { _state.value.menu == it }, controlsVisible = true)
+        if (descriptor == null) return
+        _state.value = _state.value.togglePlayerMenu(menu)
         showControls()
     }
 
     fun handleBack() {
         when {
-            _state.value.menu != null -> _state.value = _state.value.copy(menu = null)
+            _state.value.menu != null -> {
+                _state.value = _state.value.backFromPlayerMenu()
+                showControls()
+            }
             _state.value.nextDeadlineMs != null -> cancelNextCountdown()
             _state.value.controlsVisible -> _state.value = _state.value.copy(controlsVisible = false)
             else -> exit()
@@ -205,7 +242,7 @@ class PlaybackController(
             applyFileTrack(track.streamId, TrackKind.AUDIO)
             updateSelectedTracks(audioStreamId = track.streamId)
         }
-        _state.value = _state.value.copy(menu = null)
+        _state.value = _state.value.copy(menu = null, menuBackStack = emptyList(), menuReturnFocus = null)
     }
 
     fun selectSubtitle(track: SubtitleTrack?) {
@@ -225,18 +262,68 @@ class PlaybackController(
             applyFileTrack(track.streamId, TrackKind.TEXT)
         }
         if (current.delivery.type == "file") updateSelectedTracks(subtitleStreamId = track?.streamId, subtitlesOff = track == null)
-        _state.value = _state.value.copy(menu = null)
+        _state.value = _state.value.copy(menu = null, menuBackStack = emptyList(), menuReturnFocus = null)
     }
 
     fun selectQuality(id: String) {
         if (quality == id) return
-        _state.value = _state.value.copy(menu = null)
+        _state.value = _state.value.copy(menu = null, menuBackStack = emptyList(), menuReturnFocus = null)
         replace("quality_change", absolutePosition(), requestedQuality = id)
     }
 
+    fun selectSpeed(value: Float) {
+        if (value !in PLAYBACK_SPEEDS || !updateLocalPrefs { it.copy(playbackSpeed = value) }) return
+        player.setPlaybackSpeed(value)
+        _state.value = _state.value.copy(playbackSpeed = value).backFromPlayerMenu()
+        showControls()
+    }
+
+    fun selectDisplayMode(value: VideoDisplayMode) {
+        if (!updateLocalPrefs { it.copy(videoDisplayMode = value) }) return
+        _state.value = _state.value.copy(videoDisplayMode = value).backFromPlayerMenu()
+        showControls()
+    }
+
+    fun selectSleepTimer(value: SleepTimerOption) {
+        val timer = _state.value.sleepTimer.select(value, SystemClock.elapsedRealtime())
+        _state.value = _state.value.copy(sleepTimer = timer, nextDeadlineMs = null).backFromPlayerMenu()
+        scheduleSleepTimer()
+        showControls()
+    }
+
+    fun setStatistics(visible: Boolean) {
+        _state.value = _state.value.copy(showStatistics = visible)
+        refreshDiagnostics()
+        showControls()
+    }
+
+    private fun updateLocalPrefs(update: (ProfilePlaybackPrefs) -> ProfilePlaybackPrefs): Boolean {
+        if (resourcesReleased.get() || graph.session.current() != snapshot) return false
+        val me = graph.session.currentMe() ?: return false
+        prefs = update(prefs)
+        graph.localPlaybackPrefs.set(me.server.machineId, me.profile.userId, prefs)
+        return true
+    }
+
+    private fun scheduleSleepTimer() {
+        sleepTimerJob?.cancel()
+        val deadline = _state.value.sleepTimer.deadlineElapsedMs ?: return
+        sleepTimerJob = scope.launchPlaybackSleepTimer(deadline, SystemClock::elapsedRealtime) {
+            if (_state.value.sleepTimer.automaticIntent(SystemClock.elapsedRealtime()) != null) expireSleepTimer()
+        }
+    }
+
+    private fun expireSleepTimer() {
+        sleepTimerJob?.cancel()
+        _state.value = _state.value.copy(sleepTimer = SleepTimerState(), nextDeadlineMs = null)
+        gate.submitAutomaticIntent(PlaybackIntent.Stop)
+    }
+
     fun retry() {
+        if (resourcesReleased.get() || initializationJob?.isActive == true || replacementJob?.isActive == true) return
         _state.value = _state.value.copy(error = null, loading = true)
-        replace("retry", absolutePosition())
+        if (descriptor == null) initializationJob = scope.launch { initialize() }
+        else replace("retry", absolutePosition())
     }
 
     fun onStop() {
@@ -307,6 +394,7 @@ class PlaybackController(
         nextCountdownCancelled = false
         decoderName = null
         droppedFrames = 0
+        _state.value = _state.value.copy(videoDecoderName = null, audioDecoderName = null, bandwidth = PlaybackBandwidth())
         quality = playback.quality.requested
         mapper = TimelineMapper.from(playback.delivery, playback.durationMs)
         val captured = requireNotNull(snapshot)
@@ -341,7 +429,12 @@ class PlaybackController(
             buffering = true,
             descriptor = playback,
             diagnostics = playback.diagnostics + timelineDiagnostic(),
+            playbackSpeed = prefs.playbackSpeed,
+            videoDisplayMode = prefs.videoDisplayMode,
+            sleepTimer = _state.value.sleepTimer,
+            showStatistics = _state.value.showStatistics,
         )
+        player.setPlaybackSpeed(prefs.playbackSpeed)
         player.playWhenReady = true
         player.prepare()
         ticker?.cancel()
@@ -359,7 +452,10 @@ class PlaybackController(
             PlaybackIntent.StartOver -> seekAbsolute(0)
             PlaybackIntent.Next -> descriptor?.nextItem?.ratingKey?.let { openItem(it) }
             PlaybackIntent.Previous -> descriptor?.previousItem?.ratingKey?.let { openItem(it) }
-            PlaybackIntent.Stop -> exit()
+            PlaybackIntent.Stop -> {
+                _state.value = _state.value.copy(sleepTimer = SleepTimerState())
+                exit()
+            }
         }
     }
 
@@ -488,6 +584,10 @@ class PlaybackController(
         while (!resourcesReleased.get()) {
             val current = descriptor
             if (current != null) {
+                if (_state.value.sleepTimer.automaticIntent(SystemClock.elapsedRealtime()) != null) {
+                    expireSleepTimer()
+                    return
+                }
                 val position = absolutePosition()
                 var nextDeadline = _state.value.nextDeadlineMs
                 val introEnd = current.markers.firstOrNull {
@@ -496,7 +596,7 @@ class PlaybackController(
                 bingePolicy.skipTarget(position, current.markers, current.autoplay.autoSkipIntro)?.let {
                     gate.submitAutomaticIntent(PlaybackIntent.SeekTo(it))
                 }
-                if (nextDeadline == null && !nextCountdownCancelled) {
+                if (nextDeadline == null && !nextCountdownCancelled && !_state.value.sleepTimer.suppressAutoNext) {
                     nextDeadline = bingePolicy.nextCountdown(
                         position,
                         current.durationMs,
@@ -523,12 +623,17 @@ class PlaybackController(
     }
 
     private fun openItem(ratingKey: String) {
+        if (_state.value.sleepTimer.automaticIntent(SystemClock.elapsedRealtime()) != null) {
+            expireSleepTimer()
+            return
+        }
         if (!exited.compareAndSet(false, true)) return
+        val nextRoute = _state.value.sleepTimer.nextRoute(ratingKey)
         releaseAndStop()
-        onOpenItem(PlayerRoute(ratingKey))
+        onOpenItem(nextRoute)
     }
 
-    private fun showControls() {
+    fun showControls() {
         val generation = ++controlsGeneration
         _state.value = _state.value.copy(controlsVisible = true)
         scope.launch {
@@ -554,6 +659,8 @@ class PlaybackController(
             val active = current.delivery.activePartIndex
             if (current.delivery.type == "hls" && active < current.delivery.parts.lastIndex) {
                 replace("part_change", current.delivery.parts[active + 1].startMs)
+            } else if (_state.value.sleepTimer.automaticIntent(SystemClock.elapsedRealtime(), itemEnded = true) != null) {
+                expireSleepTimer()
             } else if (current.nextItem != null && current.autoplay.autoPlayNextEpisode && !nextCountdownCancelled) {
                 if (gate.submitAutomaticIntent(PlaybackIntent.Next) is AuthorityDecision.Deny) {
                     _state.value = _state.value.copy(controlsVisible = true, playWhenReady = false, isPlaying = false)
@@ -637,6 +744,7 @@ class PlaybackController(
     private fun release() {
         ticker?.cancel()
         replacementJob?.cancel()
+        sleepTimerJob?.cancel()
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         displayMode.restore()
         player.removeListener(this)

@@ -159,6 +159,11 @@ data class MediaSummary(
     val parentRatingKey: String?,
     val grandparentRatingKey: String?,
     val external: ExternalId?,
+    val summary: String? = null,
+    val clearLogoUrl: String? = null,
+    val artworkColors: ArtworkColors? = null,
+    val genres: List<String> = emptyList(),
+    val ratings: List<ProviderRating> = emptyList(),
 )
 
 @Serializable
@@ -166,6 +171,9 @@ data class HomeRow(val id: String, val kind: String, val title: String, val item
 
 @Serializable
 data class HomeResponse(val hero: List<MediaSummary>, val rows: List<HomeRow>, val errors: List<String>)
+
+@Serializable
+data class LibraryRecommendationsResponse(val rows: List<HomeRow>)
 
 @Serializable
 data class LibrarySection(val sectionId: String, val type: String, val title: String)
@@ -187,6 +195,7 @@ data class AudioTrack(
     val default: Boolean,
     val selected: Boolean,
     val audioDescription: Boolean,
+    val description: String? = null,
 )
 
 @Serializable
@@ -234,10 +243,38 @@ data class MediaVersion(
     val parts: List<MediaPart>,
     val audioTracks: List<AudioTrack>,
     val subtitleTracks: List<SubtitleTrack>,
+    val aspectRatio: Double? = null,
+    val dolbyVisionProfile: Int? = null,
 )
 
 @Serializable
-data class Person(val name: String, val role: String?, val thumbUrl: String?)
+data class Person(val name: String, val role: String?, val thumbUrl: String?, val id: String? = null)
+
+@Serializable
+data class ProviderRating(val source: String, val kind: String, val value: Double, val maxValue: Int)
+
+@Serializable
+data class MediaRatingsResponse(val ratings: List<ProviderRating> = emptyList(), val warnings: List<String> = emptyList())
+
+@Serializable
+data class PersonProfile(
+    val id: String,
+    val name: String,
+    val role: String?,
+    val thumbUrl: String?,
+    val biography: String?,
+    val birthday: String?,
+    val deathday: String?,
+    val placeOfBirth: String?,
+    val knownForDepartment: String?,
+    val knownFor: List<MediaSummary>,
+    val library: List<MediaSummary>,
+    val filmography: List<MediaSummary>,
+    val warnings: List<String> = emptyList(),
+)
+
+@Serializable
+data class WatchlistStatusResponse(val onWatchlist: Boolean?)
 
 @Serializable
 data class Edition(val ratingKey: String, val editionTitle: String?)
@@ -283,11 +320,14 @@ data class MediaDetail(
     val markers: List<Marker>,
     val onWatchlist: Boolean?,
     val playable: Boolean,
+    val clearLogoUrl: String? = null,
+    val artworkColors: ArtworkColors? = null,
+    val ratings: List<ProviderRating> = emptyList(),
 ) {
     fun toSummary() = MediaSummary(
         ratingKey, type, title, year, posterUrl, backdropUrl, thumbUrl, durationMs, viewOffsetMs, viewCount,
         leafCount, viewedLeafCount, contentRating, showTitle, seasonNumber, episodeNumber, parentRatingKey,
-        grandparentRatingKey, external,
+        grandparentRatingKey, external, summary, clearLogoUrl, artworkColors, genres, ratings,
     )
 }
 
@@ -353,6 +393,11 @@ data class PlaylistItem(
     val grandparentRatingKey: String?,
     val external: ExternalId?,
     val playlistItemId: String,
+    val summary: String? = null,
+    val clearLogoUrl: String? = null,
+    val artworkColors: ArtworkColors? = null,
+    val genres: List<String> = emptyList(),
+    val ratings: List<ProviderRating> = emptyList(),
 )
 
 @Serializable
@@ -387,6 +432,8 @@ data class RequestAvailability(
     val status4k: String,
     val requests: List<RequestEntry>,
     val seasons: List<SeasonAvailability>,
+    val canRequest: Boolean? = null,
+    val ratingKey: String? = null,
 )
 
 @Serializable
@@ -542,3 +589,41 @@ data class TimelineResponse(val accepted: Boolean)
 
 @Serializable
 data class StopPlaybackRequest(val positionMs: Long?, val durationMs: Long?, val sequence: Long?)
+
+
+@Serializable
+data class ServicePage<T>(val items: List<T>, val page: Int, val pages: Int, val totalResults: Int)
+
+@Serializable
+data class RequestSummary(
+    val id: Int, val type: String, val tmdbId: Int, val title: String,
+    val posterUrl: String?, val ratingKey: String?, val status: String,
+    val is4k: Boolean, val createdAt: String,
+)
+
+@Serializable
+data class IssueSummary(
+    val id: Int, val type: String, val tmdbId: Int, val title: String,
+    val posterUrl: String?, val ratingKey: String?, val status: String,
+    val issueType: Int, val message: String, val createdAt: String,
+)
+
+@Serializable
+data class IssueComment(val id: Int, val message: String, val createdAt: String, val author: String?)
+
+@Serializable
+data class IssueDetail(
+    val id: Int, val type: String, val tmdbId: Int, val title: String,
+    val posterUrl: String?, val ratingKey: String?, val status: String,
+    val issueType: Int, val message: String, val createdAt: String,
+    val comments: List<IssueComment>,
+)
+
+@Serializable
+data class LibraryLetter(val letter: String, val cursor: String)
+
+@Serializable
+data class LibraryLettersResponse(val letters: List<LibraryLetter>)
+
+@Serializable
+data class ArtworkColors(val topLeft: String, val topRight: String, val bottomRight: String, val bottomLeft: String)

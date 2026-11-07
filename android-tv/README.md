@@ -4,6 +4,22 @@ Watchtower Android TV is a native Kotlin application for Android TV and Google T
 
 The `work/android-tv` branch contains this standalone TV client and the native API. Watch Together was removed from this branch; the complete combined implementation and its historical evidence remain on `work/watch-together`. See [the acceptance handoff](../docs/handoffs/android-tv/ACCEPTANCE.md) for historical evidence and its limits.
 
+Current visual direction: [Netflix-led Watchtower TV handoff](../docs/handoffs/android-tv/NETFLIX-LED-2026-11-04.md), with Plex's library depth and Watchtower branding. The preceding [Plex TV parity handoff](../docs/handoffs/android-tv/PLEX-PARITY-2026-11-04.md) retains the API, playback and reference evidence it established.
+
+Current functional hardening: [November 5 UX audit](../docs/handoffs/android-tv/UX-AUDIT-2026-11-05.md), covering request eligibility, status feedback, list artwork/navigation, failure recovery and preference integrity.
+
+Details and cast: [November 5 metadata/person handoff](../docs/handoffs/android-tv/DETAILS-PEOPLE-2026-11-05.md), covering stable focus captions, provider badges, spaced facts, person profiles and scoped filmography/library navigation.
+
+Interaction refinement: [November 5 focus/hover and dialog pass](../docs/handoffs/android-tv/INTERACTION-REFINEMENT-2026-11-05.md), covering rating layout, anchored hints, mouse Back/Close, long menu labels, pending controls and retry focus.
+
+Rating prompt: [November 5 five-star prompt](../docs/handoffs/android-tv/FIVE-STAR-RATING-2026-11-05.md), with half-star selection, preview/confirm, mouse hit areas and preserved Plex ratings.
+
+Inline actions: [November 5 inline rating/actions follow-up](../docs/handoffs/android-tv/INLINE-ACTIONS-2026-11-05.md), replacing the rating panel with an expanding button, removing persistent Saved feedback, and reserving More for measured surplus actions.
+
+Home and technical details: [November 5 rich hero/media handoff](../docs/handoffs/android-tv/HERO-MEDIA-DETAILS-2026-11-05.md), with content-driven shelf spacing, contextual hero actions, progress/ratings and per-version Picture/Sound/File facts.
+
+Previous verification: [November 4 playback/control repair](../docs/handoffs/android-tv/REPAIR-2026-11-04.md), including repeated HLS starts/resumes/stops, pointer controls, uniform sizing, Watchtower branding and emulator navigation. [TV redesign acceptance](../docs/handoffs/android-tv/REDESIGN-2026-11-04.md) records the preceding pass; its intermittent startup finding is repaired by this follow-up.
+
 ## Requirements
 
 - macOS, Linux, or Windows with an Android SDK installation.
@@ -35,6 +51,7 @@ The application module is `android-tv/app`. Kotlin sources are under `app/src/ma
 - `catalog/` contains home, library, search, details, seasons, episodes, lists, ratings, requests, and catalog state.
 - `playback/` contains Media3 player ownership, media-source construction, capability detection, track mapping, timeline mapping, progress reporting, policies, and the player screen.
 - `platform/` contains validated deep links, system voice-search integration, and Android TV Watch Next provider integration.
+- `services/` contains Requests/Issues history, pagination, filtering, report detail, and identity-aware state.
 - `settings/` contains local playback preferences and the settings screen.
 - `ui/` contains the application shell and shared TV UI composition.
 - `navigation/` contains player route integration.
@@ -75,8 +92,10 @@ bun scripts/tv-e2e/generate-media.ts
 bun scripts/tv-e2e/fake-pms.ts 32499
 bun scripts/tv-e2e/seed.ts > ./tmp/tv-e2e/token.txt
 just build
-NODE_ENV=production DATA_PATH=./tmp/tv-e2e/data PORT=9031 SECURE_COOKIES=false node --import tsx server.ts
+NODE_ENV=production DATA_PATH=./tmp/tv-e2e/data PORT=9031 SECURE_COOKIES=false node --import ./scripts/tv-e2e/fixture-fetch.mjs --import tsx server.ts
 ```
+
+For browser-approved fixture pairing, follow the [emulator harness steps](../scripts/tv-e2e/README.md#emulator-pairing-and-playback), which use ADB port forwarding and a synthetic browser identity.
 
 On a standard Android emulator, enter `http://10.0.2.2:9031` in the debug app. `localhost` inside the emulator is the emulator itself. A physical TV must use a reachable address for the server, and a release build must use an HTTPS origin with a certificate trusted by the TV. The app accepts only an origin without a path, query, or fragment.
 

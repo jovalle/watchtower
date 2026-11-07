@@ -1,0 +1,33 @@
+<resources>
+    <string name="media_technical_picture">Picture</string>
+    <string name="media_technical_sound">Sound</string>
+    <string name="media_technical_file">File</string>
+    <string name="media_technical_version">Version</string>
+    <string name="media_technical_version_number">Version %1$d</string>
+    <string name="media_technical_resolution">Resolution</string>
+    <string name="media_technical_codec">Codec</string>
+    <string name="media_technical_profile">Profile</string>
+    <string name="media_technical_bit_depth">Bit Depth</string>
+    <string name="media_technical_bits">%1$d-bit</string>
+    <string name="media_technical_hdr">HDR</string>
+    <string name="media_technical_dolby_vision">Dolby Vision</string>
+    <string name="media_technical_profile_number">Profile %1$d</string>
+    <string name="media_technical_frame_rate">Frame Rate</string>
+    <string name="media_technical_fps">%1$s fps</string>
+    <string name="media_technical_aspect_ratio">Aspect Ratio</string>
+    <string name="media_technical_ratio">%1$s:1</string>
+    <string name="media_technical_audio">Audio</string>
+    <string name="media_technical_audio_description">Audio Description</string>
+    <string name="media_technical_mono">Mono</string>
+    <string name="media_technical_stereo">Stereo</string>
+    <string name="media_technical_channels">%1$d channels</string>
+    <string name="media_technical_container">Container</string>
+    <string name="media_technical_bitrate">Bitrate</string>
+    <string name="media_technical_mbps">%1$s Mbps</string>
+    <string name="media_technical_size">Size</string>
+    <string name="media_technical_parts">Parts</string>
+    <string name="media_technical_parts_count">%1$d parts</string>
+    <string name="media_technical_subtitles">Subtitles</string>
+    <string name="media_technical_one_track">%1$d track</string>
+    <string name="media_technical_tracks_count">%1$d tracks</string>
+</resources>

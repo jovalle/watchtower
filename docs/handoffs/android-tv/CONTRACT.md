@@ -12,6 +12,10 @@ Status: **frozen for implementation on `work/android-tv`, 2026-09-27**, base `85
 - Pagination: `?limit=` (1–100, default 50) and opaque `?cursor=`. A cursor is valid only for the same path and query; otherwise `invalid_cursor`. Responses are `Page<T>`; `nextCursor: null` ends the list. A Plex page that fails to advance is an error, not an empty page.
 - Clients send `X-Watchtower-Client: android-tv/<versionName> (<versionCode>)`. Servers never branch security on it.
 
+Presentation additions (2026-11-04): `MediaSummary` and derived detail/playlist items include nullable `summary`, `clearLogoUrl`, and `artworkColors` (`topLeft`, `topRight`, `bottomRight`, `bottomLeft`, six hex digits each). They carry actual PMS metadata through the existing protected image proxy; absent/invalid palette metadata stays null. Kotlin defaults preserve reading older API responses.
+
+Audio presentation addition (2026-11-04): `AudioTrack.description` is optional and nullable, including within media versions and playback descriptors. It preserves a distinct trimmed PMS stream title (for example, a commentary attribution) while `title` retains the display-title-first primary label. Missing/blank stream titles and case/whitespace-normalized duplicates produce null; older payloads default to null in Kotlin. This text does not change `audioDescription` (the accessibility flag), stream IDs, selection, or playback negotiation.
+
 ## Authentication and identity
 
 - Credential: opaque device session token `wtd_<43 base64url chars>` (256 bits) in `Authorization: Bearer`. Never in URLs, query strings, QR codes, logs or JSON other than the pairing grant.
@@ -50,10 +54,15 @@ All require bearer auth unless marked public.
 | `GET /home` | `HomeResponse`; honors `showContinueWatching`, `showRecentlyAdded`, `showCollections`, `showTrending` and `discoveryDisabled` |
 | `GET /libraries` | `{items: LibrarySection[]}` (movie and show sections the profile can read) |
 | `GET /libraries/:sectionId/items?sort&filter&genre&limit&cursor` | `Page<MediaSummary>`; `sort` ∈ `LibrarySort` (default `titleSort:asc`), `filter` ∈ `LibraryFilter` |
+| `GET /libraries/:sectionId/recommendations` | `LibraryRecommendationsResponse {rows: HomeRow[]}` from profile-scoped PMS section hubs; inaccessible sections return404 |
+| `GET /libraries/:sectionId/letters?sort&filter&genre&limit` | `LibraryLettersResponse {letters: {letter, cursor}[]}` from scoped first-character counts; title sort only; cursors bind to the same `/items` query and limit |
 | `GET /libraries/:sectionId/filters` | `LibraryFiltersResponse` |
 | `GET /libraries/:sectionId/collections` | `{items: CollectionSummary[]}` |
 | `GET /collections/:collectionId/items?limit&cursor` | `Page<MediaSummary>` |
 | `GET /media/:ratingKey` | `MediaDetail` (versions, tracks, markers, editions) |
+| `GET /media/:ratingKey/watchlist` | `{onWatchlist: boolean \| null}`; independently loaded Plex membership using the account token, after local media authorization; unknown/outage must not imply Add |
+| `GET /media/:ratingKey/ratings` | `MediaRatingsResponse`; scoped Plex scores plus independent optional provider enrichment |
+| `GET /media/:ratingKey/cast/:personId` | `PersonProfile`; the person must belong to the freshly authorized source cast |
 | `GET /media/:ratingKey/children?limit&cursor` | `Page<MediaSummary>` seasons or episodes in Plex order (`seasonNumber` 0 = specials) |
 | `GET /media/:ratingKey/adjacent` | `AdjacentResponse` across season boundaries |
 | `PUT` / `DELETE /media/:ratingKey/watched` | 204 after Plex confirms |
@@ -73,6 +82,10 @@ All require bearer auth unless marked public.
 | `GET /playback/:id/hls/*` | HLS master, variant, init, key and segment proxy; playlist URIs rewritten root-relative |
 | `GET /playback/:id/subtitles/:streamId` | WebVTT for that session's external text subtitle |
 | `GET /images?src&w&h` | Image proxy; Plex paths with the profile token, cached per user; allowlisted public HTTPS hosts without credentials |
+
+`MediaDetail.ratings` defaults to an empty array and cast `Person.id` defaults to null for older servers. `ProviderRating` carries source, kind, numeric value and explicit scale (10 or100); metadata identifiers alone do not imply a score. `PersonProfile` contains nullable biography/facts and separate `knownFor`, `library` and `filmography` MediaSummary arrays plus partial-result warnings. Local works have a ratingKey; external works retain their typed provider identity. Both optional endpoints use the normal native principal checks and must not delay required playback metadata.
+
+`RequestAvailability` adds `canRequest:boolean` for the standard-quality request and `ratingKey:string|null` for an exact accessible Plex match. Native clients default these additive fields for older servers and must keep requests disabled until availability is known. Separate 4K state does not determine standard eligibility; partial TV may request missing seasons. The native POST rechecks availability and identity before creation and returns 409 `conflict` when the action is already satisfied or blocked. Successful creation remains 201 with a conservative pending/non-requestable response if its refresh fails. Permission, quota and network failures use sanitized native errors; request/issue responses recheck identity before returning.
 
 ## Playback rules
 
