@@ -48,6 +48,7 @@ COPY --from=builder --chown=remix:nodejs /app/public ./public
 COPY --from=builder --chown=remix:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=remix:nodejs /app/server.ts ./server.ts
 COPY --from=builder --chown=remix:nodejs /app/app/lib/native/client-ip.server.ts ./app/lib/native/client-ip.server.ts
+COPY --from=builder --chown=remix:nodejs /app/app/lib/response-stream.server.ts ./app/lib/response-stream.server.ts
 COPY --from=deps --chown=remix:nodejs /app/node_modules ./node_modules
 
 # Switch to non-root user

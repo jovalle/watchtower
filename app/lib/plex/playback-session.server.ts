@@ -15,6 +15,7 @@ export interface PlaybackSession {
     deviceSessionId: string;
     identityVersion: number;
     mediaId: string;
+    mediaIndex: number;
     partIds: string[];
     partKeys: Record<string, string>;
     allowedSubtitleStreams: Record<string, string>;
@@ -58,6 +59,7 @@ export function registerNativePlaybackSession(
     ratingKey: string;
     clientId: string;
     mediaId: string;
+    mediaIndex?: number;
     partIds: string[];
     partKeys: Record<string, string>;
     allowedSubtitleStreams: Record<string, string>;
@@ -80,6 +82,7 @@ export function registerNativePlaybackSession(
       deviceSessionId: principal.deviceSessionId,
       identityVersion: principal.identityVersion,
       mediaId: input.mediaId,
+      mediaIndex: input.mediaIndex ?? 0,
       partIds: [...input.partIds],
       partKeys: { ...input.partKeys },
       allowedSubtitleStreams: { ...input.allowedSubtitleStreams },

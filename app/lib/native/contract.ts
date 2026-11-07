@@ -153,6 +153,13 @@ export interface ExternalId {
   type: "movie" | "show";
 }
 
+export interface ArtworkColors {
+  topLeft: string;
+  topRight: string;
+  bottomRight: string;
+  bottomLeft: string;
+}
+
 export interface MediaSummary {
   /** null only for external (not in library) titles. */
   ratingKey: string | null;
@@ -175,6 +182,11 @@ export interface MediaSummary {
   parentRatingKey: string | null;
   grandparentRatingKey: string | null;
   external: ExternalId | null;
+  summary?: string | null;
+  clearLogoUrl?: string | null;
+  artworkColors?: ArtworkColors | null;
+  genres?: string[];
+  ratings?: ProviderRating[];
 }
 
 export type HomeRowKind =
@@ -197,6 +209,19 @@ export interface HomeResponse {
   rows: HomeRow[];
   /** Safe, user-facing partial-failure messages. */
   errors: string[];
+}
+
+export interface LibraryLetter {
+  letter: string;
+  cursor: string;
+}
+
+export interface LibraryLettersResponse {
+  letters: LibraryLetter[];
+}
+
+export interface LibraryRecommendationsResponse {
+  rows: HomeRow[];
 }
 
 export interface LibrarySection {
@@ -240,6 +265,7 @@ export interface AudioTrack {
   default: boolean;
   selected: boolean;
   audioDescription: boolean;
+  description?: string | null;
 }
 
 export interface SubtitleTrack {
@@ -275,6 +301,8 @@ export interface MediaVersion {
   height: number | null;
   frameRate: number | null;
   bitDepth: number | null;
+  aspectRatio?: number | null;
+  dolbyVisionProfile?: number | null;
   hdr: HdrType | null;
   bitrateKbps: number | null;
   audioCodec: string | null;
@@ -289,6 +317,35 @@ export interface Person {
   name: string;
   role: string | null;
   thumbUrl: string | null;
+  id?: string | null;
+}
+
+export interface ProviderRating {
+  source: "imdb" | "tmdb" | "tvdb" | "rotten_tomatoes" | "plex";
+  kind: "rating" | "audience" | "critic";
+  value: number;
+  maxValue: 10 | 100;
+}
+
+export interface MediaRatingsResponse {
+  ratings: ProviderRating[];
+  warnings: string[];
+}
+
+export interface PersonProfile {
+  id: string;
+  name: string;
+  role: string | null;
+  thumbUrl: string | null;
+  biography: string | null;
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
+  knownForDepartment: string | null;
+  knownFor: MediaSummary[];
+  library: MediaSummary[];
+  filmography: MediaSummary[];
+  warnings: string[];
 }
 
 export interface MediaDetail extends MediaSummary {
@@ -300,6 +357,7 @@ export interface MediaDetail extends MediaSummary {
   cast: Person[];
   audienceRating: number | null;
   criticRating: number | null;
+  ratings?: ProviderRating[];
   userRating: number | null;
   originallyAvailableAt: string | null;
   editionTitle: string | null;
@@ -391,8 +449,46 @@ export type RequestStatus =
 export interface RequestAvailability {
   status: RequestStatus;
   status4k: RequestStatus;
+  canRequest: boolean;
+  ratingKey: string | null;
   requests: Array<{ id: number; status: "pending" | "approved" | "declined" | "unknown"; is4k: boolean; mine: boolean }>;
   seasons: Array<{ number: number; status: RequestStatus; status4k: RequestStatus }>;
+}
+
+export interface ServicePage<T> {
+  items: T[];
+  page: number;
+  pages: number;
+  totalResults: number;
+}
+
+export interface RequestSummary {
+  id: number;
+  type: "movie" | "tv";
+  tmdbId: number;
+  title: string;
+  posterUrl: string | null;
+  ratingKey: string | null;
+  status: string;
+  is4k: boolean;
+  createdAt: string;
+}
+
+export interface IssueSummary {
+  id: number;
+  type: "movie" | "tv";
+  tmdbId: number;
+  title: string;
+  posterUrl: string | null;
+  ratingKey: string | null;
+  status: "open" | "resolved" | "unknown";
+  issueType: number;
+  message: string;
+  createdAt: string;
+}
+
+export interface IssueDetail extends IssueSummary {
+  comments: Array<{ id: number; message: string; createdAt: string; author: string | null }>;
 }
 
 export interface CreateRequestBody {

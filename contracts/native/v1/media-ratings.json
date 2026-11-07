@@ -1,0 +1,10 @@
+{
+  "ratings": [
+    { "source": "imdb", "kind": "rating", "value": 8.6, "maxValue": 10 },
+    { "source": "tmdb", "kind": "rating", "value": 8.1, "maxValue": 10 },
+    { "source": "tvdb", "kind": "rating", "value": 8.4, "maxValue": 10 },
+    { "source": "rotten_tomatoes", "kind": "critic", "value": 94, "maxValue": 100 },
+    { "source": "rotten_tomatoes", "kind": "audience", "value": 91, "maxValue": 100 }
+  ],
+  "warnings": []
+}

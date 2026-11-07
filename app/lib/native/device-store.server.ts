@@ -69,22 +69,25 @@ function sessionsFile(): string {
 async function ensureLoaded(): Promise<void> {
   const file = sessionsFile();
   if (loadedPath === file) return;
-  records = new Map();
+  const loaded = new Map<string, DeviceSessionRecord>();
   try {
     const parsed = JSON.parse(await readFile(file, "utf8")) as DeviceSessionFile;
-    if (parsed.version === 1 && Array.isArray(parsed.sessions)) {
-      const now = Date.now();
-      for (const record of parsed.sessions) {
-        const inactiveAt = record.revokedAtMs ?? record.expiresAtMs;
-        if (inactiveAt + PRUNE_AFTER_MS > now) records.set(record.tokenHash, record);
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.sessions)) {
+      throw new Error("Unsupported device session storage; existing data was preserved.");
+    }
+    const now = Date.now();
+    for (const record of parsed.sessions) {
+      if (!record || typeof record.tokenHash !== "string" || !Number.isFinite(record.expiresAtMs) ||
+          (record.revokedAtMs !== null && !Number.isFinite(record.revokedAtMs))) {
+        throw new Error("Invalid device session storage; existing data was preserved.");
       }
+      const inactiveAt = record.revokedAtMs ?? record.expiresAtMs;
+      if (inactiveAt + PRUNE_AFTER_MS > now) loaded.set(record.tokenHash, record);
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      // Losing either this file or device-key intentionally signs every TV out.
-      records = new Map();
-    }
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  records = loaded;
   loadedPath = file;
 }
 

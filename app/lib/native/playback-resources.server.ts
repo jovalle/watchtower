@@ -1,7 +1,9 @@
 import { activatePlaybackSession, ownedNativePlaybackSession, playbackSessionExists, type PlaybackSession } from "~/lib/plex/playback-session.server";
 import { NativeError } from "./http.server";
 import { recheckPrincipal, type NativePrincipal } from "./principal.server";
-import { requireNativePlexResponse } from "./catalog.server";
+import { nativePlexClient, plexData, requireNativePlexResponse } from "./catalog.server";
+import { buildPlexTranscodeUrl } from "~/lib/plex/client.server";
+import { QUALITY_PROFILES } from "~/lib/plex/types";
 
 export function requireOwnedPlayback(
   playbackId: string | undefined,
@@ -44,11 +46,29 @@ export async function proxyNativeFile(
   const url = new URL(key, principal.serverUrl);
   if (url.origin !== new URL(principal.serverUrl).origin) throw new NativeError(404, "not_found", "Media part not found.");
   url.searchParams.set("X-Plex-Token", principal.serverToken);
+  const sessionId = session.clientId.split("-").slice(-5).join("-");
+  const decisionUrl = new URL(buildPlexTranscodeUrl({
+    serverUrl: principal.serverUrl, token: principal.serverToken,
+    ratingKey: session.ratingKey, session: sessionId, clientIdentifier: session.clientId,
+    mediaIndex: session.native.mediaIndex, partIndex: session.native.partIds.indexOf(partId),
+    offsetSeconds: 0, quality: QUALITY_PROFILES[0], forceTranscode: false,
+    subtitles: "none", platform: "Android", device: "Android TV", deviceName: "Watchtower TV",
+  }));
+  decisionUrl.searchParams.set("directPlay", "1");
+  decisionUrl.searchParams.set("X-Plex-Session-Identifier", sessionId);
+  // Plex reserves direct-play access per client/part; an ad-hoc file request can return 503.
+  const decision = plexData(await nativePlexClient(principal, session.clientId).getTranscodeDecision(decisionUrl.toString()));
+  if (decision.generalDecisionCode >= 2000 || (decision.generalDecisionCode !== 1000 && !decision.directPlayApproved)) {
+    throw new NativeError(422, "unsupported_media", "Plex could not authorize direct playback. Try a converted quality.");
+  }
+  url.searchParams.set("X-Plex-Client-Identifier", session.clientId);
+  url.searchParams.set("X-Plex-Session-Identifier", sessionId);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
     const upstream = await requireNativePlexResponse(await fetch(url, {
-      headers: { Accept: "*/*", ...(request.headers.has("Range") ? { Range: request.headers.get("Range")! } : {}) },
+      headers: { Accept: "*/*", "X-Plex-Client-Identifier": session.clientId, "X-Plex-Session-Identifier": sessionId,
+        ...(request.headers.has("Range") ? { Range: request.headers.get("Range")! } : {}) },
       signal: AbortSignal.any([request.signal, controller.signal]),
     }), principal);
     const headers = new Headers();

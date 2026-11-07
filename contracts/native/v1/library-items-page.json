@@ -19,7 +19,12 @@
       "episodeNumber": null,
       "parentRatingKey": null,
       "grandparentRatingKey": null,
-      "external": null
+      "external": null,
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "genres": [],
+      "ratings": []
     },
     {
       "ratingKey": "7000",
@@ -40,7 +45,12 @@
       "episodeNumber": null,
       "parentRatingKey": null,
       "grandparentRatingKey": null,
-      "external": null
+      "external": null,
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "genres": [],
+      "ratings": []
     }
   ],
   "nextCursor": "eyJvIjo1MCwicSI6ImFiYyJ9",
