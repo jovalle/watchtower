@@ -5,7 +5,9 @@
 
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import { createRequestHandler } from "@remix-run/express";
+import { createRequestHandler } from "@remix-run/node";
+import { createRemixRequest } from "@remix-run/express/dist/server.js";
+import { sendResponse } from "./app/lib/response-stream.server";
 import { createPairingClientIpResolver } from "./app/lib/native/client-ip.server";
 
 const app = express();
@@ -102,22 +104,20 @@ async function start() {
     }),
   );
 
-  // Handle all other requests with Remix
-  app.all(
-    "{*splat}",
-    createRequestHandler({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      build: build as any,
-      mode: process.env.NODE_ENV,
-      getLoadContext: (req) => ({
+  // Reuse Remix's request/proxy/cancellation adapter with a backpressure-aware response writer.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleRequest = createRequestHandler(build as any, process.env.NODE_ENV);
+  app.all("{*splat}", async (req, res, next) => {
+    try {
+      const response = await handleRequest(createRemixRequest(req, res), {
         clientIp: req.ip,
-        pairingClientIp: pairingClientIp(
-          req.socket.remoteAddress,
-          req.get("X-Forwarded-For"),
-        ),
-      }),
-    }),
-  );
+        pairingClientIp: pairingClientIp(req.socket.remoteAddress, req.get("X-Forwarded-For")),
+      });
+      await sendResponse(res, response);
+    } catch (error) {
+      if (!res.destroyed) next(error);
+    }
+  });
 
   app.listen(PORT, () => {
     log("info", `Server started`, {

@@ -18,7 +18,12 @@
     "episodeNumber": 2,
     "parentRatingKey": "7001",
     "grandparentRatingKey": "7000",
-    "external": null
+    "external": null,
+    "summary": null,
+    "clearLogoUrl": null,
+    "artworkColors": null,
+    "genres": [],
+    "ratings": []
   },
   "next": null
 }

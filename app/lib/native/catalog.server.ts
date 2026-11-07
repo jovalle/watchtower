@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { resolveImageUrl } from "~/lib/plex/image-proxy.server";
 import { PlexClient } from "~/lib/plex/client.server";
-import type { PlexMediaItem, PlexMetadata, PlexResult, PlexStream } from "~/lib/plex/types";
+import type { PlexMediaItem, PlexMetadata, PlexResult, PlexRole, PlexStream } from "~/lib/plex/types";
 import type {
   AudioTrack,
   CollectionSummary,
@@ -13,6 +14,7 @@ import type {
   SubtitleFormat,
   SubtitleTrack,
 } from "./contract";
+import { plexRatings } from "./ratings.server";
 import { NativeError } from "./http.server";
 import type { NativePrincipal } from "./principal.server";
 import { markPrincipalForVerification } from "./principal.server";
@@ -37,11 +39,11 @@ type ExtendedMetadata = Omit<PlexMetadata, "Media"> & {
   Media?: ExtendedMedia[];
 };
 
-export function nativePlexClient(principal: NativePrincipal): PlexClient {
+export function nativePlexClient(principal: NativePrincipal, clientId = process.env.PLEX_CLIENT_ID ?? "watchtower-001"): PlexClient {
   return new PlexClient({
     serverUrl: principal.serverUrl,
     token: principal.serverToken,
-    clientId: process.env.PLEX_CLIENT_ID ?? "watchtower-001",
+    clientId,
     onUnauthorized: () => markPrincipalForVerification(principal),
   });
 }
@@ -66,7 +68,7 @@ export function plexData<T>(result: PlexResult<T>, notFound = false): T {
   if (result.error.status === 401) {
     throw new NativeError(401, "upstream_auth_failed", "Plex authorization failed.");
   }
-  if (notFound || result.error.status === 404) {
+  if (result.error.status === 404 || (notFound && result.error.status === undefined && result.error.code === 404)) {
     throw new NativeError(404, "not_found", "Media not found.");
   }
   throw new NativeError(503, "upstream_unavailable", "Plex is unavailable.", true, 15);
@@ -82,12 +84,21 @@ export function imageUrl(
 }
 
 export function mediaSummary(item: PlexMediaItem): MediaSummary {
+  const colors = item.UltraBlurColors?.[0];
+  const artworkColors = colors && [colors.topLeft, colors.topRight, colors.bottomRight, colors.bottomLeft]
+    .every((color) => typeof color === "string" && /^[0-9a-f]{6}$/i.test(color))
+    ? { topLeft: colors.topLeft!, topRight: colors.topRight!, bottomRight: colors.bottomRight!, bottomLeft: colors.bottomLeft! }
+    : null;
+  const logo = item.Image?.find((image) => image.type === "clearLogo")?.url;
+  const resolvedLogo = logo && !/x-plex-token/i.test(logo) ? resolveImageUrl(logo, "", "https://plex.invalid") : null;
+  const logoUrl = resolvedLogo ? new URL(resolvedLogo) : null;
+  const safeLogo = logoUrl && !logoUrl.username && !logoUrl.password ? logo : undefined;
   return {
     ratingKey: item.ratingKey ?? null,
     type: item.type as MediaSummary["type"],
     title: item.title,
     year: item.year ?? null,
-    posterUrl: imageUrl(item.thumb ?? item.grandparentThumb, 400, 600),
+    posterUrl: imageUrl(item.type === "episode" ? item.grandparentThumb ?? item.thumb : item.thumb ?? item.grandparentThumb, 400, 600),
     backdropUrl: imageUrl(item.art ?? item.grandparentArt, 1280, 720),
     thumbUrl: imageUrl(item.type === "episode" ? item.thumb : undefined, 640, 360),
     durationMs: item.duration ?? null,
@@ -102,6 +113,11 @@ export function mediaSummary(item: PlexMediaItem): MediaSummary {
     parentRatingKey: item.parentRatingKey ?? null,
     grandparentRatingKey: item.grandparentRatingKey ?? null,
     external: null,
+    summary: item.summary ?? null,
+    clearLogoUrl: imageUrl(safeLogo, 800, 310),
+    artworkColors,
+    genres: item.Genre?.map(({ tag }) => tag) ?? [],
+    ratings: plexRatings(item),
   };
 }
 
@@ -113,13 +129,17 @@ function subtitleFormat(codec: string | undefined): SubtitleFormat {
 }
 
 export function audioTrack(stream: ExtendedStream): AudioTrack {
+  const title = stream.displayTitle ?? stream.title ?? stream.language ?? stream.codec ?? "Audio";
+  const description = typeof stream.title === "string" ? stream.title.trim() : "";
+  const duplicateTitle = description.replace(/\s+/g, " ").toLowerCase() === title.trim().replace(/\s+/g, " ").toLowerCase();
   return {
     streamId: String(stream.id),
-    title: stream.displayTitle ?? stream.title ?? stream.language ?? stream.codec ?? "Audio",
+    title,
+    description: description && !duplicateTitle ? description : null,
     language: stream.language ?? null,
     languageCode: stream.languageCode ?? null,
     codec: stream.codec ?? null,
-    channels: stream.channels ?? null,
+    channels: positiveInteger(stream.channels),
     default: Boolean(stream.default),
     selected: Boolean(stream.selected),
     audioDescription: Boolean(stream.visualImpaired),
@@ -142,9 +162,19 @@ export function subtitleTrack(stream: ExtendedStream): SubtitleTrack {
   };
 }
 
-function hdrType(media: ExtendedMedia): HdrType | null {
-  const video = media.Part?.flatMap((part) => part.Stream ?? []).find((stream) => stream.streamType === 1) as (ExtendedStream & { colorTrc?: string }) | undefined;
-  if (video?.DOVIProfile !== undefined) return "dolby-vision";
+function positiveNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value
+    : typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const number = positiveNumber(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+function hdrType(media: ExtendedMedia, video: ExtendedStream | undefined): HdrType | null {
+  if (positiveInteger(video?.DOVIProfile) !== null) return "dolby-vision";
   const colorTrc = media.colorTrc ?? video?.colorTrc;
   if (colorTrc === "smpte2084") return "hdr10";
   if (colorTrc === "arib-std-b67") return "hlg";
@@ -154,9 +184,12 @@ function hdrType(media: ExtendedMedia): HdrType | null {
 export function mediaVersions(metadata: ExtendedMetadata): MediaVersion[] {
   return (metadata.Media ?? []).map((media) => {
     const streams = (media.Part?.[0]?.Stream ?? []) as ExtendedStream[];
-    const hdr = hdrType(media);
-    const resolution = media.height ? `${media.height >= 2160 ? "4K" : `${media.height}p`}` : media.videoResolution ?? null;
-    const labels = [resolution, hdr?.toUpperCase(), media.videoCodec?.toUpperCase(), media.audioCodec ? `${media.audioCodec.toUpperCase()}${media.audioChannels ? ` ${media.audioChannels}` : ""}` : null].filter(Boolean);
+    const video = media.Part?.flatMap((part) => part.Stream ?? []).find((stream) => stream.streamType === 1);
+    const hdr = hdrType(media, video);
+    const height = positiveInteger(media.height);
+    const audioChannels = positiveInteger(media.audioChannels);
+    const resolution = height ? `${height >= 2160 ? "4K" : `${height}p`}` : media.videoResolution ?? null;
+    const labels = [resolution, hdr?.toUpperCase(), media.videoCodec?.toUpperCase(), media.audioCodec ? `${media.audioCodec.toUpperCase()}${audioChannels ? ` ${audioChannels}` : ""}` : null].filter(Boolean);
     return {
       mediaId: String(media.id),
       label: labels.join(" · ") || `Version ${media.id}`,
@@ -164,21 +197,23 @@ export function mediaVersions(metadata: ExtendedMetadata): MediaVersion[] {
       videoCodec: media.videoCodec ?? null,
       videoProfile: media.videoProfile ?? null,
       videoResolution: media.videoResolution ?? null,
-      width: media.width ?? null,
-      height: media.height ?? null,
-      frameRate: media.videoFrameRate ? Number.parseFloat(media.videoFrameRate) : null,
-      bitDepth: media.bitDepth ?? null,
+      width: positiveInteger(media.width),
+      height,
+      frameRate: positiveNumber(video?.frameRate) ?? positiveNumber(media.videoFrameRate),
+      bitDepth: positiveInteger(video?.bitDepth) ?? positiveInteger(media.bitDepth),
+      aspectRatio: positiveNumber(media.aspectRatio) ?? positiveNumber(video?.aspectRatio),
+      dolbyVisionProfile: positiveInteger(video?.DOVIProfile),
       hdr,
-      bitrateKbps: media.bitrate ?? null,
+      bitrateKbps: positiveNumber(media.bitrate),
       audioCodec: media.audioCodec ?? null,
-      audioChannels: media.audioChannels ?? null,
-      durationMs: media.duration ?? metadata.duration ?? null,
+      audioChannels,
+      durationMs: positiveInteger(media.duration) ?? positiveInteger(metadata.duration),
       parts: (media.Part ?? []).map((part, index) => ({
         partId: String(part.id),
         index,
-        durationMs: part.duration ?? null,
+        durationMs: positiveInteger(part.duration),
         container: part.container ?? media.container ?? null,
-        sizeBytes: part.size ?? null,
+        sizeBytes: positiveInteger(part.size),
       })),
       audioTracks: streams.filter((stream) => stream.streamType === 2).map(audioTrack),
       subtitleTracks: streams.filter((stream) => stream.streamType === 3).map(subtitleTrack),
@@ -190,6 +225,12 @@ function guid(metadata: PlexMetadata, provider: string): string | null {
   return metadata.Guid?.find((entry) => entry.id.startsWith(`${provider}://`))?.id.split("//")[1] ?? null;
 }
 
+export function castPersonId(role: PlexRole): string {
+  return Number.isSafeInteger(role.id) && role.id! >= 0
+    ? `plex:${role.id}`
+    : `name:${createHash("sha256").update(JSON.stringify([role.tag, role.role ?? null])).digest("hex").slice(0, 16)}`;
+}
+
 export function mediaDetail(metadata: PlexMetadata): MediaDetail {
   const extended = metadata as ExtendedMetadata;
   return {
@@ -199,7 +240,8 @@ export function mediaDetail(metadata: PlexMetadata): MediaDetail {
     studio: metadata.studio ?? null,
     genres: metadata.Genre?.map(({ tag }) => tag) ?? [],
     directors: metadata.Director?.map(({ tag }) => tag) ?? [],
-    cast: metadata.Role?.map((role) => ({ name: role.tag, role: role.role ?? null, thumbUrl: imageUrl(role.thumb, 200, 300) })) ?? [],
+    cast: metadata.Role?.map((role) => ({ id: castPersonId(role), name: role.tag, role: role.role ?? null, thumbUrl: imageUrl(role.thumb, 200, 300) })) ?? [],
+    ratings: plexRatings(metadata),
     audienceRating: metadata.audienceRating ?? null,
     criticRating: metadata.rating ?? null,
     userRating: metadata.userRating ?? null,

@@ -19,7 +19,12 @@
       "episodeNumber": null,
       "parentRatingKey": null,
       "grandparentRatingKey": null,
-      "external": null
+      "external": null,
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "genres": [],
+      "ratings": []
     }
   ],
   "external": []

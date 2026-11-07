@@ -19,7 +19,28 @@
       "episodeNumber": null,
       "parentRatingKey": null,
       "grandparentRatingKey": null,
-      "external": null
+      "external": null,
+      "summary": null,
+      "clearLogoUrl": null,
+      "artworkColors": null,
+      "genres": [
+        "Drama",
+        "Adventure"
+      ],
+      "ratings": [
+        {
+          "source": "imdb",
+          "kind": "rating",
+          "value": 7.8,
+          "maxValue": 10
+        },
+        {
+          "source": "rotten_tomatoes",
+          "kind": "critic",
+          "value": 92,
+          "maxValue": 100
+        }
+      ]
     }
   ],
   "rows": [
@@ -47,7 +68,12 @@
           "episodeNumber": 3,
           "parentRatingKey": "7001",
           "grandparentRatingKey": "7000",
-          "external": null
+          "external": null,
+          "summary": null,
+          "clearLogoUrl": null,
+          "artworkColors": null,
+          "genres": [],
+          "ratings": []
         }
       ]
     },
@@ -75,7 +101,16 @@
           "episodeNumber": null,
           "parentRatingKey": null,
           "grandparentRatingKey": null,
-          "external": { "provider": "tmdb", "id": "12345", "type": "movie" }
+          "external": {
+            "provider": "tmdb",
+            "id": "12345",
+            "type": "movie"
+          },
+          "summary": null,
+          "clearLogoUrl": null,
+          "artworkColors": null,
+          "genres": [],
+          "ratings": []
         }
       ]
     }

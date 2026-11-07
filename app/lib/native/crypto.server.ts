@@ -17,6 +17,7 @@ export interface SealedValue {
 }
 
 let cachedDeviceKey: Buffer | undefined;
+let deviceKeyPromise: Promise<Buffer> | undefined;
 
 export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -50,6 +51,14 @@ async function writeNewPrivateFile(file: string, contents: string): Promise<void
 
 export async function getDeviceKey(): Promise<Buffer> {
   if (cachedDeviceKey) return cachedDeviceKey;
+  deviceKeyPromise ??= loadDeviceKey().catch((error) => {
+    deviceKeyPromise = undefined;
+    throw error;
+  });
+  return deviceKeyPromise;
+}
+
+async function loadDeviceKey(): Promise<Buffer> {
   const directory = path.join(getDataPath(), "config");
   const file = path.join(directory, "device-key");
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -119,4 +128,5 @@ export async function openCredential(
 
 export function resetNativeCryptoForTests(): void {
   cachedDeviceKey = undefined;
+  deviceKeyPromise = undefined;
 }

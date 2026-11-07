@@ -118,13 +118,27 @@ export async function readJsonObject(request: Request): Promise<Record<string, u
   if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BYTES) {
     throw new NativeError(413, "payload_too_large", "Request body exceeds 16 KiB.");
   }
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > MAX_JSON_BYTES) {
-    throw new NativeError(413, "payload_too_large", "Request body exceeds 16 KiB.");
+  const bytes = new Uint8Array(MAX_JSON_BYTES);
+  let length = 0;
+  const reader = request.body?.getReader();
+  if (reader) {
+    try {
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        const value = chunk.value;
+        if (length + value.byteLength > MAX_JSON_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          throw new NativeError(413, "payload_too_large", "Request body exceeds 16 KiB.");
+        }
+        bytes.set(value, length);
+        length += value.byteLength;
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
   let value: unknown;
   try {
-    value = JSON.parse(new TextDecoder().decode(bytes));
+    value = JSON.parse(new TextDecoder().decode(bytes.subarray(0, length)));
   } catch {
     throw new NativeError(400, "invalid_request", "Request body must be valid JSON.");
   }
