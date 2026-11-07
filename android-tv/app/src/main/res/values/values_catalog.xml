@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cat_library">Library</string>
+    <string name="cat_sort">Sort</string>
+    <string name="cat_filter">Filter</string>
+    <string name="cat_more">More</string>
+    <string name="cat_cast">Cast</string>
+    <string name="cat_show">Show</string>
+    <string name="cat_season">Season</string>
+    <string name="cat_episode_context">Season %1$d · Episode %2$d</string>
+    <string name="cat_season_context">Season %1$d</string>
+    <string name="cat_episode_number">Episode %1$d</string>
+    <string name="cat_overview">Overview</string>
+    <string name="cat_issue_message">Describe the Issue</string>
+    <string name="cat_directed_by">Directed by %1$s</string>
+    <string name="cat_recommended">Recommended</string>
+    <string name="cat_browse">Browse</string>
+    <string name="cat_by">by</string>
+    <string name="cat_no_recommendations">No recommendations in this library.</string>
+    <string name="cat_critic_rating">Critics %1$.1f</string>
+    <string name="cat_rate">Rate</string>
+    <string name="cat_sort_by">Sort by</string>
+    <string name="cat_jump_letter">Jump to %1$s</string>
+    <string name="cat_release_date">Release Date</string>
+    <string name="cat_search_query">Search query</string>
+    <string name="cat_search_key">Search key %1$s</string>
+    <string name="cat_search_space">Space</string>
+    <string name="cat_search_backspace">Backspace</string>
+    <string name="cat_search_clear">Clear Search</string>
+    <string name="cat_search_clear_history">Clear Search History</string>
+    <string name="cat_search_settings">Search Settings</string>
+    <string name="cat_search_media_libraries">Search Media Libraries</string>
+    <string name="cat_search_library_results">Library Results</string>
+    <string name="cat_search_discovery_results">Discovery Results</string>
+    <string name="cat_search_system_keyboard">Use System Keyboard</string>
+    <string name="cat_search_movies">Movies</string>
+    <string name="cat_search_tv">TV</string>
+    <string name="cat_search_movie">Movie</string>
+    <string name="cat_search_episode">Episode</string>
+    <string name="cat_categories">Categories</string>
+    <string name="cat_no_categories">No categories in this library.</string>
+    <string name="cat_clear">Clear</string>
+</resources>

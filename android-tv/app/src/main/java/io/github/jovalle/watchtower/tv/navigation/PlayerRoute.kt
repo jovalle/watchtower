@@ -11,4 +11,6 @@ data class PlayerRoute(
     val ratingKey: String,
     val mediaId: String? = null,
     val startPositionMs: Long? = null,
+    val sleepDeadlineElapsedMs: Long? = null,
+    val sleepTimerMinutes: Int? = null,
 )

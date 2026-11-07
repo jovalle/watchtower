@@ -1,0 +1,9 @@
+<resources>
+    <string name="hero_episode">S%1$d E%2$d</string>
+    <string name="hero_remove_continue">Remove from Continue Watching</string>
+    <string name="hero_minutes">%1$dm</string>
+    <string name="hero_hours_minutes">%1$dh %2$dm</string>
+    <string name="hero_elapsed_total">%1$s / %2$s</string>
+    <string name="hero_time_left">%1$s left</string>
+    <string name="hero_refresh_home">Refresh Home</string>
+</resources>

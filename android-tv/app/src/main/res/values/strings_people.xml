@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="person_back">Back</string>
+    <string name="person_known_for">Known For</string>
+    <string name="person_library">In Your Library</string>
+    <string name="person_filmography">Filmography</string>
+    <string name="person_biography_unavailable">Biography unavailable.</string>
+    <string name="person_known_for_empty">No known works are available.</string>
+    <string name="person_library_empty">No matching titles are available in your library.</string>
+    <string name="person_filmography_empty">No filmography is available.</string>
+    <string name="person_profile_unavailable">Profile unavailable</string>
+    <string name="person_born">Born: %1$s</string>
+    <string name="person_died">Died: %1$s</string>
+    <string name="person_birthplace">Birthplace: %1$s</string>
+    <string name="person_department">Known For: %1$s</string>
+</resources>

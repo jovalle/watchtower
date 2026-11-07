@@ -1,6 +1,7 @@
 package io.github.jovalle.watchtower.tv.playback
 
 import io.github.jovalle.watchtower.tv.api.Marker
+import io.github.jovalle.watchtower.tv.navigation.PlayerRoute
 
 sealed interface PlaybackIntent {
     data object Play : PlaybackIntent
@@ -125,4 +126,48 @@ class RecoveryPolicy {
         }
         else -> RecoveryAction.SHOW_ERROR
     }
+}
+
+internal fun PlaybackUiState.togglePlayerMenu(target: PlayerMenu): PlaybackUiState =
+    copy(
+        menu = target.takeUnless { menu == it },
+        menuBackStack = if (menu != null && menu != target) menuBackStack + menu else emptyList(),
+        menuReturnFocus = null,
+        controlsVisible = true,
+    )
+
+internal fun PlaybackUiState.backFromPlayerMenu(): PlaybackUiState = copy(
+    menu = menuParent,
+    menuBackStack = menuBackStack.dropLast(1),
+    menuReturnFocus = menu.takeIf { menuParent != null },
+    controlsVisible = true,
+)
+
+internal fun playbackBufferTargetBytes(maxHeapBytes: Long): Int =
+    (maxHeapBytes / 6).coerceIn(16L * 1024 * 1024, 64L * 1024 * 1024).toInt()
+
+internal val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+
+internal fun validatedPlaybackSpeed(value: Float): Float = value.takeIf { it in PLAYBACK_SPEEDS } ?: 1f
+
+enum class SleepTimerOption(val minutes: Int? = null) {
+    OFF, FIFTEEN_MINUTES(15), THIRTY_MINUTES(30), ONE_HOUR(60), TWO_HOURS(120), AFTER_THIS_ITEM,
+}
+
+data class SleepTimerState(val option: SleepTimerOption = SleepTimerOption.OFF, val deadlineElapsedMs: Long? = null) {
+    fun select(value: SleepTimerOption, nowElapsedMs: Long): SleepTimerState =
+        SleepTimerState(value, value.minutes?.let { nowElapsedMs + it * 60_000L })
+
+    fun automaticIntent(nowElapsedMs: Long, itemEnded: Boolean = false): PlaybackIntent? =
+        PlaybackIntent.Stop.takeIf { deadlineElapsedMs?.let { nowElapsedMs >= it } == true || (suppressAutoNext && itemEnded) }
+
+    val suppressAutoNext: Boolean get() = option == SleepTimerOption.AFTER_THIS_ITEM
+
+    fun nextRoute(ratingKey: String): PlayerRoute = PlayerRoute(ratingKey,
+        sleepDeadlineElapsedMs = deadlineElapsedMs, sleepTimerMinutes = option.minutes)
+}
+
+internal fun PlayerRoute.restoredSleepTimer(): SleepTimerState {
+    val option = SleepTimerOption.entries.firstOrNull { it.minutes != null && it.minutes == sleepTimerMinutes }
+    return if (option != null && sleepDeadlineElapsedMs != null && sleepDeadlineElapsedMs >= 0) SleepTimerState(option, sleepDeadlineElapsedMs) else SleepTimerState()
 }

@@ -5,11 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.Modifier
+import android.view.View
+import androidx.compose.ui.platform.LocalView
+import android.view.KeyEvent
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -23,7 +23,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -32,6 +31,7 @@ class RemoteDialogTest {
 
     @Test fun dpadMovesBetweenActionsAndBackClosesDialog() {
         var open by mutableStateOf(false)
+        var dialogView: View? = null
         compose.setContent {
             MaterialTheme {
                 Row {
@@ -40,16 +40,9 @@ class RemoteDialogTest {
                 }
                 if (open) {
                     Dialog(onDismissRequest = { open = false }) {
+                        dialogView = LocalView.current
                         Button(
                             onClick = { open = false },
-                            modifier = Modifier.onPreviewKeyEvent {
-                                if (it.key == Key.Back && it.type == KeyEventType.KeyDown) {
-                                    open = false
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
                         ) { Text("Close") }
                     }
                 }
@@ -61,10 +54,18 @@ class RemoteDialogTest {
         compose.onNodeWithText("Next").assertIsFocused()
         compose.onNodeWithText("Open").performSemanticsAction(SemanticsActions.RequestFocus)
         compose.onNodeWithText("Open").performSemanticsAction(SemanticsActions.OnClick)
-        compose.waitForIdle()
-        compose.onNodeWithText("Close").assertIsDisplayed().performKeyInput { pressKey(Key.Back) }
-        compose.waitForIdle()
-        assertTrue(compose.onAllNodesWithText("Close").fetchSemanticsNodes().isEmpty())
+        compose.waitUntil(timeoutMillis = 3_000) { dialogView?.hasWindowFocus() == true }
+        compose.onNodeWithText("Close").performSemanticsAction(SemanticsActions.RequestFocus).assertIsFocused()
+        compose.onNodeWithText("Close").assertIsDisplayed()
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        compose.waitUntil(timeoutMillis = 3_000) {
+            compose.onAllNodesWithText("Close").fetchSemanticsNodes().isEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 3_000) {
+            compose.onAllNodesWithText("Open").fetchSemanticsNodes().any {
+                it.config.contains(SemanticsProperties.Focused) && it.config[SemanticsProperties.Focused]
+            }
+        }
         compose.onNodeWithText("Open").assertIsFocused()
     }
 }
